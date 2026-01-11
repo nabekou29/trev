@@ -91,9 +91,7 @@ impl PreviewState {
         // ディレクトリの場合
         if path.is_dir() {
             return match fs::read_dir(path) {
-                Ok(entries) => PreviewContent::Directory {
-                    children_count: entries.count(),
-                },
+                Ok(entries) => PreviewContent::Directory { children_count: entries.count() },
                 Err(e) => PreviewContent::Error(e.to_string()),
             };
         }
@@ -153,13 +151,9 @@ impl PreviewState {
             // シンタックスハイライトを適用
             let content = lines.join("\n");
             let highlighted_lines = self.highlighter.highlight_file(path, &content);
-            PreviewContent::Text {
-                highlighted_lines,
-                total_lines,
-            }
+            PreviewContent::Text { highlighted_lines, total_lines }
         }
     }
-
 }
 
 #[cfg(test)]
@@ -182,11 +176,7 @@ mod tests {
         let mut state = PreviewState::new();
         state.load(&file_path);
 
-        let PreviewContent::Text {
-            highlighted_lines,
-            total_lines,
-        } = &state.content
-        else {
+        let PreviewContent::Text { highlighted_lines, total_lines } = &state.content else {
             panic!("Expected Text content");
         };
 
