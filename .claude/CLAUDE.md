@@ -2,6 +2,10 @@
 
 A TUI file viewer written in Rust.
 
+## Roadmap
+
+See [ROADMAP.md](/ROADMAP.md) for planned features and progress.
+
 ## Tasks (mise)
 
 ```bash
