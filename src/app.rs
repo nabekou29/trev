@@ -17,8 +17,8 @@ use crate::cli::Args;
 use crate::error::Result;
 use crate::git::GitCache;
 use crate::preview::PreviewState;
-use crate::tree::builder::TreeBuilder;
 use crate::tree::TreeState;
+use crate::tree::builder::TreeBuilder;
 use crate::ui;
 
 /// アプリケーションの実行状態
@@ -44,7 +44,6 @@ pub(crate) enum InputMode {
     /// `g` が押された状態（`gg` 待ち）
     WaitingForG,
 }
-
 
 /// アプリケーション
 ///
@@ -220,7 +219,6 @@ impl App {
 
     /// Git ステータスを再適用する
     fn refresh_git_status(&mut self) {
-        self.tree
-            .update_git_status(|path| self.git_cache.get_status(path));
+        self.tree.update_git_status(|path| self.git_cache.get_status(path));
     }
 }

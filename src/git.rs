@@ -104,11 +104,7 @@ impl GitCache {
     }
 
     /// porcelain 出力をパースする
-    fn parse_porcelain_output(
-        &mut self,
-        output: &[u8],
-        repo_root: &Path,
-    ) {
+    fn parse_porcelain_output(&mut self, output: &[u8], repo_root: &Path) {
         let output_str = String::from_utf8_lossy(output);
 
         // ヌル文字区切りで分割
@@ -141,10 +137,7 @@ impl GitCache {
     }
 
     /// ステータス文字をパースする
-    fn parse_status(
-        index: char,
-        worktree: char,
-    ) -> Option<GitStatus> {
+    fn parse_status(index: char, worktree: char) -> Option<GitStatus> {
         // 未追跡
         if index == '?' && worktree == '?' {
             return Some(GitStatus::Untracked);

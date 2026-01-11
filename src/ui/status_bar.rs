@@ -39,9 +39,7 @@ impl Widget for &StatusBar<'_> {
         }
 
         // 背景色
-        let bg_style = Style::default()
-            .bg(Color::DarkGray)
-            .fg(Color::White);
+        let bg_style = Style::default().bg(Color::DarkGray).fg(Color::White);
 
         // 背景を塗りつぶす
         for x in area.x..area.x + area.width {
@@ -56,17 +54,11 @@ impl Widget for &StatusBar<'_> {
             .map(|n| n.path.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let left_span = Span::styled(
-            format!(" {} ", path_str),
-            bg_style,
-        );
+        let left_span = Span::styled(format!(" {} ", path_str), bg_style);
 
         // 右側: ヘルプヒント
         let help_str = " j/k:move  h/l:collapse/expand  Enter:select  q:quit ";
-        let help_span = Span::styled(
-            help_str,
-            bg_style.add_modifier(Modifier::DIM),
-        );
+        let help_span = Span::styled(help_str, bg_style.add_modifier(Modifier::DIM));
 
         // 左側を描画
         let left_line = Line::from(vec![left_span]);

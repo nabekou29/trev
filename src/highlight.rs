@@ -58,11 +58,7 @@ impl Highlighter {
     }
 
     /// ファイルをハイライトする
-    pub(crate) fn highlight_file(
-        &self,
-        path: &Path,
-        content: &str,
-    ) -> Vec<HighlightedLine> {
+    pub(crate) fn highlight_file(&self, path: &Path, content: &str) -> Vec<HighlightedLine> {
         // 拡張子から構文を検出
         let syntax = path
             .extension()
@@ -112,12 +108,7 @@ impl Highlighter {
     fn plain_text_lines(content: &str) -> Vec<HighlightedLine> {
         content
             .lines()
-            .map(|line| {
-                vec![HighlightedSpan {
-                    text: line.to_string(),
-                    style: Style::default(),
-                }]
-            })
+            .map(|line| vec![HighlightedSpan { text: line.to_string(), style: Style::default() }])
             .collect()
     }
 
@@ -163,8 +154,7 @@ mod tests {
         let syntaxes = highlighter.list_syntaxes();
 
         let has_toml = syntaxes.iter().any(|(name, exts)| {
-            name.to_lowercase().contains("toml")
-                || exts.iter().any(|e| e.to_lowercase() == "toml")
+            name.to_lowercase().contains("toml") || exts.iter().any(|e| e.to_lowercase() == "toml")
         });
 
         assert_that!(has_toml, eq(true));

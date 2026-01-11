@@ -40,20 +40,8 @@ pub(crate) struct TreeNode {
 
 impl TreeNode {
     /// 新しい `TreeNode` を作成する
-    pub(crate) fn new(
-        name: String,
-        path: PathBuf,
-        kind: NodeKind,
-        depth: usize,
-    ) -> Self {
-        Self {
-            name,
-            path,
-            kind,
-            children: Vec::new(),
-            expanded: false,
-            depth,
-        }
+    pub(crate) fn new(name: String, path: PathBuf, kind: NodeKind, depth: usize) -> Self {
+        Self { name, path, kind, children: Vec::new(), expanded: false, depth }
     }
 
     /// 子ノードを持つかどうかを返す
@@ -99,12 +87,7 @@ pub(crate) struct TreeState {
 impl TreeState {
     /// 新しい `TreeState` を作成する
     pub(crate) fn new(root: TreeNode) -> Self {
-        let mut state = Self {
-            root,
-            visible_nodes: Vec::new(),
-            selected: 0,
-            scroll_offset: 0,
-        };
+        let mut state = Self { root, visible_nodes: Vec::new(), selected: 0, scroll_offset: 0 };
         state.rebuild_visible_nodes();
         state
     }
@@ -220,20 +203,12 @@ impl TreeState {
     }
 
     /// 指定パスのノードの展開状態を設定する
-    fn set_expanded(
-        &mut self,
-        path: &PathBuf,
-        expanded: bool,
-    ) -> bool {
+    fn set_expanded(&mut self, path: &PathBuf, expanded: bool) -> bool {
         Self::set_expanded_recursive(&mut self.root, path, expanded)
     }
 
     /// 再帰的に展開状態を設定する
-    fn set_expanded_recursive(
-        node: &mut TreeNode,
-        path: &PathBuf,
-        expanded: bool,
-    ) -> bool {
+    fn set_expanded_recursive(node: &mut TreeNode, path: &PathBuf, expanded: bool) -> bool {
         if &node.path == path {
             node.expanded = expanded;
             return true;
@@ -260,11 +235,7 @@ impl TreeState {
     }
 
     /// 可視ノードを再帰的に収集する
-    fn collect_visible_nodes(
-        &mut self,
-        node: &TreeNode,
-        git_status: Option<GitStatus>,
-    ) {
+    fn collect_visible_nodes(&mut self, node: &TreeNode, git_status: Option<GitStatus>) {
         self.visible_nodes.push(VisibleNode {
             name: node.name.clone(),
             path: node.path.clone(),
@@ -321,12 +292,8 @@ mod tests {
     /// テスト用のツリーを作成するフィクスチャ
     #[fixture]
     fn test_tree() -> TreeNode {
-        let mut root = TreeNode::new(
-            "root".to_string(),
-            PathBuf::from("/root"),
-            NodeKind::Directory,
-            0,
-        );
+        let mut root =
+            TreeNode::new("root".to_string(), PathBuf::from("/root"), NodeKind::Directory, 0);
         root.expanded = true;
 
         let file1 = TreeNode::new(
@@ -336,12 +303,8 @@ mod tests {
             1,
         );
 
-        let mut dir1 = TreeNode::new(
-            "dir1".to_string(),
-            PathBuf::from("/root/dir1"),
-            NodeKind::Directory,
-            1,
-        );
+        let mut dir1 =
+            TreeNode::new("dir1".to_string(), PathBuf::from("/root/dir1"), NodeKind::Directory, 1);
 
         let file2 = TreeNode::new(
             "file2.txt".to_string(),

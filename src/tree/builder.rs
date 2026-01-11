@@ -32,10 +32,7 @@ impl Default for TreeBuilder {
 impl TreeBuilder {
     /// 新しい `TreeBuilder` を作成する
     pub(crate) fn new() -> Self {
-        Self {
-            show_hidden: false,
-            max_depth: None,
-        }
+        Self { show_hidden: false, max_depth: None }
     }
 
     /// 隠しファイルの表示設定を変更する
@@ -63,21 +60,11 @@ impl TreeBuilder {
 
         // ルートがファイルの場合
         if root_path.is_file() {
-            return Some(TreeNode::new(
-                root_name,
-                root_path,
-                NodeKind::File,
-                0,
-            ));
+            return Some(TreeNode::new(root_name, root_path, NodeKind::File, 0));
         }
 
         // ディレクトリの場合はツリーを構築
-        let mut root = TreeNode::new(
-            root_name,
-            root_path.clone(),
-            NodeKind::Directory,
-            0,
-        );
+        let mut root = TreeNode::new(root_name, root_path.clone(), NodeKind::Directory, 0);
         root.expanded = true;
 
         // ignore::WalkBuilder で走査
@@ -126,10 +113,8 @@ impl TreeBuilder {
                 continue;
             };
 
-            let name = path
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
+            let name =
+                path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
 
             let kind = if path.is_symlink() {
                 NodeKind::Symlink
@@ -140,10 +125,7 @@ impl TreeBuilder {
             };
 
             // 深さを計算
-            let depth = path
-                .strip_prefix(&root_path)
-                .map(|p| p.components().count())
-                .unwrap_or(0);
+            let depth = path.strip_prefix(&root_path).map(|p| p.components().count()).unwrap_or(0);
 
             let node = TreeNode::new(name, path.to_path_buf(), kind, depth);
 
@@ -264,10 +246,7 @@ mod tests {
         fs::write(dir.path().join(".hidden"), "hidden").unwrap();
         fs::write(dir.path().join("visible"), "visible").unwrap();
 
-        let tree = TreeBuilder::new()
-            .show_hidden(false)
-            .build(dir.path())
-            .unwrap();
+        let tree = TreeBuilder::new().show_hidden(false).build(dir.path()).unwrap();
 
         assert_that!(tree.children, len(eq(1)));
     }
@@ -278,10 +257,7 @@ mod tests {
         fs::write(dir.path().join(".hidden"), "hidden").unwrap();
         fs::write(dir.path().join("visible"), "visible").unwrap();
 
-        let tree = TreeBuilder::new()
-            .show_hidden(true)
-            .build(dir.path())
-            .unwrap();
+        let tree = TreeBuilder::new().show_hidden(true).build(dir.path()).unwrap();
 
         assert_that!(tree.children, len(eq(2)));
     }
