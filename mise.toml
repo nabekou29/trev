@@ -1,0 +1,65 @@
+# https://mise.jdx.dev/configuration.html
+[settings]
+experimental = true
+
+[tools]
+rust = "nightly"
+
+[tasks.build]
+description = "Build the binary"
+run = "cargo build"
+sources = ["Cargo.toml", "src/**/*.rs"]
+outputs = ["target/debug/trev"]
+
+[tasks.build-release]
+description = "Build the release binary"
+run = "cargo build --release"
+sources = ["Cargo.toml", "src/**/*.rs"]
+outputs = ["target/release/trev"]
+
+[tasks.build-install]
+description = "Build and install the binary"
+run = "cargo install --path . --force --debug"
+sources = ["Cargo.toml", "src/**/*.rs"]
+
+[tasks.test]
+description = "Run tests"
+run = "cargo test --all-targets --all-features"
+
+[tasks.lint]
+description = "Run lints"
+run = "cargo clippy --all-targets --all-features"
+
+[tasks.lint-fix]
+description = "Run lints and fix them"
+run = "cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged"
+
+[tasks.format]
+description = "Format the code"
+run = "cargo fmt --all"
+
+[tasks.format-check]
+description = "Check code formatting"
+run = "cargo fmt --all -- --check"
+
+[tasks.install-components]
+description = "Install components"
+run = [
+  "rustup component add rust-analyzer",
+  "rustup component add rustfmt",
+  "rustup component add clippy",
+  "rustup component add llvm-tools-preview",
+  "cargo install cargo-llvm-cov",
+]
+
+[tasks.coverage]
+description = "Run tests with coverage"
+run = "cargo llvm-cov --all-features"
+
+[tasks.coverage-html]
+description = "Run tests with coverage and generate HTML report"
+run = "cargo llvm-cov --all-features --html --open"
+
+[tasks.run]
+description = "Run the application"
+run = "cargo run"
