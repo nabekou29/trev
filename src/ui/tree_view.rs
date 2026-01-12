@@ -54,6 +54,9 @@ impl<'a> TreeView<'a> {
     }
 }
 
+/// メタ情報を非表示にする幅の閾値
+const HIDE_META_WIDTH_THRESHOLD: u16 = 60;
+
 impl Widget for &TreeView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // ボーダーを描画
@@ -65,6 +68,9 @@ impl Widget for &TreeView<'_> {
         if inner.width == 0 || inner.height == 0 {
             return;
         }
+
+        // 幅が狭い場合はメタ情報を非表示
+        let show_meta = inner.width >= HIDE_META_WIDTH_THRESHOLD;
 
         let visible_nodes = self.state.visible_nodes();
         let selected = self.state.selected();
@@ -115,8 +121,12 @@ impl Widget for &TreeView<'_> {
             // ファイルフラグ（実行可能、シンボリックリンク）
             let flags = get_file_flags(node.kind, node.is_executable, &node.symlink_target);
 
-            // メタ情報（サイズ、更新日時）
-            let meta = format_meta(node.kind, node.size, node.mtime);
+            // メタ情報（サイズ、更新日時）- 幅が狭い場合は非表示
+            let meta = if show_meta {
+                format_meta(node.kind, node.size, node.mtime)
+            } else {
+                String::new()
+            };
 
             // スタイル
             let style = if is_selected {

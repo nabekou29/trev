@@ -10,6 +10,7 @@ pub(crate) mod tree_view;
 use ratatui::Frame;
 use ratatui::layout::{
     Constraint,
+    Direction,
     Layout,
 };
 
@@ -19,9 +20,17 @@ use crate::ui::preview_view::PreviewView;
 use crate::ui::status_bar::StatusBar;
 use crate::ui::tree_view::TreeView;
 
+/// 狭い画面とみなす幅の閾値
+const NARROW_WIDTH_THRESHOLD: u16 = 100;
+
+/// 画面が狭いかどうかを判定する
+pub(crate) fn is_narrow(width: u16) -> bool {
+    width < NARROW_WIDTH_THRESHOLD
+}
+
 /// メイン画面を描画する
 ///
-/// レイアウト:
+/// 通常レイアウト（幅が広い場合）:
 /// ```text
 /// ┌─────────────────┬──────────────────┐
 /// │   TreeView      │   PreviewView    │
@@ -31,15 +40,43 @@ use crate::ui::tree_view::TreeView;
 /// │           StatusBar                │
 /// └────────────────────────────────────┘
 /// ```
+///
+/// 狭い画面レイアウト:
+/// ```text
+/// ┌────────────────────────────────────┐
+/// │           TreeView                 │
+/// │           (50%)                    │
+/// ├────────────────────────────────────┤
+/// │          PreviewView               │
+/// │           (50%)                    │
+/// ├────────────────────────────────────┤
+/// │           StatusBar                │
+/// └────────────────────────────────────┘
+/// ```
 pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
+    let area = frame.area();
+    let narrow = is_narrow(area.width);
+
     let [main_area, status_area] =
-        Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(frame.area());
+        Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(area);
 
     if app.show_preview {
-        // プレビュー表示時: ツリー40% + プレビュー60%
-        let [tree_area, preview_area] =
-            Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
-                .areas(main_area);
+        // プレビュー表示時
+        let (tree_area, preview_area) = if narrow {
+            // 狭い画面: 上下分割（ツリー50% + プレビュー50%）
+            let areas = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(main_area);
+            (areas[0], areas[1])
+        } else {
+            // 通常画面: 左右分割（ツリー40% + プレビュー60%）
+            let areas = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+                .split(main_area);
+            (areas[0], areas[1])
+        };
 
         // TreeView を描画
         let tree_view = TreeView::new(&app.tree, &app.marked_paths, app.clipboard.as_ref());
