@@ -8,11 +8,7 @@ pub(crate) mod status_bar;
 pub(crate) mod tree_view;
 
 use ratatui::Frame;
-use ratatui::layout::{
-    Constraint,
-    Direction,
-    Layout,
-};
+use ratatui::layout::{Constraint, Layout};
 
 use crate::app::App;
 use crate::ui::modal::Modal;
@@ -62,20 +58,14 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
 
     if app.show_preview {
         // プレビュー表示時
-        let (tree_area, preview_area) = if narrow {
+        let [tree_area, preview_area] = if narrow {
             // 狭い画面: 上下分割（ツリー50% + プレビュー50%）
-            let areas = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .split(main_area);
-            (areas[0], areas[1])
+            Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .areas(main_area)
         } else {
             // 通常画面: 左右分割（ツリー40% + プレビュー60%）
-            let areas = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-                .split(main_area);
-            (areas[0], areas[1])
+            Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
+                .areas(main_area)
         };
 
         // TreeView を描画

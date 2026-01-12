@@ -1091,13 +1091,11 @@ impl App {
             std::fs::create_dir_all(&new_path)
         } else {
             // ファイル作成（親ディレクトリがなければ先に作成）
-            if let Some(parent) = new_path.parent() {
-                if !parent.exists() {
-                    if std::fs::create_dir_all(parent).is_err() {
+            if let Some(parent) = new_path.parent()
+                && !parent.exists()
+                    && std::fs::create_dir_all(parent).is_err() {
                         return;
                     }
-                }
-            }
             std::fs::File::create(&new_path).map(|_| ())
         };
 

@@ -24,7 +24,8 @@ impl InputBuffer {
         &self.text
     }
 
-    /// カーソル位置を取得（文字単位）
+    /// カーソル位置を取得（文字単位）- テスト用
+    #[cfg(test)]
     pub(crate) fn cursor(&self) -> usize {
         self.cursor
     }
@@ -66,16 +67,6 @@ impl InputBuffer {
             let prev_byte_pos = self.char_to_byte_pos(self.cursor - 1);
             self.text.drain(prev_byte_pos..byte_pos);
             self.cursor -= 1;
-        }
-    }
-
-    /// カーソル位置の1文字を削除 (Delete, C-d)
-    pub(crate) fn delete(&mut self) {
-        let char_count = self.text.chars().count();
-        if self.cursor < char_count {
-            let byte_pos = self.cursor_byte_pos();
-            let next_byte_pos = self.char_to_byte_pos(self.cursor + 1);
-            self.text.drain(byte_pos..next_byte_pos);
         }
     }
 
@@ -192,12 +183,6 @@ impl InputBuffer {
             self.text.drain(..byte_pos);
             self.cursor = 0;
         }
-    }
-
-    /// 行末まで削除 (C-k)
-    pub(crate) fn delete_to_end(&mut self) {
-        let byte_pos = self.cursor_byte_pos();
-        self.text.truncate(byte_pos);
     }
 
     /// カーソル位置のバイトオフセットを計算

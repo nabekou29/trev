@@ -160,11 +160,10 @@ fn run(args: &Args) -> Result<()> {
     let mut app = App::new(args)?;
 
     // 起動時に reveal が指定されていれば実行
-    if let Some(reveal_path) = &args.reveal {
-        if let Err(e) = app.reveal(reveal_path) {
+    if let Some(reveal_path) = &args.reveal
+        && let Err(e) = app.reveal(reveal_path) {
             error!(?e, ?reveal_path, "Failed to reveal path on startup");
         }
-    }
 
     // メインループ
     while app.is_running() {

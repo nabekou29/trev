@@ -47,16 +47,6 @@ impl SortOrder {
         }
     }
 
-    /// 表示名を取得する
-    pub(crate) fn display_name(self) -> &'static str {
-        match self {
-            Self::Name => "name",
-            Self::Size => "size",
-            Self::Mtime => "mtime",
-            Self::Type => "type",
-            Self::Extension => "ext",
-        }
-    }
 }
 
 /// ソート方向
@@ -75,14 +65,6 @@ impl SortDirection {
         match self {
             Self::Ascending => Self::Descending,
             Self::Descending => Self::Ascending,
-        }
-    }
-
-    /// 表示用シンボルを取得する
-    pub(crate) fn symbol(self) -> &'static str {
-        match self {
-            Self::Ascending => "↑",
-            Self::Descending => "↓",
         }
     }
 }
@@ -471,11 +453,6 @@ impl TreeState {
     pub(crate) fn clear_filter(&mut self) {
         self.filter_query = None;
         self.rebuild_visible_nodes();
-    }
-
-    /// フィルタがアクティブかどうかを返す
-    pub(crate) fn has_filter(&self) -> bool {
-        self.filter_query.is_some()
     }
 
     /// 展開されているパスのリストを取得する
