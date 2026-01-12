@@ -4,12 +4,16 @@
 
 mod app;
 mod cli;
+mod config;
 mod error;
 mod git;
 mod highlight;
 mod preview;
 mod tree;
 mod ui;
+
+use std::path::Path;
+use std::process::Command;
 
 use clap::Parser;
 use tracing::info;
@@ -48,6 +52,19 @@ fn run(args: &Args) -> Result<()> {
 
     // メインループ
     while app.is_running() {
+        // ファイルを開く要求があれば処理
+        if let Some(path) = app.take_open_file_request() {
+            // ターミナルを一時的に復元
+            ratatui::restore();
+
+            // ファイルを開く
+            open_file(&path);
+
+            // ターミナルを再初期化
+            terminal = ratatui::init();
+            continue;
+        }
+
         // 描画
         terminal.draw(|frame| app.draw(frame))?;
 
@@ -68,8 +85,35 @@ fn run(args: &Args) -> Result<()> {
     Ok(())
 }
 
+/// ファイルを外部エディタで開く
+fn open_file(path: &Path) {
+    // $EDITOR 環境変数を優先
+    if let Ok(editor) = std::env::var("EDITOR") {
+        let _ = Command::new(&editor).arg(path).status();
+        return;
+    }
+
+    // $VISUAL 環境変数を次に試す
+    if let Ok(visual) = std::env::var("VISUAL") {
+        let _ = Command::new(&visual).arg(path).status();
+        return;
+    }
+
+    // macOS の場合は open コマンドを使用
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open").arg(path).status();
+    }
+
+    // Linux の場合は xdg-open を使用
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("xdg-open").arg(path).status();
+    }
+}
+
 /// 選択パスを stdout に出力する
 #[allow(clippy::print_stdout)]
-fn emit_path(path: &std::path::Path) {
+fn emit_path(path: &Path) {
     println!("{}", path.display());
 }
