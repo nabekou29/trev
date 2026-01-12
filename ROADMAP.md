@@ -59,7 +59,13 @@
 
 - [ ] `?` - HelpOverlay
 - [ ] `:` - CommandPalette
-- [ ] Modal（確認ダイアログ）
+- [x] Modal（確認ダイアログ）
+
+### レスポンシブレイアウト
+
+- [x] 狭い画面で上下分割（幅 < 100）
+- [x] 狭い TreeView でメタ情報非表示（幅 < 60）
+- [x] 狭い画面でプレビューをデフォルト非表示
 
 ### 選択操作
 
@@ -107,25 +113,34 @@
 
 ## Phase 5: Neovim 連携
 
-### 単発モード（MVP）
+### 単発モード（Picker）
 
-- [ ] `--emit {lines|nul|json}`
-- [ ] `--action {open|split|vsplit|tabedit}`
-- [ ] `s/v/T` キーバインド
+- [x] `--emit` - 終了時に選択パスを出力
+- [x] `--emit-format {lines|nul|json}` - 出力フォーマット
+- [x] `--action {edit|split|vsplit|tabedit}` - 終了時アクション種別
+- [x] `--reveal <path>` - 起動時に指定パスを選択
 
-### 常駐モード
+### 常駐モード（Daemon）
 
-- [ ] daemon モード（IPC 待ち受け）
-- [ ] `reveal(path)` による UI 更新
-- [ ] viewer_id / workspace_key 管理
-- [ ] viewer registry
+- [x] `--daemon` - IPC サーバー有効化
+- [x] Unix Domain Socket による IPC
+- [x] workspace_key 管理（Git root or directory name）
+- [x] コマンドファイルによるエディタへの通知
 
-### viewerctl
+### trev ctl サブコマンド
 
-- [ ] path → workspace 解決
-- [ ] workspace → default viewer_id 解決
-- [ ] IPC 命令送信（reveal / reload / quit）
-- [ ] viewer 不在時の起動
+- [x] `trev ctl reveal <path>` - パスを選択
+- [x] `trev ctl ping` - 疎通確認
+- [x] `trev ctl quit` - 終了要求
+
+### Neovim プラグイン (nvim-plugin/)
+
+- [x] toggleterm.nvim ベースのサイドパネル
+- [x] フローティングウィンドウ Picker
+- [x] `TrevOpen`, `TrevToggle`, `TrevClose` コマンド
+- [x] `reveal` 引数でカレントファイルを選択
+- [x] `auto_reveal` - バッファ切替時に自動 reveal
+- [x] コマンドファイル監視（edit/split/vsplit/tabedit）
 
 ---
 
@@ -185,16 +200,16 @@
 - `devicons` クレートを採用
 - Nerd Fonts 必須
 
-### 想定 crate
+### 使用 crate
 
-| 用途      | crate                         |
-| --------- | ----------------------------- |
-| UI        | ratatui, crossterm            |
-| FS        | ignore, walkdir, globset      |
-| Git       | 外部コマンド（MVP）→ git2/gix |
-| 検索      | nucleo                        |
-| IPC       | interprocess, tokio           |
-| CLI       | clap                          |
-| 設定      | serde, directories            |
-| Clipboard | arboard                       |
-| Plugin    | mlua                          |
+| 用途      | crate                          | 状態         |
+| --------- | ------------------------------ | ------------ |
+| UI        | ratatui, crossterm             | ✅ 使用中    |
+| FS        | ignore, walkdir                | ✅ 使用中    |
+| Git       | 外部コマンド                   | ✅ 使用中    |
+| 検索      | nucleo                         | ✅ 使用中    |
+| IPC       | tokio (Unix Socket)            | ✅ 使用中    |
+| CLI       | clap                           | ✅ 使用中    |
+| 設定      | serde, directories             | ✅ 使用中    |
+| Clipboard | arboard                        | 未実装       |
+| Plugin    | mlua                           | 未実装       |
