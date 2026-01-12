@@ -2,6 +2,7 @@
 //!
 //! ratatui を使用した UI の構成と描画を提供する。
 
+pub(crate) mod modal;
 pub(crate) mod preview_view;
 pub(crate) mod status_bar;
 pub(crate) mod tree_view;
@@ -13,6 +14,7 @@ use ratatui::layout::{
 };
 
 use crate::app::App;
+use crate::ui::modal::Modal;
 use crate::ui::preview_view::PreviewView;
 use crate::ui::status_bar::StatusBar;
 use crate::ui::tree_view::TreeView;
@@ -60,4 +62,10 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
     // StatusBar を描画
     let status_bar = StatusBar::new(app);
     frame.render_widget(&status_bar, status_area);
+
+    // モーダルダイアログを描画（必要な場合）
+    let modal = Modal::new(app);
+    if modal.should_show() {
+        frame.render_widget(&modal, frame.area());
+    }
 }

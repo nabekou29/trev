@@ -52,29 +52,8 @@ impl Widget for &StatusBar<'_> {
             return;
         }
 
-        // 削除確認モードの場合
-        if self.app.input_mode == InputMode::ConfirmDelete {
-            self.render_delete_confirm_mode(area, buf);
-            return;
-        }
-
-        // リネームモードの場合
-        if self.app.input_mode == InputMode::Renaming {
-            self.render_rename_mode(area, buf, bg_style);
-            return;
-        }
-
-        // ペースト確認モードの場合
-        if self.app.input_mode == InputMode::ConfirmPaste {
-            self.render_paste_confirm_mode(area, buf);
-            return;
-        }
-
-        // 追加モードの場合
-        if matches!(self.app.input_mode, InputMode::AddingFile | InputMode::AddingDirectory) {
-            self.render_add_mode(area, buf, bg_style);
-            return;
-        }
+        // モーダルで表示されるモードの場合は通常表示
+        // (モーダル側で詳細を表示するため)
 
         // 通常モード
         self.render_normal_mode(area, buf, bg_style);
@@ -141,107 +120,4 @@ impl StatusBar<'_> {
         buf.set_line(area.x, area.y, &line, area.width);
     }
 
-    /// リネームモードの描画
-    fn render_rename_mode(&self, area: Rect, buf: &mut Buffer, bg_style: Style) {
-        let rename_style = Style::default().bg(Color::Cyan).fg(Color::Black);
-
-        // プロンプト
-        let prompt = Span::styled(" RENAME ", rename_style);
-
-        // 入力
-        let input = Span::styled(&self.app.rename_input, bg_style);
-
-        // カーソル
-        let cursor = Span::styled("_", bg_style.add_modifier(Modifier::SLOW_BLINK));
-
-        // ヒント
-        let hint = Span::styled(
-            " (Enter: confirm, Esc: cancel)",
-            bg_style.add_modifier(Modifier::DIM),
-        );
-
-        let line = Line::from(vec![prompt, input, cursor, hint]);
-        buf.set_line(area.x, area.y, &line, area.width);
-    }
-
-    /// 削除確認モードの描画
-    fn render_delete_confirm_mode(&self, area: Rect, buf: &mut Buffer) {
-        let warn_style = Style::default().bg(Color::Red).fg(Color::White);
-        let text_style = Style::default().bg(Color::Red).fg(Color::White);
-
-        // 警告マーク
-        let warning = Span::styled(" DELETE ", warn_style.add_modifier(Modifier::BOLD));
-
-        // 対象ファイル表示
-        let target_display = if self.app.delete_targets.len() == 1 {
-            self.app.delete_targets.first()
-                .and_then(|p| p.file_name())
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| "?".to_string())
-        } else {
-            format!("{} files", self.app.delete_targets.len())
-        };
-
-        let target = Span::styled(format!(" {} ", target_display), text_style);
-
-        // 確認プロンプト
-        let prompt = Span::styled("(y/n) ", text_style.add_modifier(Modifier::BOLD));
-
-        let line = Line::from(vec![warning, target, prompt]);
-        buf.set_line(area.x, area.y, &line, area.width);
-    }
-
-    /// 追加モードの描画
-    fn render_add_mode(&self, area: Rect, buf: &mut Buffer, bg_style: Style) {
-        let add_style = Style::default().bg(Color::Green).fg(Color::Black);
-
-        // プロンプト
-        let prompt_text = match self.app.input_mode {
-            InputMode::AddingFile => " NEW FILE ",
-            InputMode::AddingDirectory => " NEW DIR ",
-            _ => " NEW ",
-        };
-        let prompt = Span::styled(prompt_text, add_style);
-
-        // 入力
-        let input = Span::styled(&self.app.add_input, bg_style);
-
-        // カーソル
-        let cursor = Span::styled("_", bg_style.add_modifier(Modifier::SLOW_BLINK));
-
-        // ヒント
-        let hint = Span::styled(
-            " (Enter: create, Esc: cancel)",
-            bg_style.add_modifier(Modifier::DIM),
-        );
-
-        let line = Line::from(vec![prompt, input, cursor, hint]);
-        buf.set_line(area.x, area.y, &line, area.width);
-    }
-
-    /// ペースト確認モードの描画
-    fn render_paste_confirm_mode(&self, area: Rect, buf: &mut Buffer) {
-        let warn_style = Style::default().bg(Color::Yellow).fg(Color::Black);
-        let text_style = Style::default().bg(Color::Yellow).fg(Color::Black);
-
-        // 警告マーク
-        let warning = Span::styled(" CONFLICT ", warn_style.add_modifier(Modifier::BOLD));
-
-        // 対象ファイル名
-        let target_name = self
-            .app
-            .paste_conflict
-            .as_ref()
-            .and_then(|c| c.current_dest.file_name())
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "?".to_string());
-
-        let target = Span::styled(format!(" '{}' already exists ", target_name), text_style);
-
-        // 確認プロンプト
-        let prompt = Span::styled("(o:overwrite / r:rename / s:skip / Esc:cancel) ", text_style.add_modifier(Modifier::BOLD));
-
-        let line = Line::from(vec![warning, target, prompt]);
-        buf.set_line(area.x, area.y, &line, area.width);
-    }
 }
