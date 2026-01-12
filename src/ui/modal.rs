@@ -322,7 +322,8 @@ fn truncate_start(s: &str, max_width: usize) -> String {
         "...".to_string()
     } else {
         let start = chars.len() - (max_width - 3);
-        format!("...{}", chars[start..].iter().collect::<String>())
+        let suffix: String = chars.get(start..).map(|c| c.iter().collect()).unwrap_or_default();
+        format!("...{}", suffix)
     }
 }
 
@@ -335,8 +336,9 @@ fn truncate_middle(s: &str, max_width: usize) -> String {
         "...".to_string()
     } else {
         let half = (max_width - 3) / 2;
-        let start: String = chars[..half].iter().collect();
-        let end: String = chars[chars.len() - half..].iter().collect();
+        let start: String = chars.get(..half).map(|c| c.iter().collect()).unwrap_or_default();
+        let end_start = chars.len().saturating_sub(half);
+        let end: String = chars.get(end_start..).map(|c| c.iter().collect()).unwrap_or_default();
         format!("{}...{}", start, end)
     }
 }
