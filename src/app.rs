@@ -20,6 +20,7 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::git::GitCache;
 use crate::input::InputBuffer;
+use crate::ipc::{EditorAction, EditorCommand, workspace_key, write_editor_command};
 use crate::preview::PreviewState;
 use crate::tree::{SortConfig, TreeState};
 use crate::tree::builder::TreeBuilder;
@@ -138,6 +139,10 @@ pub(crate) struct App {
     view_height: usize,
     /// ソート設定
     pub(crate) sort_config: SortConfig,
+    /// daemon モードかどうか
+    daemon_mode: bool,
+    /// workspace キー（daemon モード時に使用）
+    workspace_key: String,
 }
 
 impl App {
@@ -182,6 +187,20 @@ impl App {
             preview.load(&node.path);
         }
 
+        // 狭い画面ではプレビューをデフォルト非表示
+        let show_preview = if let Ok((width, _)) = crossterm::terminal::size() {
+            if ui::is_narrow(width) {
+                false
+            } else {
+                config.show_preview
+            }
+        } else {
+            config.show_preview
+        };
+
+        // workspace キーを計算
+        let ws_key = workspace_key(&args.path);
+
         Ok(Self {
             state: AppState::Running,
             tree,
@@ -202,9 +221,11 @@ impl App {
             root_path: args.path.clone(),
             show_hidden,
             show_ignored: config.show_ignored,
-            show_preview: config.show_preview,
+            show_preview,
             view_height: 20, // 初期値、draw で更新される
             sort_config,
+            daemon_mode: args.daemon,
+            workspace_key: ws_key,
         })
     }
 
@@ -221,6 +242,56 @@ impl App {
             Some(path)
         } else {
             None
+        }
+    }
+
+    /// アプリケーションを終了する（IPC quit コマンド用）
+    pub(crate) fn quit(&mut self) {
+        self.state = AppState::Quit;
+    }
+
+    /// 指定パスをツリー上で表示・選択する（IPC reveal コマンド用）
+    ///
+    /// # Errors
+    ///
+    /// パスが見つからない場合にエラーを返す。
+    pub(crate) fn reveal(&mut self, path: &Path) -> Result<()> {
+        // パスを正規化
+        let abs_path = path.canonicalize()?;
+
+        // フィルタをクリア（検索入力とTreeStateの両方）
+        self.search_input.clear();
+        self.tree.clear_filter();
+        self.input_mode = InputMode::Normal;
+
+        // 親ディレクトリをすべて展開し、対象を選択
+        if self.tree.reveal_path(&abs_path) {
+            // プレビューを更新
+            self.preview.load(&abs_path);
+            Ok(())
+        } else {
+            Err(crate::error::AppError::InvalidPath(abs_path))
+        }
+    }
+
+    /// エディタにコマンドを送信する（daemon モード用）
+    fn send_editor_command(&self, action: EditorAction) {
+        // ファイルのみ対象
+        let Some(node) = self.tree.selected_node() else {
+            return;
+        };
+
+        if node.kind == crate::tree::NodeKind::Directory {
+            return;
+        }
+
+        let command = EditorCommand {
+            action,
+            path: node.path.clone(),
+        };
+
+        if let Err(e) = write_editor_command(&self.workspace_key, &command) {
+            tracing::warn!(?e, "Failed to write editor command");
         }
     }
 
@@ -375,8 +446,29 @@ impl App {
                 self.input_mode = InputMode::Normal;
             }
 
+            (_, KeyCode::Enter) if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                // Shift+Enter: 新しいタブで開く（daemon モード時）
+                if self.daemon_mode {
+                    self.send_editor_command(EditorAction::Tabedit);
+                }
+                self.input_mode = InputMode::Normal;
+            }
+
+            // O: 新しいタブで開く（daemon モード時、Shift+Enter の代替）
+            (InputMode::Normal, KeyCode::Char('O')) if self.daemon_mode => {
+                self.send_editor_command(EditorAction::Tabedit);
+                self.input_mode = InputMode::Normal;
+            }
+
             (_, KeyCode::Enter) => {
-                self.confirm_selection();
+                if self.daemon_mode {
+                    // daemon モード: エディタでファイルを開く
+                    self.send_editor_command(EditorAction::Edit);
+                    self.input_mode = InputMode::Normal;
+                } else {
+                    // 通常モード: 選択を確定して終了
+                    self.confirm_selection();
+                }
             }
 
             // ファイルを開く

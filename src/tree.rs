@@ -388,17 +388,28 @@ impl TreeState {
 
     /// 可視ノードを再帰的に収集する
     fn collect_visible_nodes(&mut self, node: &TreeNode, git_status: Option<GitStatus>) {
+        let filter_active = self.filter_query.is_some();
+
         // フィルタがある場合は、このノードまたは子孫がマッチするかチェック
-        if self.filter_query.is_some() && !self.node_or_descendants_match(node) {
+        if filter_active && !self.node_or_descendants_match(node) {
             return;
         }
+
+        // フィルタ中は、マッチする子孫がいるディレクトリを自動展開
+        // 通常時は node.expanded に従う
+        let should_show_children = if filter_active && node.kind == NodeKind::Directory {
+            // 子または子孫にマッチがあれば展開表示
+            node.children.iter().any(|child| self.node_or_descendants_match(child))
+        } else {
+            node.expanded
+        };
 
         self.visible_nodes.push(VisibleNode {
             name: node.name.clone(),
             path: node.path.clone(),
             depth: node.depth,
             kind: node.kind,
-            expanded: node.expanded,
+            expanded: should_show_children,
             git_status,
             git_summary: None, // 後で update_git_status で設定
             has_children: node.has_children(),
@@ -408,7 +419,7 @@ impl TreeState {
             mtime: node.mtime,
         });
 
-        if node.expanded {
+        if should_show_children {
             for child in &node.children {
                 self.collect_visible_nodes(child, None);
             }
@@ -490,6 +501,60 @@ impl TreeState {
             self.set_expanded(path, true);
         }
         self.rebuild_visible_nodes();
+    }
+
+    /// 指定パスをツリー上で表示・選択する（IPC reveal 用）
+    ///
+    /// 対象パスまでの親ディレクトリをすべて展開し、対象を選択する。
+    /// 成功した場合は `true`、パスが見つからない場合は `false` を返す。
+    pub(crate) fn reveal_path(&mut self, target: &std::path::Path) -> bool {
+        // ツリー内でパスを探し、親ディレクトリを展開する
+        let ancestors = Self::collect_ancestors(&self.root, target);
+        if ancestors.is_empty() {
+            return false;
+        }
+
+        // 親ディレクトリをすべて展開
+        for path in &ancestors {
+            self.set_expanded(path, true);
+        }
+
+        // 表示ノードを再構築
+        self.rebuild_visible_nodes();
+
+        // 対象を選択
+        let target_buf = target.to_path_buf();
+        for (i, node) in self.visible_nodes.iter().enumerate() {
+            if node.path == target_buf {
+                self.selected = i;
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// 指定パスまでの親ディレクトリパスを収集する（ルートから対象まで）
+    fn collect_ancestors(node: &TreeNode, target: &std::path::Path) -> Vec<PathBuf> {
+        if node.path == target {
+            return vec![node.path.clone()];
+        }
+
+        // 対象パスがこのノード配下にあるかチェック
+        if target.starts_with(&node.path) || node.path.as_os_str().is_empty() {
+            for child in &node.children {
+                let mut result = Self::collect_ancestors(child, target);
+                if !result.is_empty() {
+                    // このノードがディレクトリなら先頭に追加
+                    if node.kind == NodeKind::Directory {
+                        result.insert(0, node.path.clone());
+                    }
+                    return result;
+                }
+            }
+        }
+
+        Vec::new()
     }
 
     /// ノードがフィルタにマッチするかを判定する（fuzzy マッチ）
