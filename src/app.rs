@@ -814,17 +814,30 @@ impl App {
             return;
         }
 
-        let new_path = target_dir.join(&name);
+        // 末尾が / の場合はディレクトリとして扱う
+        let is_directory = name.ends_with('/') || self.input_mode == InputMode::AddingDirectory;
+        let name = name.trim_end_matches('/');
+
+        let new_path = target_dir.join(name);
 
         // 既に存在する場合は何もしない
         if new_path.exists() {
             return;
         }
 
-        let result = match self.input_mode {
-            InputMode::AddingFile => std::fs::File::create(&new_path).map(|_| ()),
-            InputMode::AddingDirectory => std::fs::create_dir_all(&new_path),
-            _ => return,
+        let result = if is_directory {
+            // ディレクトリ作成（中間ディレクトリも作成）
+            std::fs::create_dir_all(&new_path)
+        } else {
+            // ファイル作成（親ディレクトリがなければ先に作成）
+            if let Some(parent) = new_path.parent() {
+                if !parent.exists() {
+                    if std::fs::create_dir_all(parent).is_err() {
+                        return;
+                    }
+                }
+            }
+            std::fs::File::create(&new_path).map(|_| ())
         };
 
         if result.is_ok() {
