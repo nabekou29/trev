@@ -127,15 +127,31 @@ impl PreviewView<'_> {
     ) {
         let mut current_x = x;
         let mut remaining_width = max_width as usize;
+        let mut skip_chars = self.state.horizontal_scroll;
 
         for span in spans {
             if remaining_width == 0 {
                 break;
             }
 
-            // テキストを残り幅で切り詰め
-            let text: String = span.text.chars().take(remaining_width).collect();
+            let span_chars: Vec<char> = span.text.chars().collect();
+            let span_len = span_chars.len();
+
+            // 横スクロール分をスキップ
+            if skip_chars >= span_len {
+                skip_chars -= span_len;
+                continue;
+            }
+
+            // スキップ後の文字列を取得
+            let text: String = span_chars
+                .into_iter()
+                .skip(skip_chars)
+                .take(remaining_width)
+                .collect();
             let text_width = text.len();
+
+            skip_chars = 0;
 
             buf.set_string(current_x, y, &text, span.style);
 
