@@ -118,11 +118,13 @@ impl Modal<'_> {
         )]);
         buf.set_line(inner.x, inner.y, &parent_line, inner.width);
 
-        // 入力フィールド
+        // 入力フィールド（カーソル位置を反映）
+        let (before, after) = self.app.add_input.split_at_cursor();
         let input_line = Line::from(vec![
             Span::styled(" > ", Style::default().fg(Color::Green)),
-            Span::raw(&self.app.add_input),
+            Span::raw(before),
             Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
+            Span::raw(after),
         ]);
         buf.set_line(inner.x, inner.y + 1, &input_line, inner.width);
 
@@ -227,11 +229,13 @@ impl Modal<'_> {
         ]);
         buf.set_line(inner.x, inner.y, &original_line, inner.width);
 
-        // 入力フィールド
+        // 入力フィールド（カーソル位置を反映）
+        let (before, after) = self.app.rename_input.split_at_cursor();
         let input_line = Line::from(vec![
             Span::styled(" To:   ", Style::default().fg(Color::Cyan)),
-            Span::raw(&self.app.rename_input),
+            Span::raw(before),
             Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
+            Span::raw(after),
         ]);
         buf.set_line(inner.x, inner.y + 1, &input_line, inner.width);
 

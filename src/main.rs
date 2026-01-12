@@ -8,6 +8,7 @@ mod config;
 mod error;
 mod git;
 mod highlight;
+mod input;
 mod preview;
 mod tree;
 mod ui;

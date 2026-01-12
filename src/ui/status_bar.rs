@@ -72,8 +72,8 @@ impl StatusBar<'_> {
             .unwrap_or_default();
 
         // フィルタがアクティブな場合は表示
-        let filter_indicator = if !self.app.search_query.is_empty() {
-            format!(" [filter: {}]", self.app.search_query)
+        let filter_indicator = if !self.app.search_input.is_empty() {
+            format!(" [filter: {}]", self.app.search_input.text())
         } else {
             String::new()
         };
@@ -104,11 +104,11 @@ impl StatusBar<'_> {
         // プロンプト
         let prompt = Span::styled(" / ", search_style);
 
-        // クエリ
-        let query = Span::styled(&self.app.search_query, bg_style);
-
-        // カーソル（点滅効果は省略、アンダースコアで代用）
+        // クエリ（カーソル位置を反映）
+        let (before, after) = self.app.search_input.split_at_cursor();
+        let query_before = Span::styled(before, bg_style);
         let cursor = Span::styled("_", bg_style.add_modifier(Modifier::SLOW_BLINK));
+        let query_after = Span::styled(after, bg_style);
 
         // ヒント
         let hint = Span::styled(
@@ -116,7 +116,7 @@ impl StatusBar<'_> {
             bg_style.add_modifier(Modifier::DIM),
         );
 
-        let line = Line::from(vec![prompt, query, cursor, hint]);
+        let line = Line::from(vec![prompt, query_before, cursor, query_after, hint]);
         buf.set_line(area.x, area.y, &line, area.width);
     }
 

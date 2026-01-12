@@ -19,6 +19,7 @@ use crate::cli::Args;
 use crate::config::Config;
 use crate::error::Result;
 use crate::git::GitCache;
+use crate::input::InputBuffer;
 use crate::preview::PreviewState;
 use crate::tree::{SortConfig, TreeState};
 use crate::tree::builder::TreeBuilder;
@@ -103,20 +104,20 @@ pub(crate) struct App {
     pub(crate) git_cache: GitCache,
     /// 入力モード
     pub(crate) input_mode: InputMode,
-    /// 検索クエリ
-    pub(crate) search_query: String,
+    /// 検索入力バッファ
+    pub(crate) search_input: InputBuffer,
     /// 検索開始前のクエリ（キャンセル時の復元用）
     search_query_backup: String,
     /// 削除確認中のパス（複数対応）
     pub(crate) delete_targets: Vec<PathBuf>,
     /// リネーム対象のパス
     pub(crate) rename_target: Option<PathBuf>,
-    /// リネーム入力中の新しいファイル名
-    pub(crate) rename_input: String,
+    /// リネーム入力バッファ
+    pub(crate) rename_input: InputBuffer,
     /// 追加先ディレクトリ
     pub(crate) add_target_dir: Option<PathBuf>,
-    /// 追加入力中のファイル/ディレクトリ名
-    pub(crate) add_input: String,
+    /// 追加入力バッファ
+    pub(crate) add_input: InputBuffer,
     /// クリップボード（コピー/カット対象）- 複数ファイル対応
     pub(crate) clipboard: Option<(Vec<PathBuf>, ClipboardOperation)>,
     /// ペースト確認中のコンフリクト情報
@@ -187,13 +188,13 @@ impl App {
             preview,
             git_cache,
             input_mode: InputMode::Normal,
-            search_query: String::new(),
+            search_input: InputBuffer::new(),
             search_query_backup: String::new(),
             delete_targets: Vec::new(),
             rename_target: None,
-            rename_input: String::new(),
+            rename_input: InputBuffer::new(),
             add_target_dir: None,
-            add_input: String::new(),
+            add_input: InputBuffer::new(),
             clipboard: None,
             paste_conflict: None,
             marked_paths: HashSet::new(),
@@ -307,8 +308,8 @@ impl App {
             (InputMode::Normal, KeyCode::Char('/')) => {
                 self.input_mode = InputMode::Searching;
                 // 現在のクエリをバックアップして、新しい検索を開始
-                self.search_query_backup = self.search_query.clone();
-                self.search_query.clear();
+                self.search_query_backup = self.search_input.text().to_string();
+                self.search_input.clear();
                 self.apply_filter();
             }
 
@@ -481,28 +482,83 @@ impl App {
 
     /// リネームモードでのキーイベントを処理する
     fn handle_rename_key(&mut self, key: KeyEvent) {
-        match key.code {
+        match (key.code, key.modifiers) {
             // リネーム確定
-            KeyCode::Enter => {
+            (KeyCode::Enter, _) => {
                 self.execute_rename();
                 self.input_mode = InputMode::Normal;
             }
 
             // キャンセル
-            KeyCode::Esc => {
+            (KeyCode::Esc, _) => {
                 self.rename_target = None;
                 self.rename_input.clear();
                 self.input_mode = InputMode::Normal;
             }
 
+            // C-h: バックスペース
+            (KeyCode::Char('h'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.rename_input.backspace();
+            }
+
             // バックスペース
-            KeyCode::Backspace => {
-                self.rename_input.pop();
+            (KeyCode::Backspace, _) => {
+                self.rename_input.backspace();
+            }
+
+            // C-w: 単語削除
+            (KeyCode::Char('w'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.rename_input.delete_word();
+            }
+
+            // C-u: 行頭まで削除
+            (KeyCode::Char('u'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.rename_input.delete_to_start();
+            }
+
+            // C-a / Home: 行頭へ
+            (KeyCode::Char('a'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.rename_input.move_home();
+            }
+            (KeyCode::Home, _) => {
+                self.rename_input.move_home();
+            }
+
+            // C-e / End: 行末へ
+            (KeyCode::Char('e'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.rename_input.move_end();
+            }
+            (KeyCode::End, _) => {
+                self.rename_input.move_end();
+            }
+
+            // M-b / M-Left: 前の単語へ
+            (KeyCode::Char('b'), m) if m.contains(KeyModifiers::ALT) => {
+                self.rename_input.move_word_left();
+            }
+            (KeyCode::Left, m) if m.contains(KeyModifiers::ALT) => {
+                self.rename_input.move_word_left();
+            }
+
+            // M-f / M-Right: 次の単語へ
+            (KeyCode::Char('f'), m) if m.contains(KeyModifiers::ALT) => {
+                self.rename_input.move_word_right();
+            }
+            (KeyCode::Right, m) if m.contains(KeyModifiers::ALT) => {
+                self.rename_input.move_word_right();
+            }
+
+            // 左右カーソル
+            (KeyCode::Left, _) => {
+                self.rename_input.move_left();
+            }
+            (KeyCode::Right, _) => {
+                self.rename_input.move_right();
             }
 
             // 文字入力
-            KeyCode::Char(c) => {
-                self.rename_input.push(c);
+            (KeyCode::Char(c), _) => {
+                self.rename_input.insert(c);
             }
 
             _ => {}
@@ -568,29 +624,87 @@ impl App {
 
     /// 検索モードでのキーイベントを処理する
     fn handle_search_key(&mut self, key: KeyEvent) {
-        match key.code {
+        match (key.code, key.modifiers) {
             // 検索確定
-            KeyCode::Enter => {
+            (KeyCode::Enter, _) => {
                 self.apply_filter();
                 self.input_mode = InputMode::Normal;
             }
 
             // 検索キャンセル（元のフィルタを復元）
-            KeyCode::Esc => {
-                self.search_query = std::mem::take(&mut self.search_query_backup);
+            (KeyCode::Esc, _) => {
+                self.search_input.set(std::mem::take(&mut self.search_query_backup));
                 self.apply_filter();
                 self.input_mode = InputMode::Normal;
             }
 
-            // バックスペース
-            KeyCode::Backspace => {
-                self.search_query.pop();
+            // C-h: バックスペース
+            (KeyCode::Char('h'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.search_input.backspace();
                 self.apply_filter();
             }
 
+            // バックスペース
+            (KeyCode::Backspace, _) => {
+                self.search_input.backspace();
+                self.apply_filter();
+            }
+
+            // C-w: 単語削除
+            (KeyCode::Char('w'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.search_input.delete_word();
+                self.apply_filter();
+            }
+
+            // C-u: 行頭まで削除
+            (KeyCode::Char('u'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.search_input.delete_to_start();
+                self.apply_filter();
+            }
+
+            // C-a / Home: 行頭へ
+            (KeyCode::Char('a'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.search_input.move_home();
+            }
+            (KeyCode::Home, _) => {
+                self.search_input.move_home();
+            }
+
+            // C-e / End: 行末へ
+            (KeyCode::Char('e'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.search_input.move_end();
+            }
+            (KeyCode::End, _) => {
+                self.search_input.move_end();
+            }
+
+            // M-b / M-Left: 前の単語へ
+            (KeyCode::Char('b'), m) if m.contains(KeyModifiers::ALT) => {
+                self.search_input.move_word_left();
+            }
+            (KeyCode::Left, m) if m.contains(KeyModifiers::ALT) => {
+                self.search_input.move_word_left();
+            }
+
+            // M-f / M-Right: 次の単語へ
+            (KeyCode::Char('f'), m) if m.contains(KeyModifiers::ALT) => {
+                self.search_input.move_word_right();
+            }
+            (KeyCode::Right, m) if m.contains(KeyModifiers::ALT) => {
+                self.search_input.move_word_right();
+            }
+
+            // 左右カーソル
+            (KeyCode::Left, _) => {
+                self.search_input.move_left();
+            }
+            (KeyCode::Right, _) => {
+                self.search_input.move_right();
+            }
+
             // 文字入力
-            KeyCode::Char(c) => {
-                self.search_query.push(c);
+            (KeyCode::Char(c), _) => {
+                self.search_input.insert(c);
                 self.apply_filter();
             }
 
@@ -600,17 +714,17 @@ impl App {
 
     /// フィルタを適用する
     fn apply_filter(&mut self) {
-        if self.search_query.is_empty() {
+        if self.search_input.is_empty() {
             self.tree.clear_filter();
         } else {
-            self.tree.set_filter(&self.search_query);
+            self.tree.set_filter(self.search_input.text());
         }
         self.update_preview();
     }
 
     /// フィルタをクリアする
     fn clear_filter(&mut self) {
-        self.search_query.clear();
+        self.search_input.clear();
         self.tree.clear_filter();
         self.update_preview();
     }
@@ -696,7 +810,7 @@ impl App {
         if let Some(node) = self.tree.selected_node() {
             self.rename_target = Some(node.path.clone());
             // 現在のファイル名を初期値として設定
-            self.rename_input = node.name.clone();
+            self.rename_input.set(node.name.clone());
             self.input_mode = InputMode::Renaming;
         }
     }
@@ -704,7 +818,7 @@ impl App {
     /// リネームを実行する
     fn execute_rename(&mut self) {
         if let Some(old_path) = self.rename_target.take() {
-            let new_name = std::mem::take(&mut self.rename_input);
+            let new_name = self.rename_input.take();
 
             // 空の名前は無効
             if new_name.is_empty() {
@@ -746,28 +860,83 @@ impl App {
 
     /// 追加モードでのキーイベントを処理する
     fn handle_add_key(&mut self, key: KeyEvent) {
-        match key.code {
+        match (key.code, key.modifiers) {
             // 追加確定
-            KeyCode::Enter => {
+            (KeyCode::Enter, _) => {
                 self.execute_add();
                 self.input_mode = InputMode::Normal;
             }
 
             // キャンセル
-            KeyCode::Esc => {
+            (KeyCode::Esc, _) => {
                 self.add_target_dir = None;
                 self.add_input.clear();
                 self.input_mode = InputMode::Normal;
             }
 
+            // C-h: バックスペース
+            (KeyCode::Char('h'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.add_input.backspace();
+            }
+
             // バックスペース
-            KeyCode::Backspace => {
-                self.add_input.pop();
+            (KeyCode::Backspace, _) => {
+                self.add_input.backspace();
+            }
+
+            // C-w: 単語削除
+            (KeyCode::Char('w'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.add_input.delete_word();
+            }
+
+            // C-u: 行頭まで削除
+            (KeyCode::Char('u'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.add_input.delete_to_start();
+            }
+
+            // C-a / Home: 行頭へ
+            (KeyCode::Char('a'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.add_input.move_home();
+            }
+            (KeyCode::Home, _) => {
+                self.add_input.move_home();
+            }
+
+            // C-e / End: 行末へ
+            (KeyCode::Char('e'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.add_input.move_end();
+            }
+            (KeyCode::End, _) => {
+                self.add_input.move_end();
+            }
+
+            // M-b / M-Left: 前の単語へ
+            (KeyCode::Char('b'), m) if m.contains(KeyModifiers::ALT) => {
+                self.add_input.move_word_left();
+            }
+            (KeyCode::Left, m) if m.contains(KeyModifiers::ALT) => {
+                self.add_input.move_word_left();
+            }
+
+            // M-f / M-Right: 次の単語へ
+            (KeyCode::Char('f'), m) if m.contains(KeyModifiers::ALT) => {
+                self.add_input.move_word_right();
+            }
+            (KeyCode::Right, m) if m.contains(KeyModifiers::ALT) => {
+                self.add_input.move_word_right();
+            }
+
+            // 左右カーソル
+            (KeyCode::Left, _) => {
+                self.add_input.move_left();
+            }
+            (KeyCode::Right, _) => {
+                self.add_input.move_right();
             }
 
             // 文字入力
-            KeyCode::Char(c) => {
-                self.add_input.push(c);
+            (KeyCode::Char(c), _) => {
+                self.add_input.insert(c);
             }
 
             _ => {}
@@ -808,7 +977,7 @@ impl App {
         let Some(target_dir) = self.add_target_dir.take() else {
             return;
         };
-        let name = std::mem::take(&mut self.add_input);
+        let name = self.add_input.take();
 
         if name.is_empty() {
             return;
@@ -1040,8 +1209,8 @@ impl App {
             self.refresh_git_status();
 
             // フィルタを再適用
-            if !self.search_query.is_empty() {
-                self.tree.set_filter(&self.search_query);
+            if !self.search_input.is_empty() {
+                self.tree.set_filter(self.search_input.text());
             }
 
             // 可能なら以前の選択を復元
