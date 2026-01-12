@@ -43,6 +43,50 @@ impl GitStatus {
     }
 }
 
+/// ディレクトリのGitステータス集計
+///
+/// ディレクトリ内のファイルのGitステータスを集計する。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct GitStatusSummary {
+    /// 変更ファイル数
+    pub(crate) modified: usize,
+    /// 追加ファイル数
+    pub(crate) added: usize,
+    /// 削除ファイル数
+    pub(crate) deleted: usize,
+    /// 未追跡ファイル数
+    pub(crate) untracked: usize,
+    /// コンフリクトファイル数
+    pub(crate) conflicted: usize,
+    /// リネームファイル数
+    pub(crate) renamed: usize,
+}
+
+impl GitStatusSummary {
+    /// サマリが空かどうかを返す
+    pub(crate) fn is_empty(&self) -> bool {
+        self.modified == 0
+            && self.added == 0
+            && self.deleted == 0
+            && self.untracked == 0
+            && self.conflicted == 0
+            && self.renamed == 0
+    }
+
+    /// ステータスを加算する
+    fn add_status(&mut self, status: GitStatus) {
+        match status {
+            GitStatus::Modified => self.modified += 1,
+            GitStatus::Added => self.added += 1,
+            GitStatus::Deleted => self.deleted += 1,
+            GitStatus::Untracked => self.untracked += 1,
+            GitStatus::Conflicted => self.conflicted += 1,
+            GitStatus::Ignored => {} // 無視ファイルはカウントしない
+            GitStatus::Renamed => self.renamed += 1,
+        }
+    }
+}
+
 /// Git ステータスキャッシュ
 ///
 /// リポジトリ内のファイルの Git 状態をキャッシュする。
@@ -199,5 +243,21 @@ impl GitCache {
         }
 
         None
+    }
+
+    /// 指定ディレクトリ配下のGitステータスを集計する
+    ///
+    /// ディレクトリ内のすべてのファイルのステータスをカウントして返す。
+    pub(crate) fn get_directory_summary(&self, dir_path: &Path) -> GitStatusSummary {
+        let mut summary = GitStatusSummary::default();
+
+        for (path, status) in &self.statuses {
+            // ディレクトリ配下のパスのみを対象とする
+            if path.starts_with(dir_path) && path != dir_path {
+                summary.add_status(*status);
+            }
+        }
+
+        summary
     }
 }

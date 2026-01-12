@@ -5,8 +5,105 @@
 pub(crate) mod builder;
 
 use std::path::PathBuf;
+use std::time::SystemTime;
 
-use crate::git::GitStatus;
+use nucleo::pattern::{
+    AtomKind,
+    CaseMatching,
+    Normalization,
+    Pattern,
+};
+
+use crate::git::{
+    GitStatus,
+    GitStatusSummary,
+};
+
+/// ソート順
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum SortOrder {
+    /// 名前順
+    #[default]
+    Name,
+    /// サイズ順
+    Size,
+    /// 更新日時順
+    Mtime,
+    /// 種別順（ディレクトリ/ファイル）
+    Type,
+    /// 拡張子順
+    Extension,
+}
+
+impl SortOrder {
+    /// 次のソート順を取得する
+    pub(crate) fn next(self) -> Self {
+        match self {
+            Self::Name => Self::Size,
+            Self::Size => Self::Mtime,
+            Self::Mtime => Self::Type,
+            Self::Type => Self::Extension,
+            Self::Extension => Self::Name,
+        }
+    }
+
+    /// 表示名を取得する
+    pub(crate) fn display_name(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Size => "size",
+            Self::Mtime => "mtime",
+            Self::Type => "type",
+            Self::Extension => "ext",
+        }
+    }
+}
+
+/// ソート方向
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum SortDirection {
+    /// 昇順
+    #[default]
+    Ascending,
+    /// 降順
+    Descending,
+}
+
+impl SortDirection {
+    /// ソート方向を反転する
+    pub(crate) fn toggle(self) -> Self {
+        match self {
+            Self::Ascending => Self::Descending,
+            Self::Descending => Self::Ascending,
+        }
+    }
+
+    /// 表示用シンボルを取得する
+    pub(crate) fn symbol(self) -> &'static str {
+        match self {
+            Self::Ascending => "↑",
+            Self::Descending => "↓",
+        }
+    }
+}
+
+/// ソート設定
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct SortConfig {
+    /// ソート順
+    pub(crate) order: SortOrder,
+    /// ソート方向
+    pub(crate) direction: SortDirection,
+    /// ディレクトリを先に表示するか
+    pub(crate) directories_first: bool,
+}
+
+impl SortConfig {
+    /// 新しい `SortConfig` を作成する
+    pub(crate) fn new() -> Self {
+        Self { order: SortOrder::Name, direction: SortDirection::Ascending, directories_first: true }
+    }
+}
 
 /// ノードの種別
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,12 +133,31 @@ pub(crate) struct TreeNode {
     pub(crate) expanded: bool,
     /// ツリー内での深さ
     pub(crate) depth: usize,
+    /// 実行可能ファイルか
+    pub(crate) is_executable: bool,
+    /// シンボリックリンクの場合のターゲットパス
+    pub(crate) symlink_target: Option<String>,
+    /// ファイルサイズ（バイト）
+    pub(crate) size: u64,
+    /// 更新日時
+    pub(crate) mtime: Option<SystemTime>,
 }
 
 impl TreeNode {
     /// 新しい `TreeNode` を作成する
     pub(crate) fn new(name: String, path: PathBuf, kind: NodeKind, depth: usize) -> Self {
-        Self { name, path, kind, children: Vec::new(), expanded: false, depth }
+        Self {
+            name,
+            path,
+            kind,
+            children: Vec::new(),
+            expanded: false,
+            depth,
+            is_executable: false,
+            symlink_target: None,
+            size: 0,
+            mtime: None,
+        }
     }
 
     /// 子ノードを持つかどうかを返す
@@ -67,8 +183,18 @@ pub(crate) struct VisibleNode {
     pub(crate) expanded: bool,
     /// Git ステータス
     pub(crate) git_status: Option<GitStatus>,
+    /// Git ステータス集計（ディレクトリの場合）
+    pub(crate) git_summary: Option<GitStatusSummary>,
     /// 子ノードを持つか
     pub(crate) has_children: bool,
+    /// 実行可能ファイルか
+    pub(crate) is_executable: bool,
+    /// シンボリックリンクの場合のターゲットパス
+    pub(crate) symlink_target: Option<String>,
+    /// ファイルサイズ（バイト）
+    pub(crate) size: u64,
+    /// 更新日時
+    pub(crate) mtime: Option<SystemTime>,
 }
 
 /// ツリー全体の状態
@@ -82,12 +208,15 @@ pub(crate) struct TreeState {
     selected: usize,
     /// スクロールオフセット
     scroll_offset: usize,
+    /// フィルタクエリ
+    filter_query: Option<String>,
 }
 
 impl TreeState {
     /// 新しい `TreeState` を作成する
     pub(crate) fn new(root: TreeNode) -> Self {
-        let mut state = Self { root, visible_nodes: Vec::new(), selected: 0, scroll_offset: 0 };
+        let mut state =
+            Self { root, visible_nodes: Vec::new(), selected: 0, scroll_offset: 0, filter_query: None };
         state.rebuild_visible_nodes();
         state
     }
@@ -137,6 +266,19 @@ impl TreeState {
         }
     }
 
+    /// 半ページ下にスクロール
+    pub(crate) fn page_down(&mut self, page_size: usize) {
+        let half = page_size / 2;
+        let max = self.visible_nodes.len().saturating_sub(1);
+        self.selected = (self.selected + half).min(max);
+    }
+
+    /// 半ページ上にスクロール
+    pub(crate) fn page_up(&mut self, page_size: usize) {
+        let half = page_size / 2;
+        self.selected = self.selected.saturating_sub(half);
+    }
+
     /// 選択中のノードを展開する
     ///
     /// ディレクトリの場合は展開し、ファイルの場合は何もしない。
@@ -177,6 +319,16 @@ impl TreeState {
         } else {
             // 親ディレクトリに移動
             self.select_parent();
+        }
+    }
+
+    /// 指定パスのノードを選択する
+    pub(crate) fn select_path(&mut self, path: &PathBuf) {
+        for (i, node) in self.visible_nodes.iter().enumerate() {
+            if &node.path == path {
+                self.selected = i;
+                return;
+            }
         }
     }
 
@@ -236,6 +388,11 @@ impl TreeState {
 
     /// 可視ノードを再帰的に収集する
     fn collect_visible_nodes(&mut self, node: &TreeNode, git_status: Option<GitStatus>) {
+        // フィルタがある場合は、このノードまたは子孫がマッチするかチェック
+        if self.filter_query.is_some() && !self.node_or_descendants_match(node) {
+            return;
+        }
+
         self.visible_nodes.push(VisibleNode {
             name: node.name.clone(),
             path: node.path.clone(),
@@ -243,7 +400,12 @@ impl TreeState {
             kind: node.kind,
             expanded: node.expanded,
             git_status,
+            git_summary: None, // 後で update_git_status で設定
             has_children: node.has_children(),
+            is_executable: node.is_executable,
+            symlink_target: node.symlink_target.clone(),
+            size: node.size,
+            mtime: node.mtime,
         });
 
         if node.expanded {
@@ -254,12 +416,18 @@ impl TreeState {
     }
 
     /// Git ステータスを更新する
-    pub(crate) fn update_git_status<F>(&mut self, get_status: F)
+    pub(crate) fn update_git_status<F, S>(&mut self, get_status: F, get_summary: S)
     where
         F: Fn(&PathBuf) -> Option<GitStatus>,
+        S: Fn(&PathBuf) -> GitStatusSummary,
     {
         for node in &mut self.visible_nodes {
             node.git_status = get_status(&node.path);
+            // ディレクトリの場合はサマリを設定
+            if node.kind == NodeKind::Directory {
+                let summary = get_summary(&node.path);
+                node.git_summary = if summary.is_empty() { None } else { Some(summary) };
+            }
         }
     }
 
@@ -278,6 +446,84 @@ impl TreeState {
         if self.selected >= self.scroll_offset + visible_height {
             self.scroll_offset = self.selected - visible_height + 1;
         }
+    }
+
+    /// フィルタを設定する（fuzzy マッチ対応）
+    pub(crate) fn set_filter(&mut self, query: &str) {
+        self.filter_query = Some(query.to_string());
+        self.rebuild_visible_nodes();
+        self.selected = 0;
+        self.scroll_offset = 0;
+    }
+
+    /// フィルタをクリアする
+    pub(crate) fn clear_filter(&mut self) {
+        self.filter_query = None;
+        self.rebuild_visible_nodes();
+    }
+
+    /// フィルタがアクティブかどうかを返す
+    pub(crate) fn has_filter(&self) -> bool {
+        self.filter_query.is_some()
+    }
+
+    /// 展開されているパスのリストを取得する
+    pub(crate) fn get_expanded_paths(&self) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        Self::collect_expanded_paths(&self.root, &mut paths);
+        paths
+    }
+
+    /// 再帰的に展開されているパスを収集する
+    fn collect_expanded_paths(node: &TreeNode, paths: &mut Vec<PathBuf>) {
+        if node.expanded && node.kind == NodeKind::Directory {
+            paths.push(node.path.clone());
+            for child in &node.children {
+                Self::collect_expanded_paths(child, paths);
+            }
+        }
+    }
+
+    /// 指定されたパスを展開する
+    pub(crate) fn expand_paths(&mut self, paths: &[PathBuf]) {
+        for path in paths {
+            self.set_expanded(path, true);
+        }
+        self.rebuild_visible_nodes();
+    }
+
+    /// ノードがフィルタにマッチするかを判定する（fuzzy マッチ）
+    fn matches_filter(&self, node: &TreeNode) -> bool {
+        match &self.filter_query {
+            Some(query) => {
+                let pattern = Pattern::new(
+                    query,
+                    CaseMatching::Ignore,
+                    Normalization::Smart,
+                    AtomKind::Fuzzy,
+                );
+                let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
+                let mut buf = Vec::new();
+                let haystack = nucleo::Utf32Str::new(&node.name, &mut buf);
+                pattern.score(haystack, &mut matcher).is_some()
+            }
+            None => true,
+        }
+    }
+
+    /// ノードまたはその子孫がフィルタにマッチするかを判定する
+    fn node_or_descendants_match(&self, node: &TreeNode) -> bool {
+        if self.matches_filter(node) {
+            return true;
+        }
+
+        for child in &node.children {
+            if self.node_or_descendants_match(child) {
+                return true;
+            }
+        }
+
+        false
     }
 }
 

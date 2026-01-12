@@ -3,12 +3,16 @@
 //! `ignore` クレートを使用してファイルシステムからツリーを構築する。
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::Path;
 
 use ignore::WalkBuilder;
 
 use super::{
     NodeKind,
+    SortConfig,
+    SortDirection,
+    SortOrder,
     TreeNode,
 };
 
@@ -19,8 +23,12 @@ use super::{
 pub(crate) struct TreeBuilder {
     /// 隠しファイルを表示するか
     show_hidden: bool,
+    /// gitignore されたファイルを表示するか
+    show_ignored: bool,
     /// 最大深さ（None で無制限）
     max_depth: Option<usize>,
+    /// ソート設定
+    sort_config: SortConfig,
 }
 
 impl Default for TreeBuilder {
@@ -32,7 +40,7 @@ impl Default for TreeBuilder {
 impl TreeBuilder {
     /// 新しい `TreeBuilder` を作成する
     pub(crate) fn new() -> Self {
-        Self { show_hidden: false, max_depth: None }
+        Self { show_hidden: false, show_ignored: false, max_depth: None, sort_config: SortConfig::new() }
     }
 
     /// 隠しファイルの表示設定を変更する
@@ -41,10 +49,22 @@ impl TreeBuilder {
         self
     }
 
+    /// gitignore されたファイルの表示設定を変更する
+    pub(crate) fn show_ignored(mut self, show: bool) -> Self {
+        self.show_ignored = show;
+        self
+    }
+
     /// 最大深さを設定する
     #[allow(dead_code)]
     pub(crate) fn max_depth(mut self, depth: Option<usize>) -> Self {
         self.max_depth = depth;
+        self
+    }
+
+    /// ソート設定を変更する
+    pub(crate) fn sort_config(mut self, config: SortConfig) -> Self {
+        self.sort_config = config;
         self
     }
 
@@ -70,9 +90,9 @@ impl TreeBuilder {
         // ignore::WalkBuilder で走査
         let walker = WalkBuilder::new(&root_path)
             .hidden(!self.show_hidden)
-            .git_ignore(true)
-            .git_global(true)
-            .git_exclude(true)
+            .git_ignore(!self.show_ignored)
+            .git_global(!self.show_ignored)
+            .git_exclude(!self.show_ignored)
             .max_depth(self.max_depth)
             .sort_by_file_path(|a, b| {
                 // ディレクトリを先に、その後ファイル名でソート
@@ -127,7 +147,26 @@ impl TreeBuilder {
             // 深さを計算
             let depth = path.strip_prefix(&root_path).map(|p| p.components().count()).unwrap_or(0);
 
-            let node = TreeNode::new(name, path.to_path_buf(), kind, depth);
+            // 実行可能フラグを取得（Unix 系のみ）
+            let is_executable = is_executable_file(&path);
+
+            // シンボリックリンクのターゲットを取得
+            let symlink_target = if kind == NodeKind::Symlink {
+                fs::read_link(&path).ok().map(|t| t.to_string_lossy().to_string())
+            } else {
+                None
+            };
+
+            // ファイルメタデータを取得
+            let (size, mtime) = fs::metadata(&path)
+                .map(|m| (m.len(), m.modified().ok()))
+                .unwrap_or((0, None));
+
+            let mut node = TreeNode::new(name, path.to_path_buf(), kind, depth);
+            node.is_executable = is_executable;
+            node.symlink_target = symlink_target;
+            node.size = size;
+            node.mtime = mtime;
 
             // ディレクトリの場合はマップに追加（将来の子の親になる可能性）
             if kind == NodeKind::Directory {
@@ -158,30 +197,85 @@ impl TreeBuilder {
         }
 
         // ルートの子をソート
+        let sort_config = self.sort_config;
         if let Some(root) = nodes.get_mut(&root_path) {
-            Self::sort_children(root);
+            Self::sort_children(root, &sort_config);
         }
 
         nodes.remove(&root_path)
     }
 
-    /// 子ノードを再帰的にソートする（ディレクトリ優先、名前順）
-    fn sort_children(node: &mut TreeNode) {
+    /// 子ノードを再帰的にソートする
+    fn sort_children(node: &mut TreeNode, config: &SortConfig) {
         node.children.sort_by(|a, b| {
-            let a_is_dir = a.kind == NodeKind::Directory;
-            let b_is_dir = b.kind == NodeKind::Directory;
+            // ディレクトリ優先オプション
+            if config.directories_first {
+                let a_is_dir = a.kind == NodeKind::Directory;
+                let b_is_dir = b.kind == NodeKind::Directory;
 
-            match (a_is_dir, b_is_dir) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.name.cmp(&b.name),
+                match (a_is_dir, b_is_dir) {
+                    (true, false) => return std::cmp::Ordering::Less,
+                    (false, true) => return std::cmp::Ordering::Greater,
+                    _ => {}
+                }
+            }
+
+            // ソート順に応じた比較
+            let ordering = match config.order {
+                SortOrder::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortOrder::Size => {
+                    let a_size = fs::metadata(&a.path).map(|m| m.len()).unwrap_or(0);
+                    let b_size = fs::metadata(&b.path).map(|m| m.len()).unwrap_or(0);
+                    a_size.cmp(&b_size)
+                }
+                SortOrder::Mtime => {
+                    let a_mtime = fs::metadata(&a.path)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                    let b_mtime = fs::metadata(&b.path)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                    a_mtime.cmp(&b_mtime)
+                }
+                SortOrder::Type => {
+                    let a_is_dir = a.kind == NodeKind::Directory;
+                    let b_is_dir = b.kind == NodeKind::Directory;
+                    a_is_dir.cmp(&b_is_dir).reverse()
+                }
+                SortOrder::Extension => {
+                    let a_ext = a.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    let b_ext = b.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    a_ext.to_lowercase().cmp(&b_ext.to_lowercase())
+                }
+            };
+
+            // 降順の場合は反転
+            match config.direction {
+                SortDirection::Ascending => ordering,
+                SortDirection::Descending => ordering.reverse(),
             }
         });
 
         for child in &mut node.children {
-            Self::sort_children(child);
+            Self::sort_children(child, config);
         }
     }
+}
+
+/// ファイルが実行可能かどうかを判定する
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::metadata(path)
+        .map(|m| !m.is_dir() && (m.permissions().mode() & 0o111) != 0)
+        .unwrap_or(false)
+}
+
+/// ファイルが実行可能かどうかを判定する（Windows では常に false）
+#[cfg(not(unix))]
+fn is_executable_file(_path: &Path) -> bool {
+    false
 }
 
 #[cfg(test)]
