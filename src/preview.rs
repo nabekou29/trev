@@ -48,8 +48,10 @@ pub(crate) enum PreviewContent {
 pub(crate) struct PreviewState {
     /// プレビューコンテンツ
     pub(crate) content: PreviewContent,
-    /// スクロールオフセット
+    /// 縦スクロールオフセット
     pub(crate) scroll_offset: usize,
+    /// 横スクロールオフセット
+    pub(crate) horizontal_scroll: usize,
     /// 現在プレビュー中のパス
     current_path: Option<PathBuf>,
     /// シンタックスハイライター
@@ -68,6 +70,7 @@ impl PreviewState {
         Self {
             content: PreviewContent::Empty,
             scroll_offset: 0,
+            horizontal_scroll: 0,
             current_path: None,
             highlighter: Highlighter::new(),
         }
@@ -82,6 +85,7 @@ impl PreviewState {
 
         self.current_path = Some(path.to_path_buf());
         self.scroll_offset = 0;
+        self.horizontal_scroll = 0;
 
         self.content = self.load_content(path);
     }
@@ -154,6 +158,31 @@ impl PreviewState {
             PreviewContent::Text { highlighted_lines, total_lines }
         }
     }
+
+    /// プレビューをスクロールダウン
+    pub(crate) fn scroll_down(&mut self, lines: usize) {
+        if let PreviewContent::Text { total_lines, .. } = &self.content {
+            let max_offset = total_lines.saturating_sub(1);
+            self.scroll_offset = (self.scroll_offset + lines).min(max_offset);
+        }
+    }
+
+    /// プレビューをスクロールアップ
+    pub(crate) fn scroll_up(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+    }
+
+    /// プレビューを右にスクロール
+    pub(crate) fn scroll_right(&mut self, cols: usize) {
+        if matches!(&self.content, PreviewContent::Text { .. }) {
+            self.horizontal_scroll = self.horizontal_scroll.saturating_add(cols);
+        }
+    }
+
+    /// プレビューを左にスクロール
+    pub(crate) fn scroll_left(&mut self, cols: usize) {
+        self.horizontal_scroll = self.horizontal_scroll.saturating_sub(cols);
+    }
 }
 
 #[cfg(test)]
@@ -198,5 +227,58 @@ mod tests {
         };
 
         assert_that!(*children_count, eq(2));
+    }
+
+    #[rstest]
+    fn scroll_down_increases_offset() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, "line1\nline2\nline3\nline4\nline5").unwrap();
+
+        let mut state = PreviewState::new();
+        state.load(&file_path);
+
+        assert_that!(state.scroll_offset, eq(0));
+
+        state.scroll_down(2);
+        assert_that!(state.scroll_offset, eq(2));
+
+        state.scroll_down(1);
+        assert_that!(state.scroll_offset, eq(3));
+    }
+
+    #[rstest]
+    fn scroll_up_decreases_offset() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, "line1\nline2\nline3\nline4\nline5").unwrap();
+
+        let mut state = PreviewState::new();
+        state.load(&file_path);
+        state.scroll_down(3);
+
+        state.scroll_up(1);
+        assert_that!(state.scroll_offset, eq(2));
+
+        state.scroll_up(1);
+        assert_that!(state.scroll_offset, eq(1));
+    }
+
+    #[rstest]
+    fn scroll_does_not_exceed_bounds() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, "line1\nline2\nline3").unwrap();
+
+        let mut state = PreviewState::new();
+        state.load(&file_path);
+
+        // 末尾を超えない
+        state.scroll_down(100);
+        assert_that!(state.scroll_offset, eq(2)); // total_lines - 1
+
+        // 先頭を超えない
+        state.scroll_up(100);
+        assert_that!(state.scroll_offset, eq(0));
     }
 }
