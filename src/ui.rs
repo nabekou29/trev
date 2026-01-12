@@ -33,22 +33,29 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
     let [main_area, status_area] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(frame.area());
 
-    let [tree_area, preview_area] =
-        Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
-            .areas(main_area);
+    if app.show_preview {
+        // プレビュー表示時: ツリー40% + プレビュー60%
+        let [tree_area, preview_area] =
+            Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
+                .areas(main_area);
 
-    // TreeView を描画
-    let tree_view = TreeView::new(&app.tree);
-    frame.render_widget(&tree_view, tree_area);
+        // TreeView を描画
+        let tree_view = TreeView::new(&app.tree, &app.marked_paths, app.clipboard.as_ref());
+        frame.render_widget(&tree_view, tree_area);
 
-    // PreviewView を描画
-    let title = app.tree.selected_node().map(|n| n.name.clone());
+        // PreviewView を描画
+        let title = app.tree.selected_node().map(|n| n.name.clone());
 
-    let mut preview_view = PreviewView::new(&app.preview);
-    if let Some(t) = title {
-        preview_view = preview_view.title(t);
+        let mut preview_view = PreviewView::new(&app.preview);
+        if let Some(t) = title {
+            preview_view = preview_view.title(t);
+        }
+        frame.render_widget(&preview_view, preview_area);
+    } else {
+        // プレビュー非表示時: ツリー100%
+        let tree_view = TreeView::new(&app.tree, &app.marked_paths, app.clipboard.as_ref());
+        frame.render_widget(&tree_view, main_area);
     }
-    frame.render_widget(&preview_view, preview_area);
 
     // StatusBar を描画
     let status_bar = StatusBar::new(app);
