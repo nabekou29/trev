@@ -107,8 +107,17 @@ impl StatusBar<'_> {
         // クエリ（カーソル位置を反映）
         let (before, after) = self.app.search_input.split_at_cursor();
         let query_before = Span::styled(before, bg_style);
-        let cursor = Span::styled("_", bg_style.add_modifier(Modifier::SLOW_BLINK));
-        let query_after = Span::styled(after, bg_style);
+
+        // カーソル位置の文字を反転表示（文末なら空白）
+        let cursor_style = bg_style.add_modifier(Modifier::REVERSED);
+        let (cursor_char, remaining) = if let Some(c) = after.chars().next() {
+            let char_len = c.len_utf8();
+            (c.to_string(), &after[char_len..])
+        } else {
+            (" ".to_string(), "")
+        };
+        let cursor = Span::styled(cursor_char, cursor_style);
+        let query_after = Span::styled(remaining, bg_style);
 
         // ヒント
         let hint = Span::styled(
