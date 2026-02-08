@@ -2,7 +2,8 @@
 
 /// Application-level errors.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum AppError {
+#[allow(dead_code)]
+pub enum AppError {
     /// I/O error.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

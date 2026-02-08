@@ -24,6 +24,5 @@ fn main() -> Result<()> {
         )
         .init();
 
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(app::run(args))
+    app::run(&args)
 }

@@ -104,8 +104,11 @@ indexing_slicing = "deny"
 float_arithmetic = "deny"
 
 # === Security ===
-transmute_ptr_to_ptr = "forbid"
-cast_ptr_alignment = "forbid"
+# NOTE: Using "deny" instead of "forbid" because any "forbid" in [lints.clippy]
+# causes clippy to treat ALL group lints as command-line forbid level, which
+# conflicts with derive macros that emit #[allow(clippy::pedantic)] (e.g. clap).
+transmute_ptr_to_ptr = "deny"
+cast_ptr_alignment = "deny"
 
 # === Output control ===
 print_stdout = "deny"

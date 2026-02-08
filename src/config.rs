@@ -11,43 +11,43 @@ use serde::{
 };
 
 /// Application configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub(crate) struct Config {
+pub struct Config {
     /// Sort settings.
-    pub(crate) sort: SortConfig,
+    pub sort: SortConfig,
     /// Display settings.
-    pub(crate) display: DisplayConfig,
+    pub display: DisplayConfig,
 }
 
 /// Sort configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub(crate) struct SortConfig {
+pub struct SortConfig {
     /// Sort order field.
-    pub(crate) order: SortOrder,
+    pub order: SortOrder,
     /// Sort direction.
-    pub(crate) direction: SortDirection,
+    pub direction: SortDirection,
     /// Whether directories come first.
-    pub(crate) directories_first: bool,
+    pub directories_first: bool,
 }
 
 /// Display configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub(crate) struct DisplayConfig {
+pub struct DisplayConfig {
     /// Show hidden files.
-    pub(crate) show_hidden: bool,
+    pub show_hidden: bool,
     /// Show gitignored files.
-    pub(crate) show_ignored: bool,
+    pub show_ignored: bool,
     /// Show preview panel.
-    pub(crate) show_preview: bool,
+    pub show_preview: bool,
 }
 
 /// Sort order variants.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum SortOrder {
+pub enum SortOrder {
     /// Sort by name.
     #[default]
     Name,
@@ -64,21 +64,12 @@ pub(crate) enum SortOrder {
 /// Sort direction.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum SortDirection {
+pub enum SortDirection {
     /// Ascending order.
     #[default]
     Asc,
     /// Descending order.
     Desc,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            sort: SortConfig::default(),
-            display: DisplayConfig::default(),
-        }
-    }
 }
 
 impl Default for SortConfig {
@@ -107,10 +98,8 @@ impl Config {
     /// Returns default config if the file does not exist.
     pub(crate) fn load() -> anyhow::Result<Self> {
         let path = Self::config_path();
-        if let Some(path) = path {
-            if path.exists() {
-                return Self::load_from(&path);
-            }
+        if let Some(path) = path.filter(|p| p.exists()) {
+            return Self::load_from(&path);
         }
         Ok(Self::default())
     }

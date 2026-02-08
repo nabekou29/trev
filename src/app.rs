@@ -6,7 +6,7 @@ use crate::cli::Args;
 use crate::config::Config;
 
 /// Run the application.
-pub(crate) async fn run(args: Args) -> Result<()> {
+pub fn run(args: &Args) -> Result<()> {
     let _config = Config::load()?;
     tracing::info!(?args, "starting trev");
     // TODO: Initialize terminal, event loop, and UI

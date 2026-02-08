@@ -10,43 +10,43 @@ use clap::{
 /// Fast TUI file viewer with tree view and Neovim integration.
 #[derive(Debug, Parser)]
 #[command(name = "trev", version, about)]
-pub(crate) struct Args {
+pub struct Args {
     /// Directory to open.
     #[arg(default_value = ".")]
-    pub(crate) path: PathBuf,
+    pub path: PathBuf,
 
     /// Show hidden files.
     #[arg(short = 'a', long)]
-    pub(crate) show_hidden: bool,
+    pub show_hidden: bool,
 
     /// Run as daemon (enable IPC server).
     #[arg(long)]
-    pub(crate) daemon: bool,
+    pub daemon: bool,
 
     /// Emit selected path to stdout on exit.
     #[arg(long)]
-    pub(crate) emit: bool,
+    pub emit: bool,
 
     /// Output format for --emit.
     #[arg(long, default_value = "lines")]
-    pub(crate) emit_format: EmitFormat,
+    pub emit_format: EmitFormat,
 
     /// Default action when opening a file (used with --daemon).
     #[arg(long, default_value = "edit")]
-    pub(crate) action: OpenAction,
+    pub action: OpenAction,
 
     /// Reveal a specific path on startup.
     #[arg(long)]
-    pub(crate) reveal: Option<PathBuf>,
+    pub reveal: Option<PathBuf>,
 
     /// Subcommand.
     #[command(subcommand)]
-    pub(crate) command: Option<Command>,
+    pub command: Option<Command>,
 }
 
 /// Emit output format.
 #[derive(Debug, Clone, Default, clap::ValueEnum)]
-pub(crate) enum EmitFormat {
+pub enum EmitFormat {
     /// One path per line.
     #[default]
     Lines,
@@ -58,7 +58,7 @@ pub(crate) enum EmitFormat {
 
 /// Action for opening files in editor.
 #[derive(Debug, Clone, Default, clap::ValueEnum)]
-pub(crate) enum OpenAction {
+pub enum OpenAction {
     /// Open in current window.
     #[default]
     Edit,
@@ -72,7 +72,7 @@ pub(crate) enum OpenAction {
 
 /// Subcommands for controlling a running daemon.
 #[derive(Debug, Subcommand)]
-pub(crate) enum Command {
+pub enum Command {
     /// Control a running trev daemon.
     Ctl {
         #[command(subcommand)]
@@ -82,7 +82,7 @@ pub(crate) enum Command {
 
 /// Control actions for a running daemon.
 #[derive(Debug, Subcommand)]
-pub(crate) enum CtlAction {
+pub enum CtlAction {
     /// Reveal a file in the tree.
     Reveal {
         /// Path to reveal.

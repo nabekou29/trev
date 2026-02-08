@@ -1,6 +1,6 @@
 //! UI layout and rendering.
 
-pub(crate) mod modal;
-pub(crate) mod preview_view;
-pub(crate) mod status_bar;
-pub(crate) mod tree_view;
+pub mod modal;
+pub mod preview_view;
+pub mod status_bar;
+pub mod tree_view;

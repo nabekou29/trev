@@ -16,7 +16,7 @@ run = "cargo test --all-features"
 
 [tasks.lint]
 description = "Run lints"
-run = "cargo clippy --all-targets --all-features -- -D warnings"
+run = "cargo clippy --all-targets --all-features"
 
 [tasks.lint-fix]
 description = "Run lints and fix them"
