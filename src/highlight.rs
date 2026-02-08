@@ -1,0 +1,1 @@
+//! Syntax highlighting using syntect.

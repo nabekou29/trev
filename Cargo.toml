@@ -1,0 +1,132 @@
+[package]
+name = "trev"
+version = "0.1.0"
+edition = "2024"
+description = "Fast TUI file viewer with tree view, syntax-highlighted preview, and Neovim integration"
+license = "MIT"
+repository = "https://github.com/nabekou29/trev"
+keywords = ["tui", "file-manager", "tree-view", "neovim", "terminal"]
+categories = ["command-line-utilities"]
+readme = "README.md"
+
+[dependencies]
+# TUI
+ratatui = "0.30"
+crossterm = "0.29"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Syntax highlighting
+syntect = "5"
+two-face = "0.4"
+
+# Fuzzy search
+nucleo = "0.5"
+
+# File system
+ignore = "0.4"
+walkdir = "2"
+globset = "0.4"
+
+# Clipboard
+arboard = "3"
+
+# File icons
+devicons = "0.6"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Config
+directories = "6"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+unicode-width = "0.2"
+pathdiff = "0.2"
+
+[dev-dependencies]
+googletest = "0.14"
+rstest = "0.26"
+tempfile = "3"
+tokio-test = "0.4"
+
+[lints.rust]
+# === Forbidden ===
+unsafe_code = "forbid"
+future_incompatible = { level = "deny", priority = -1 }
+
+# === Required ===
+unused_must_use = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+# === Recommended ===
+missing_debug_implementations = "warn"
+missing_copy_implementations = "warn"
+unreachable_pub = "warn"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unused_import_braces = "warn"
+unused_qualifications = "warn"
+
+# === Advanced ===
+single_use_lifetimes = "warn"
+unused_lifetimes = "warn"
+elided_lifetimes_in_paths = "warn"
+explicit_outlives_requirements = "warn"
+
+[lints.clippy]
+# === Group rules ===
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+
+# === Restriction (selected) ===
+panic = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+float_arithmetic = "deny"
+
+# === Security ===
+transmute_ptr_to_ptr = "forbid"
+cast_ptr_alignment = "forbid"
+
+# === Output control ===
+print_stdout = "deny"
+print_stderr = "deny"
+dbg_macro = "deny"
+
+# === Performance ===
+large_stack_arrays = "deny"
+large_types_passed_by_value = "deny"
+redundant_clone = "deny"
+
+# === Function design ===
+too_many_arguments = "deny"
+cognitive_complexity = "deny"
+
+# === Allowed ===
+multiple_crate_versions = "allow"
+missing_errors_doc = "allow"
+missing_docs_in_private_items = "allow"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

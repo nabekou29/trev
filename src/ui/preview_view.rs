@@ -1,0 +1,1 @@
+//! Preview panel widget.

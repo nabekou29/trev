@@ -1,0 +1,23 @@
+# Rust
+debug/
+target/
+**/*.rs.bk
+*.pdb
+**/mutants.out*/
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+
+# OS
+.DS_Store
+._*
+Thumbs.db
+*~
+.fuse_hidden*
+.Trash-*
+.nfs*
