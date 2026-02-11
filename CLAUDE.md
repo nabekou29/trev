@@ -3,6 +3,8 @@
 Auto-generated from all feature plans. Last updated: 2026-02-11
 
 ## Active Technologies
+- Rust 2024 edition, nightly-2026-01-24 toolchain + ratatui 0.30, crossterm 0.29, tokio (full), devicons 0.6 (011-tui-ratatui)
+- N/A (ファイルシステム読み取りのみ) (011-tui-ratatui)
 
 - Rust 2024 edition, nightly-2026-01-24 + ignore 0.4 (WalkBuilder), tokio (background tasks), serde + serde_json (シリアライズ) (002-core-tree)
 
@@ -22,6 +24,7 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 2024 edition, nightly-2026-01-24: Follow standard conventions
 
 ## Recent Changes
+- 011-tui-ratatui: Added Rust 2024 edition, nightly-2026-01-24 toolchain + ratatui 0.30, crossterm 0.29, tokio (full), devicons 0.6
 
 - 002-core-tree: Added Rust 2024 edition, nightly-2026-01-24 + ignore 0.4 (WalkBuilder), tokio (background tasks), serde + serde_json (シリアライズ)
 

@@ -1,17 +1,33 @@
 //! Application action definitions.
 
-/// Placeholder for the top-level action enum.
-///
-/// Will be expanded as features are implemented.
-#[derive(Debug, Clone)]
+/// Top-level application actions.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     /// Tree-related actions.
     Tree(TreeAction),
+    /// Quit the application.
+    Quit,
 }
 
 /// Actions that modify the tree state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TreeAction {
-    /// Placeholder variant to satisfy non-empty enum requirement.
-    Noop,
+    /// Move cursor one line down.
+    MoveDown,
+    /// Move cursor one line up.
+    MoveUp,
+    /// Expand directory or open file.
+    Expand,
+    /// Collapse directory or move to parent.
+    Collapse,
+    /// Toggle expand/collapse state.
+    ToggleExpand,
+    /// Jump to first visible node.
+    JumpFirst,
+    /// Jump to last visible node.
+    JumpLast,
+    /// Move cursor half a page down.
+    HalfPageDown,
+    /// Move cursor half a page up.
+    HalfPageUp,
 }

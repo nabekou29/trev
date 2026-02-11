@@ -956,7 +956,7 @@ mod tests {
     // =========================================================================
 
     #[test]
-    #[ignore] // Performance test — run with `cargo test -- --ignored`
+    #[ignore = "Performance test — run with `cargo test -- --ignored`"]
     fn test_perf_visible_nodes_10k_entries() {
         let root_path = Path::new("/perf/root");
 

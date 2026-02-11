@@ -267,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Performance test — run with `cargo test -- --ignored`
+    #[ignore = "Performance test — run with `cargo test -- --ignored`"]
     fn test_perf_build_1k_files() {
         let dir = TempDir::new().unwrap();
 

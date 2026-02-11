@@ -10,6 +10,7 @@ use clap::{
 /// Fast TUI file viewer with tree view and Neovim integration.
 #[derive(Debug, Parser)]
 #[command(name = "trev", version, about)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Args {
     /// Directory to open.
     #[arg(default_value = ".")]
@@ -18,6 +19,10 @@ pub struct Args {
     /// Show hidden files.
     #[arg(short = 'a', long)]
     pub show_hidden: bool,
+
+    /// Disable file icons (Nerd Fonts).
+    #[arg(long)]
+    pub no_icons: bool,
 
     /// Run as daemon (enable IPC server).
     #[arg(long)]

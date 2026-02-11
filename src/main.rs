@@ -11,12 +11,14 @@ mod input;
 mod ipc;
 mod preview;
 mod state;
+mod terminal;
 mod tree;
 mod ui;
 
 use anyhow::Result;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = cli::Args::parse_args();
 
     tracing_subscriber::fmt()
@@ -26,5 +28,5 @@ fn main() -> Result<()> {
         )
         .init();
 
-    app::run(&args)
+    app::run(&args).await
 }
