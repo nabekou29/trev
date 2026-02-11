@@ -18,13 +18,13 @@
 
 **Purpose**: plan.md に基づくモジュール構造の準備
 
-- [ ] T001 Create `src/state.rs` with `pub mod tree;` declaration
-- [ ] T002 Create empty `src/state/tree.rs` with module doc comment
-- [ ] T003 [P] Create `src/tree/sort.rs` with module doc comment
-- [ ] T004 [P] Create `src/tree/search_index.rs` with module doc comment
-- [ ] T005 [P] Create `src/action.rs` with placeholder `Action` enum
-- [ ] T006 Add `mod state;` and `mod action;` to `src/main.rs`, add `pub mod sort;` and `pub mod search_index;` to `src/tree.rs`
-- [ ] T007 Verify build passes with `mise run build && mise run lint`
+- [x] T001 Create `src/state.rs` with `pub mod tree;` declaration
+- [x] T002 Create empty `src/state/tree.rs` with module doc comment
+- [x] T003 [P] Create `src/tree/sort.rs` with module doc comment
+- [x] T004 [P] Create `src/tree/search_index.rs` with module doc comment
+- [x] T005 [P] Create `src/action.rs` with placeholder `Action` enum
+- [x] T006 Add `mod state;` and `mod action;` to `src/main.rs`, add `pub mod sort;` and `pub mod search_index;` to `src/tree.rs`
+- [x] T007 Verify build passes with `mise run build && mise run lint`
 
 ---
 
@@ -32,15 +32,15 @@
 
 **Purpose**: 全ユーザーストーリーが依存するデータ型の定義
 
-- [ ] T008 Implement `TreeNode` struct in `src/state/tree.rs` (name, path, is_dir, is_symlink, size, modified, children, is_expanded)
-- [ ] T009 Implement `ChildrenState` enum in `src/state/tree.rs` (NotLoaded, Loading, Loaded)
-- [ ] T010 [P] Implement `SortOrder` and `SortDirection` enums in `src/state/tree.rs` with Serialize/Deserialize
-- [ ] T011 [P] Implement `VisibleNode<'a>` struct in `src/state/tree.rs` (node reference + depth)
-- [ ] T012 [P] Implement `NodeInfo` struct in `src/state/tree.rs` with Serialize/Deserialize
-- [ ] T013 Implement `TreeState` struct in `src/state/tree.rs` (root, cursor, sort_order, sort_direction, directories_first)
-- [ ] T014 [P] Implement `TreeAction` enum in `src/action.rs` per data-model.md
-- [ ] T015 Move `SortOrder` and `SortDirection` from `src/config.rs` to `src/state/tree.rs` and re-export or update `config.rs` to use state types
-- [ ] T016 Verify build and lint pass with `mise run build && mise run lint`
+- [x] T008 Implement `TreeNode` struct in `src/state/tree.rs` (name, path, is_dir, is_symlink, size, modified, children, is_expanded)
+- [x] T009 Implement `ChildrenState` enum in `src/state/tree.rs` (NotLoaded, Loading, Loaded)
+- [x] T010 [P] Implement `SortOrder` and `SortDirection` enums in `src/state/tree.rs` with Serialize/Deserialize
+- [x] T011 [P] Implement `VisibleNode<'a>` struct in `src/state/tree.rs` (node reference + depth)
+- [x] T012 [P] Implement `NodeInfo` struct in `src/state/tree.rs` with Serialize/Deserialize
+- [x] T013 Implement `TreeState` struct in `src/state/tree.rs` (root, cursor, sort_order, sort_direction, directories_first)
+- [x] T014 [P] Implement `TreeAction` enum in `src/action.rs` per data-model.md
+- [x] T015 Move `SortOrder` and `SortDirection` from `src/config.rs` to `src/state/tree.rs` and re-export or update `config.rs` to use state types
+- [x] T016 Verify build and lint pass with `mise run build && mise run lint`
 
 **Checkpoint**: Core types defined — user story implementation can begin
 
@@ -56,18 +56,18 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T017 [P] [US1] Test: `build()` returns root with immediate children, subdirectories have `NotLoaded` in `src/tree/builder.rs`
-- [ ] T018 [P] [US1] Test: `.gitignore` entries are excluded from tree in `src/tree/builder.rs`
-- [ ] T019 [P] [US1] Test: `show_hidden = false` excludes dotfiles, `show_hidden = true` includes them in `src/tree/builder.rs`
-- [ ] T020 [P] [US1] Test: non-existent path returns error in `src/tree/builder.rs`
-- [ ] T021 [P] [US1] Test: symlinks are included with `is_symlink = true` in `src/tree/builder.rs`
+- [x] T017 [P] [US1] Test: `build()` returns root with immediate children, subdirectories have `NotLoaded` in `src/tree/builder.rs`
+- [x] T018 [P] [US1] Test: `.gitignore` entries are excluded from tree in `src/tree/builder.rs`
+- [x] T019 [P] [US1] Test: `show_hidden = false` excludes dotfiles, `show_hidden = true` includes them in `src/tree/builder.rs`
+- [x] T020 [P] [US1] Test: non-existent path returns error in `src/tree/builder.rs`
+- [x] T021 [P] [US1] Test: symlinks are included with `is_symlink = true` in `src/tree/builder.rs`
 
 ### Implementation for User Story 1 (TDD: Green phase)
 
-- [ ] T022 [US1] Implement `TreeBuilder::new(show_hidden, show_ignored)` in `src/tree/builder.rs`
-- [ ] T023 [US1] Implement `TreeBuilder::build(&self, root_path: &Path) -> Result<TreeNode>` using `ignore::WalkBuilder` with `max_depth(Some(1))` in `src/tree/builder.rs`
-- [ ] T024 [US1] Implement `TreeBuilder::load_children(&self, dir_path: &Path) -> Result<Vec<TreeNode>>` for single-level child loading in `src/tree/builder.rs`
-- [ ] T025 [US1] Verify all US1 tests pass with `mise run test`
+- [x] T022 [US1] Implement `TreeBuilder::new(show_hidden, show_ignored)` in `src/tree/builder.rs`
+- [x] T023 [US1] Implement `TreeBuilder::build(&self, root_path: &Path) -> Result<TreeNode>` using `ignore::WalkBuilder` with `max_depth(Some(1))` in `src/tree/builder.rs`
+- [x] T024 [US1] Implement `TreeBuilder::load_children(&self, dir_path: &Path) -> Result<Vec<TreeNode>>` for single-level child loading in `src/tree/builder.rs`
+- [x] T025 [US1] Verify all US1 tests pass with `mise run test`
 
 **Checkpoint**: TreeBuilder works — can build a tree from any directory
 
@@ -81,17 +81,17 @@
 
 ### Tests for User Story 3 (TDD: Red phase)
 
-- [ ] T026 [P] [US3] Test: `SortOrder::Name` + `Asc` sorts case-insensitively in `src/tree/sort.rs`
-- [ ] T027 [P] [US3] Test: `SortOrder::Size` + `Desc` sorts by size descending in `src/tree/sort.rs`
-- [ ] T028 [P] [US3] Test: `directories_first = true` groups directories at top in `src/tree/sort.rs`
-- [ ] T029 [P] [US3] Test: sort applies recursively to nested `Loaded` children in `src/tree/sort.rs`
-- [ ] T030 [P] [US3] Test: `modified = None` entries sort to end in `src/tree/sort.rs`
+- [x] T026 [P] [US3] Test: `SortOrder::Name` + `Asc` sorts case-insensitively in `src/tree/sort.rs`
+- [x] T027 [P] [US3] Test: `SortOrder::Size` + `Desc` sorts by size descending in `src/tree/sort.rs`
+- [x] T028 [P] [US3] Test: `directories_first = true` groups directories at top in `src/tree/sort.rs`
+- [x] T029 [P] [US3] Test: sort applies recursively to nested `Loaded` children in `src/tree/sort.rs`
+- [x] T030 [P] [US3] Test: `modified = None` entries sort to end in `src/tree/sort.rs`
 
 ### Implementation for User Story 3 (TDD: Green phase)
 
-- [ ] T031 [US3] Implement `sort_children(children: &mut [TreeNode], order, direction, dirs_first)` in `src/tree/sort.rs`
-- [ ] T032 [US3] Implement `apply_sort_recursive(node: &mut TreeNode, order, direction, dirs_first)` for recursive sort in `src/tree/sort.rs`
-- [ ] T033 [US3] Verify all US3 tests pass with `mise run test`
+- [x] T031 [US3] Implement `sort_children(children: &mut [TreeNode], order, direction, dirs_first)` in `src/tree/sort.rs`
+- [x] T032 [US3] Implement `apply_sort_recursive(node: &mut TreeNode, order, direction, dirs_first)` for recursive sort in `src/tree/sort.rs`
+- [x] T033 [US3] Verify all US3 tests pass with `mise run test`
 
 **Checkpoint**: Sort works — trees can be sorted by any criteria
 
@@ -105,16 +105,16 @@
 
 ### Tests for User Story 4 (TDD: Red phase)
 
-- [ ] T034 [P] [US4] Test: root-only expanded tree returns depth=0 entries in `src/state/tree.rs`
-- [ ] T035 [P] [US4] Test: expanded subdirectory includes children with correct depth in `src/state/tree.rs`
-- [ ] T036 [P] [US4] Test: collapsed directory excludes children from visible nodes in `src/state/tree.rs`
-- [ ] T037 [P] [US4] Test: `NotLoaded` directory is visible but has no children in output in `src/state/tree.rs`
+- [x] T034 [P] [US4] Test: root-only expanded tree returns depth=0 entries in `src/state/tree.rs`
+- [x] T035 [P] [US4] Test: expanded subdirectory includes children with correct depth in `src/state/tree.rs`
+- [x] T036 [P] [US4] Test: collapsed directory excludes children from visible nodes in `src/state/tree.rs`
+- [x] T037 [P] [US4] Test: `NotLoaded` directory is visible but has no children in output in `src/state/tree.rs`
 
 ### Implementation for User Story 4 (TDD: Green phase)
 
-- [ ] T038 [US4] Implement `TreeState::visible_nodes(&self) -> Vec<VisibleNode<'_>>` with DFS walk in `src/state/tree.rs`
-- [ ] T039 [US4] Implement `TreeState::visible_node_count(&self) -> usize` helper in `src/state/tree.rs`
-- [ ] T040 [US4] Verify all US4 tests pass with `mise run test`
+- [x] T038 [US4] Implement `TreeState::visible_nodes(&self) -> Vec<VisibleNode<'_>>` with DFS walk in `src/state/tree.rs`
+- [x] T039 [US4] Implement `TreeState::visible_node_count(&self) -> usize` helper in `src/state/tree.rs`
+- [x] T040 [US4] Verify all US4 tests pass with `mise run test`
 
 **Checkpoint**: Visible nodes generation works — UI can render a flat list from tree state
 
@@ -128,17 +128,17 @@
 
 ### Tests for User Story 2 (TDD: Red phase)
 
-- [ ] T041 [P] [US2] Test: `set_children()` changes `NotLoaded` → `Loaded` and visible_nodes reflects children in `src/state/tree.rs`
-- [ ] T042 [P] [US2] Test: `toggle_expand()` on expanded dir collapses it (children hidden in visible_nodes) in `src/state/tree.rs`
-- [ ] T043 [P] [US2] Test: `toggle_expand()` on collapsed `Loaded` dir re-expands without reload in `src/state/tree.rs`
-- [ ] T044 [P] [US2] Test: `set_children_error()` reverts `Loading` → `NotLoaded` in `src/state/tree.rs`
+- [x] T041 [P] [US2] Test: `set_children()` changes `NotLoaded` → `Loaded` and visible_nodes reflects children in `src/state/tree.rs`
+- [x] T042 [P] [US2] Test: `toggle_expand()` on expanded dir collapses it (children hidden in visible_nodes) in `src/state/tree.rs`
+- [x] T043 [P] [US2] Test: `toggle_expand()` on collapsed `Loaded` dir re-expands without reload in `src/state/tree.rs`
+- [x] T044 [P] [US2] Test: `set_children_error()` reverts `Loading` → `NotLoaded` in `src/state/tree.rs`
 
 ### Implementation for User Story 2 (TDD: Green phase)
 
-- [ ] T045 [US2] Implement `TreeState::set_children(&mut self, path: &Path, children: Vec<TreeNode>)` — find node by path, set `Loaded`, apply sort in `src/state/tree.rs`
-- [ ] T046 [US2] Implement `TreeState::set_children_error(&mut self, path: &Path)` — revert to `NotLoaded` in `src/state/tree.rs`
-- [ ] T047 [US2] Implement `TreeState::toggle_expand(&mut self, index: usize)` in `src/state/tree.rs`
-- [ ] T048 [US2] Verify all US2 tests pass with `mise run test`
+- [x] T045 [US2] Implement `TreeState::set_children(&mut self, path: &Path, children: Vec<TreeNode>)` — find node by path, set `Loaded`, apply sort in `src/state/tree.rs`
+- [x] T046 [US2] Implement `TreeState::set_children_error(&mut self, path: &Path)` — revert to `NotLoaded` in `src/state/tree.rs`
+- [x] T047 [US2] Implement `TreeState::toggle_expand(&mut self, index: usize)` in `src/state/tree.rs`
+- [x] T048 [US2] Verify all US2 tests pass with `mise run test`
 
 **Checkpoint**: Lazy loading works — directories can be expanded/collapsed with async child loading
 
@@ -152,23 +152,23 @@
 
 ### Tests for User Story 5 (TDD: Red phase)
 
-- [ ] T049 [P] [US5] Test: cursor at 0, move up stays at 0 (bound check) in `src/state/tree.rs`
-- [ ] T050 [P] [US5] Test: cursor at last, move down stays at last in `src/state/tree.rs`
-- [ ] T051 [P] [US5] Test: `half_page_down(viewport_height=20)` moves cursor by 10 in `src/state/tree.rs`
-- [ ] T052 [P] [US5] Test: `jump_to_first` sets cursor to 0, `jump_to_last` sets cursor to last in `src/state/tree.rs`
-- [ ] T053 [P] [US5] Test: collapse hides cursor target → cursor moves to collapsed directory in `src/state/tree.rs`
-- [ ] T054 [P] [US5] Test: collapse on file → cursor moves to parent directory in `src/state/tree.rs`
+- [x] T049 [P] [US5] Test: cursor at 0, move up stays at 0 (bound check) in `src/state/tree.rs`
+- [x] T050 [P] [US5] Test: cursor at last, move down stays at last in `src/state/tree.rs`
+- [x] T051 [P] [US5] Test: `half_page_down(viewport_height=20)` moves cursor by 10 in `src/state/tree.rs`
+- [x] T052 [P] [US5] Test: `jump_to_first` sets cursor to 0, `jump_to_last` sets cursor to last in `src/state/tree.rs`
+- [x] T053 [P] [US5] Test: collapse hides cursor target → cursor moves to collapsed directory in `src/state/tree.rs`
+- [x] T054 [P] [US5] Test: collapse on file → cursor moves to parent directory in `src/state/tree.rs`
 
 ### Implementation for User Story 5 (TDD: Green phase)
 
-- [ ] T055 [US5] Implement `TreeState::move_cursor(&mut self, delta: i32)` with bound check in `src/state/tree.rs`
-- [ ] T056 [US5] Implement `TreeState::move_cursor_to(&mut self, index: usize)` in `src/state/tree.rs`
-- [ ] T057 [US5] Implement `TreeState::jump_to_first(&mut self)` and `jump_to_last(&mut self)` in `src/state/tree.rs`
-- [ ] T058 [US5] Implement `TreeState::half_page_down(&mut self, viewport_height: usize)` and `half_page_up` in `src/state/tree.rs`
-- [ ] T059 [US5] Implement `TreeState::collapse(&mut self)` — collapse current or move to parent in `src/state/tree.rs`
-- [ ] T060 [US5] Implement `TreeState::expand_or_open(&mut self)` — expand dir or signal file open in `src/state/tree.rs`
-- [ ] T061 [US5] Implement `TreeState::current_node_info(&self) -> Option<NodeInfo>` for IPC/serialization in `src/state/tree.rs`
-- [ ] T062 [US5] Verify all US5 tests pass with `mise run test`
+- [x] T055 [US5] Implement `TreeState::move_cursor(&mut self, delta: i32)` with bound check in `src/state/tree.rs`
+- [x] T056 [US5] Implement `TreeState::move_cursor_to(&mut self, index: usize)` in `src/state/tree.rs`
+- [x] T057 [US5] Implement `TreeState::jump_to_first(&mut self)` and `jump_to_last(&mut self)` in `src/state/tree.rs`
+- [x] T058 [US5] Implement `TreeState::half_page_down(&mut self, viewport_height: usize)` and `half_page_up` in `src/state/tree.rs`
+- [x] T059 [US5] Implement `TreeState::collapse(&mut self)` — collapse current or move to parent in `src/state/tree.rs`
+- [x] T060 [US5] Implement `TreeState::expand_or_open(&mut self)` — expand dir or signal file open in `src/state/tree.rs`
+- [x] T061 [US5] Implement `TreeState::current_node_info(&self) -> Option<NodeInfo>` for IPC/serialization in `src/state/tree.rs`
+- [x] T062 [US5] Verify all US5 tests pass with `mise run test`
 
 **Checkpoint**: Cursor management works — all navigation within tree is functional
 
@@ -182,17 +182,17 @@
 
 ### Tests for User Story 6 (TDD: Red phase)
 
-- [ ] T063 [P] [US6] Test: `SearchIndex::add_entry()` and `entries()` return added entries in `src/tree/search_index.rs`
-- [ ] T064 [P] [US6] Test: `is_complete()` returns false initially, true after marking complete in `src/tree/search_index.rs`
-- [ ] T065 [P] [US6] Test: `find_children(parent_path)` returns direct children only in `src/tree/search_index.rs`
-- [ ] T066 [P] [US6] Test: `.gitignore` entries are excluded from index (show_ignored=false) in `src/tree/search_index.rs`
+- [x] T063 [P] [US6] Test: `SearchIndex::add_entry()` and `entries()` return added entries in `src/tree/search_index.rs`
+- [x] T064 [P] [US6] Test: `is_complete()` returns false initially, true after marking complete in `src/tree/search_index.rs`
+- [x] T065 [P] [US6] Test: `find_children(parent_path)` returns direct children only in `src/tree/search_index.rs`
+- [x] T066 [P] [US6] Test: `.gitignore` entries are excluded from index (show_ignored=false) in `src/tree/search_index.rs`
 
 ### Implementation for User Story 6 (TDD: Green phase)
 
-- [ ] T067 [US6] Implement `SearchEntry` struct in `src/tree/search_index.rs`
-- [ ] T068 [US6] Implement `SearchIndex` struct with `add_entry`, `entries`, `is_complete`, `mark_complete`, `find_children` in `src/tree/search_index.rs`
-- [ ] T069 [US6] Implement `build_search_index(root_path, show_hidden, show_ignored) -> SearchIndex` using `ignore::WalkBuilder` full scan in `src/tree/search_index.rs`
-- [ ] T070 [US6] Verify all US6 tests pass with `mise run test`
+- [x] T067 [US6] Implement `SearchEntry` struct in `src/tree/search_index.rs`
+- [x] T068 [US6] Implement `SearchIndex` struct with `add_entry`, `entries`, `is_complete`, `mark_complete`, `find_children` in `src/tree/search_index.rs`
+- [x] T069 [US6] Implement `build_search_index(root_path, show_hidden, show_ignored) -> SearchIndex` using `ignore::WalkBuilder` full scan in `src/tree/search_index.rs`
+- [x] T070 [US6] Verify all US6 tests pass with `mise run test`
 
 **Checkpoint**: SearchIndex works — background scan builds a flat index of all files
 
@@ -202,11 +202,11 @@
 
 **Purpose**: 統合確認とパフォーマンス検証
 
-- [ ] T071 Integration test: TreeBuilder → sort → visible_nodes end-to-end in `src/state/tree.rs`
-- [ ] T072 Integration test: TreeBuilder + set_children + cursor navigation end-to-end in `src/state/tree.rs`
-- [ ] T073 [P] Performance test (ignored by default): visible_nodes < 16ms @ 10k entries in `src/state/tree.rs`
-- [ ] T074 [P] Performance test (ignored by default): TreeBuilder::build < 100ms @ 1k files in `src/tree/builder.rs`
-- [ ] T075 Run full validation: `mise run build && mise run test && mise run lint`
+- [x] T071 Integration test: TreeBuilder → sort → visible_nodes end-to-end in `src/state/tree.rs`
+- [x] T072 Integration test: TreeBuilder + set_children + cursor navigation end-to-end in `src/state/tree.rs`
+- [x] T073 [P] Performance test (ignored by default): visible_nodes < 16ms @ 10k entries in `src/state/tree.rs`
+- [x] T074 [P] Performance test (ignored by default): TreeBuilder::build < 100ms @ 1k files in `src/tree/builder.rs`
+- [x] T075 Run full validation: `mise run build && mise run test && mise run lint`
 
 ---
 

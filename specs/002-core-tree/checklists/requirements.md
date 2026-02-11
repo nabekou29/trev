@@ -35,5 +35,5 @@
 
 ## リスク・依存
 
-- [ ] バックグラウンド走査と遅延読み込みの統合タイミング → plan フェーズで設計
-- [ ] SearchIndex の具体的なデータ構造 → plan フェーズで決定（Vec<PathBuf> vs HashMap 等）
+- [x] バックグラウンド走査と遅延読み込みの統合タイミング → research.md R-003 で設計済み
+- [x] SearchIndex の具体的なデータ構造 → data-model.md で Vec<SearchEntry> に決定済み

@@ -1,5 +1,6 @@
 //! trev - Fast TUI file viewer with tree view and Neovim integration.
 
+mod action;
 mod app;
 mod cli;
 mod config;
@@ -9,6 +10,7 @@ mod highlight;
 mod input;
 mod ipc;
 mod preview;
+mod state;
 mod tree;
 mod ui;
 
