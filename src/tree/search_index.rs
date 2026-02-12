@@ -134,11 +134,12 @@ mod tests {
     use std::fs;
 
     use googletest::prelude::*;
+    use rstest::*;
     use tempfile::TempDir;
 
     use super::*;
 
-    #[test]
+    #[rstest]
     fn test_add_entry_and_entries() -> Result<()> {
         let mut index = SearchIndex::new();
         index.add_entry(SearchEntry {
@@ -151,7 +152,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_is_complete_lifecycle() -> Result<()> {
         let mut index = SearchIndex::new();
         verify_that!(index.is_complete(), eq(false))?;
@@ -160,7 +161,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_find_children_returns_direct_children_only() -> Result<()> {
         let mut index = SearchIndex::new();
         index.add_entry(SearchEntry {
@@ -187,7 +188,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_build_search_index_scans_all_files() -> Result<()> {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("file1.txt"), "").unwrap();
@@ -201,7 +202,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_build_search_index_respects_gitignore() -> Result<()> {
         let dir = TempDir::new().unwrap();
 

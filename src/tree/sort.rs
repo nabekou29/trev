@@ -99,6 +99,7 @@ mod tests {
     use std::path::Path;
 
     use googletest::prelude::*;
+    use rstest::*;
 
     use super::*;
     use crate::state::tree::ChildrenState;
@@ -137,7 +138,7 @@ mod tests {
 
     // --- US3 Tests ---
 
-    #[test]
+    #[rstest]
     fn test_sort_name_asc_case_insensitive() -> Result<()> {
         let mut nodes = vec![
             file_node("Charlie.txt", 0, None),
@@ -149,7 +150,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_sort_size_desc() -> Result<()> {
         let mut nodes = vec![
             file_node("small.txt", 10, None),
@@ -161,7 +162,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_sort_directories_first() -> Result<()> {
         let mut nodes = vec![
             file_node("z_file.txt", 0, None),
@@ -174,7 +175,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_sort_recursive() -> Result<()> {
         let inner_children = vec![
             file_node("b.txt", 0, None),
@@ -198,7 +199,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_sort_modified_none_at_end() -> Result<()> {
         let now = std::time::SystemTime::now();
         let earlier = now

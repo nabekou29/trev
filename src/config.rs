@@ -122,10 +122,11 @@ impl Config {
 #[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::expect_used)]
 mod tests {
     use googletest::prelude::*;
+    use rstest::*;
 
     use super::*;
 
-    #[test]
+    #[rstest]
     fn test_default_config() -> Result<()> {
         let config = Config::default();
         verify_that!(config.sort.directories_first, eq(true))?;
@@ -134,7 +135,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_config_deserialize() -> Result<()> {
         let toml_str = r#"
 [sort]

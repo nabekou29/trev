@@ -207,15 +207,13 @@ impl TreeState {
     /// Count of visible nodes (without allocating the full list).
     pub fn visible_node_count(&self) -> usize {
         fn count_visible(node: &TreeNode) -> usize {
-            let mut count = 1;
-            if node.is_expanded
-                && let Some(children) = node.children.as_loaded()
-            {
-                for child in children {
-                    count += count_visible(child);
-                }
-            }
-            count
+            1 + node
+                .children
+                .as_loaded()
+                .filter(|_| node.is_expanded)
+                .map_or(0, |children| {
+                    children.iter().map(count_visible).sum()
+                })
         }
 
         self.root
@@ -266,14 +264,14 @@ impl TreeState {
             return Vec::new();
         };
 
-        let mut paths = Vec::new();
-        for child in children {
-            if child.is_dir && matches!(child.children, ChildrenState::NotLoaded) {
-                child.children = ChildrenState::Loading;
-                paths.push(child.path.clone());
-            }
-        }
-        paths
+        children
+            .iter_mut()
+            .filter(|c| c.is_dir && matches!(c.children, ChildrenState::NotLoaded))
+            .map(|c| {
+                c.children = ChildrenState::Loading;
+                c.path.clone()
+            })
+            .collect()
     }
 
     /// Revert a directory to `NotLoaded` state (e.g., on load error).
@@ -393,14 +391,14 @@ impl TreeState {
         }
 
         // Move to parent directory
-        if let Some(parent_path) = path.parent() {
-            let visible_after = self.visible_nodes();
-            for (i, vn) in visible_after.iter().enumerate() {
-                if vn.node.path == parent_path {
-                    self.cursor = i;
-                    return true;
-                }
-            }
+        if let Some(parent_path) = path.parent()
+            && let Some(idx) = self
+                .visible_nodes()
+                .iter()
+                .position(|vn| vn.node.path == parent_path)
+        {
+            self.cursor = idx;
+            return true;
         }
 
         false
@@ -483,23 +481,22 @@ fn collect_visible<'a>(node: &'a TreeNode, depth: usize, result: &mut Vec<Visibl
 
 /// Recursively search for a node by path.
 fn find_node_recursive<'a>(node: &'a mut TreeNode, path: &Path) -> Option<&'a mut TreeNode> {
-    if let Some(children) = node.children.as_loaded_mut() {
-        for child in children {
-            if child.path == path {
-                return Some(child);
-            }
-            if path.starts_with(&child.path) {
-                return find_node_recursive(child, path);
-            }
+    node.children.as_loaded_mut()?.iter_mut().find_map(|child| {
+        if child.path == path {
+            Some(child)
+        } else if path.starts_with(&child.path) {
+            find_node_recursive(child, path)
+        } else {
+            None
         }
-    }
-    None
+    })
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::expect_used)]
 mod tests {
     use googletest::prelude::*;
+    use rstest::*;
 
     use super::*;
 
@@ -557,7 +554,7 @@ mod tests {
 
     // --- NodeInfo ---
 
-    #[test]
+    #[rstest]
     fn test_to_node_info() -> Result<()> {
         let node = file_node("test.txt", Path::new("/root"));
         let info = node.to_node_info();
@@ -568,7 +565,7 @@ mod tests {
 
     // --- ChildrenState ---
 
-    #[test]
+    #[rstest]
     fn test_children_state_as_loaded() -> Result<()> {
         let not_loaded = ChildrenState::NotLoaded;
         verify_that!(not_loaded.as_loaded().is_some(), eq(false))?;
@@ -585,7 +582,7 @@ mod tests {
     // US4: Visible Nodes
     // =========================================================================
 
-    #[test]
+    #[rstest]
     fn test_visible_nodes_root_only_expanded() -> Result<()> {
         let root = Path::new("/test/root");
         let state = state_with_children(vec![
@@ -599,7 +596,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_visible_nodes_expanded_subdir_includes_children() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
@@ -624,7 +621,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_visible_nodes_collapsed_dir_excludes_children() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
@@ -641,7 +638,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_visible_nodes_not_loaded_dir_shows_self_only() -> Result<()> {
         let root = Path::new("/test/root");
         let not_loaded_dir = TreeNode {
@@ -666,7 +663,7 @@ mod tests {
     // US2: Lazy Loading (set_children, toggle_expand, set_children_error)
     // =========================================================================
 
-    #[test]
+    #[rstest]
     fn test_set_children_loads_and_reflects_in_visible() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir = TreeNode {
@@ -698,7 +695,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_toggle_expand_collapses_expanded_dir() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
@@ -718,7 +715,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_toggle_expand_reexpands_loaded_dir_without_reload() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
@@ -738,7 +735,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_set_children_error_reverts_to_not_loaded() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir = TreeNode {
@@ -767,7 +764,7 @@ mod tests {
     // Prefetch
     // =========================================================================
 
-    #[test]
+    #[rstest]
     fn test_set_children_no_auto_expand_preserves_collapsed() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir = TreeNode {
@@ -796,7 +793,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_start_prefetch_transitions_not_loaded_dirs() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_a = TreeNode {
@@ -838,7 +835,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_start_prefetch_skips_already_loaded_and_loading() -> Result<()> {
         let root = Path::new("/test/root");
         let loaded_dir = dir_node("loaded", root, vec![]);
@@ -859,7 +856,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_expand_or_open_already_loaded_returns_already_loaded() {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
@@ -878,7 +875,7 @@ mod tests {
     // US5: Cursor Management
     // =========================================================================
 
-    #[test]
+    #[rstest]
     fn test_move_cursor_at_top_stays_at_top() -> Result<()> {
         let root = Path::new("/test/root");
         let mut state = state_with_children(vec![
@@ -890,7 +887,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_move_cursor_at_bottom_stays_at_bottom() -> Result<()> {
         let root = Path::new("/test/root");
         let mut state = state_with_children(vec![
@@ -903,7 +900,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_half_page_down() -> Result<()> {
         let root = Path::new("/test/root");
         let children: Vec<TreeNode> = (0..50)
@@ -916,7 +913,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_jump_to_first_and_last() -> Result<()> {
         let root = Path::new("/test/root");
         let children: Vec<TreeNode> = (0..10)
@@ -932,7 +929,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_collapse_on_expanded_dir_collapses() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
@@ -949,7 +946,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_collapse_on_file_moves_to_parent() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
@@ -970,7 +967,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_expand_or_open_on_file_returns_open() {
         let root = Path::new("/test/root");
         let mut state = state_with_children(vec![
@@ -980,7 +977,7 @@ mod tests {
         assert_eq!(result, Some(ExpandResult::OpenFile(root.join("test.txt"))));
     }
 
-    #[test]
+    #[rstest]
     fn test_expand_or_open_on_not_loaded_dir_returns_needs_load() {
         let root = Path::new("/test/root");
         let subdir = TreeNode {
@@ -998,7 +995,7 @@ mod tests {
         assert_eq!(result, Some(ExpandResult::NeedsLoad(root.join("subdir"))));
     }
 
-    #[test]
+    #[rstest]
     fn test_current_node_info() -> Result<()> {
         let root = Path::new("/test/root");
         let state = state_with_children(vec![
@@ -1014,7 +1011,7 @@ mod tests {
     // Integration: TreeBuilder → sort → visible_nodes end-to-end
     // =========================================================================
 
-    #[test]
+    #[rstest]
     fn test_integration_builder_sort_visible_nodes() {
         use tempfile::TempDir;
         use std::fs;
@@ -1045,7 +1042,7 @@ mod tests {
     // Integration: TreeBuilder + set_children + cursor navigation end-to-end
     // =========================================================================
 
-    #[test]
+    #[rstest]
     fn test_integration_builder_set_children_cursor() {
         use tempfile::TempDir;
         use std::fs;
@@ -1099,7 +1096,7 @@ mod tests {
     // Performance: visible_nodes < 16ms @ 10k entries
     // =========================================================================
 
-    #[test]
+    #[rstest]
     #[ignore = "Performance test — run with `cargo test -- --ignored`"]
     fn test_perf_visible_nodes_10k_entries() {
         let root_path = Path::new("/perf/root");

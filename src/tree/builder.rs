@@ -142,6 +142,7 @@ mod tests {
 
     use googletest::prelude::*;
     use googletest::Result;
+    use rstest::*;
     use tempfile::TempDir;
 
     use super::*;
@@ -163,7 +164,7 @@ mod tests {
 
     // --- US1 Tests ---
 
-    #[test]
+    #[rstest]
     fn test_build_returns_root_with_children_subdirs_not_loaded() -> Result<()> {
         let dir = create_test_dir();
         let builder = TreeBuilder::new(false, false);
@@ -184,7 +185,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_build_gitignore_excludes_target() -> Result<()> {
         let dir = TempDir::new().unwrap();
         // Create .gitignore and target/
@@ -210,7 +211,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_build_show_hidden_false_excludes_dotfiles() -> Result<()> {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(".hidden"), "").unwrap();
@@ -226,7 +227,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_build_show_hidden_true_includes_dotfiles() -> Result<()> {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(".hidden"), "").unwrap();
@@ -242,7 +243,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     fn test_build_nonexistent_path_returns_error() -> Result<()> {
         let builder = TreeBuilder::new(false, false);
         let result = builder.build(Path::new("/nonexistent/path/abc123"));
@@ -251,7 +252,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
+    #[rstest]
     fn test_build_symlink_detected() -> Result<()> {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("real.txt"), "content").unwrap();
@@ -266,7 +267,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[rstest]
     #[ignore = "Performance test — run with `cargo test -- --ignored`"]
     fn test_perf_build_1k_files() {
         let dir = TempDir::new().unwrap();
