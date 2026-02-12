@@ -237,7 +237,9 @@ impl TreeState {
     /// Set loaded children for a directory at the given path.
     ///
     /// Applies current sort settings to the children.
-    pub fn set_children(&mut self, path: &Path, mut children: Vec<TreeNode>) {
+    /// When `auto_expand` is true, the directory is automatically expanded (user-initiated loads).
+    /// When false, the current `is_expanded` state is preserved (prefetch loads).
+    pub fn set_children(&mut self, path: &Path, mut children: Vec<TreeNode>, auto_expand: bool) {
         let order = self.sort_order;
         let direction = self.sort_direction;
         let dirs_first = self.directories_first;
@@ -246,8 +248,32 @@ impl TreeState {
 
         if let Some(node) = self.find_node_mut(path) {
             node.children = ChildrenState::Loaded(children);
-            node.is_expanded = true;
+            if auto_expand {
+                node.is_expanded = true;
+            }
         }
+    }
+
+    /// Prepare prefetching for child directories at the given path.
+    ///
+    /// For each child directory with `NotLoaded` children, transitions them
+    /// to `Loading` state and returns their paths for background loading.
+    pub fn start_prefetch(&mut self, path: &Path) -> Vec<PathBuf> {
+        let Some(node) = self.find_node_mut(path) else {
+            return Vec::new();
+        };
+        let Some(children) = node.children.as_loaded_mut() else {
+            return Vec::new();
+        };
+
+        let mut paths = Vec::new();
+        for child in children {
+            if child.is_dir && matches!(child.children, ChildrenState::NotLoaded) {
+                child.children = ChildrenState::Loading;
+                paths.push(child.path.clone());
+            }
+        }
+        paths
     }
 
     /// Revert a directory to `NotLoaded` state (e.g., on load error).
@@ -260,8 +286,11 @@ impl TreeState {
 
     /// Toggle the expand/collapse state of the node at the given visible index.
     ///
-    /// Returns the path if the node needs children loaded (was `NotLoaded`).
-    pub fn toggle_expand(&mut self, index: usize) -> Option<PathBuf> {
+    /// Returns an [`ExpandResult`] indicating what happened:
+    /// - `NeedsLoad` if children need to be loaded from disk
+    /// - `AlreadyLoaded` if the directory was expanded with pre-loaded children
+    /// - `None` if collapsed, not a directory, or already loading
+    pub fn toggle_expand(&mut self, index: usize) -> Option<ExpandResult> {
         let visible = self.visible_nodes();
         let vnode = visible.get(index)?;
         let path = vnode.node.path.clone();
@@ -282,9 +311,10 @@ impl TreeState {
             match &node.children {
                 ChildrenState::NotLoaded => {
                     node.children = ChildrenState::Loading;
-                    Some(path)
+                    Some(ExpandResult::NeedsLoad(path))
                 }
-                ChildrenState::Loaded(_) | ChildrenState::Loading => None,
+                ChildrenState::Loaded(_) => Some(ExpandResult::AlreadyLoaded(path)),
+                ChildrenState::Loading => None,
             }
         }
     }
@@ -403,7 +433,8 @@ impl TreeState {
                 node.children = ChildrenState::Loading;
                 Some(ExpandResult::NeedsLoad(path))
             }
-            ChildrenState::Loaded(_) | ChildrenState::Loading => None,
+            ChildrenState::Loaded(_) => Some(ExpandResult::AlreadyLoaded(path)),
+            ChildrenState::Loading => None,
         }
     }
 
@@ -434,6 +465,8 @@ pub enum ExpandResult {
     NeedsLoad(PathBuf),
     /// The node is a file and should be opened.
     OpenFile(PathBuf),
+    /// The directory was expanded and its children are already loaded (e.g., via prefetch).
+    AlreadyLoaded(PathBuf),
 }
 
 /// Recursively collect visible nodes via DFS.
@@ -656,7 +689,7 @@ mod tests {
         state.set_children(&subdir_path, vec![
             file_node("child1.txt", &subdir_path),
             file_node("child2.txt", &subdir_path),
-        ]);
+        ], true);
 
         let visible = state.visible_nodes();
         // subdir + 2 children
@@ -697,9 +730,9 @@ mod tests {
         let mut state = state_with_children(vec![subdir]);
         verify_that!(state.visible_node_count(), eq(1))?;
 
-        // Toggle should expand, return None (no load needed since already Loaded)
+        // Toggle should expand, return AlreadyLoaded (no disk load needed)
         let result = state.toggle_expand(0);
-        verify_that!(result.is_none(), eq(true))?;
+        assert_eq!(result, Some(ExpandResult::AlreadyLoaded(root.join("subdir"))));
 
         verify_that!(state.visible_node_count(), eq(2))?; // subdir + child
         Ok(())
@@ -728,6 +761,117 @@ mod tests {
         verify_that!(node.children.as_loaded().is_some(), eq(false))?;
         verify_that!(node.is_expanded, eq(false))?;
         Ok(())
+    }
+
+    // =========================================================================
+    // Prefetch
+    // =========================================================================
+
+    #[test]
+    fn test_set_children_no_auto_expand_preserves_collapsed() -> Result<()> {
+        let root = Path::new("/test/root");
+        let subdir = TreeNode {
+            name: "subdir".to_string(),
+            path: root.join("subdir"),
+            is_dir: true,
+            is_symlink: false,
+            size: 0,
+            modified: None,
+            children: ChildrenState::Loading,
+            is_expanded: false, // collapsed (prefetch scenario)
+        };
+        let mut state = state_with_children(vec![subdir]);
+
+        let subdir_path = root.join("subdir");
+        state.set_children(&subdir_path, vec![
+            file_node("child.txt", &subdir_path),
+        ], false);
+
+        // Children loaded but directory stays collapsed
+        let visible = state.visible_nodes();
+        verify_that!(visible.len(), eq(1))?; // only subdir visible
+        let node = visible[0].node;
+        verify_that!(node.children.as_loaded().is_some(), eq(true))?;
+        verify_that!(node.is_expanded, eq(false))?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_start_prefetch_transitions_not_loaded_dirs() -> Result<()> {
+        let root = Path::new("/test/root");
+        let subdir_a = TreeNode {
+            name: "dir_a".to_string(),
+            path: root.join("dir_a"),
+            is_dir: true,
+            is_symlink: false,
+            size: 0,
+            modified: None,
+            children: ChildrenState::NotLoaded,
+            is_expanded: false,
+        };
+        let subdir_b = TreeNode {
+            name: "dir_b".to_string(),
+            path: root.join("dir_b"),
+            is_dir: true,
+            is_symlink: false,
+            size: 0,
+            modified: None,
+            children: ChildrenState::NotLoaded,
+            is_expanded: false,
+        };
+        let mut state = state_with_children(vec![
+            subdir_a,
+            subdir_b,
+            file_node("file.txt", root),
+        ]);
+
+        let paths = state.start_prefetch(&PathBuf::from("/test/root"));
+        // Only directories with NotLoaded, not files
+        verify_that!(paths.len(), eq(2))?;
+        verify_that!(paths.contains(&root.join("dir_a")), eq(true))?;
+        verify_that!(paths.contains(&root.join("dir_b")), eq(true))?;
+
+        // Verify they are now Loading
+        let visible = state.visible_nodes();
+        assert!(matches!(visible[0].node.children, ChildrenState::Loading));
+        assert!(matches!(visible[1].node.children, ChildrenState::Loading));
+        Ok(())
+    }
+
+    #[test]
+    fn test_start_prefetch_skips_already_loaded_and_loading() -> Result<()> {
+        let root = Path::new("/test/root");
+        let loaded_dir = dir_node("loaded", root, vec![]);
+        let loading_dir = TreeNode {
+            name: "loading".to_string(),
+            path: root.join("loading"),
+            is_dir: true,
+            is_symlink: false,
+            size: 0,
+            modified: None,
+            children: ChildrenState::Loading,
+            is_expanded: false,
+        };
+        let mut state = state_with_children(vec![loaded_dir, loading_dir]);
+
+        let paths = state.start_prefetch(&PathBuf::from("/test/root"));
+        verify_that!(paths.len(), eq(0))?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_expand_or_open_already_loaded_returns_already_loaded() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let subdir = dir_node("subdir", root, vec![
+            file_node("child.txt", &subdir_path),
+        ]);
+        // Collapsed but Loaded (prefetched)
+        let mut state = state_with_children(vec![subdir]);
+        let result = state.expand_or_open();
+        assert_eq!(result, Some(ExpandResult::AlreadyLoaded(root.join("subdir"))));
+        // Now expanded with children visible
+        assert_eq!(state.visible_node_count(), 2);
     }
 
     // =========================================================================
@@ -921,13 +1065,13 @@ mod tests {
         assert_eq!(state.visible_node_count(), 2);
 
         // Expand subdir (index 0) — should need load
-        let needs_load = state.toggle_expand(0);
-        assert!(needs_load.is_some());
+        let result = state.toggle_expand(0);
+        assert!(matches!(result, Some(ExpandResult::NeedsLoad(_))));
 
         // Simulate loading children
         let subdir_path = state.visible_nodes()[0].node.path.clone();
         let loaded_children = builder.load_children(&subdir_path).unwrap();
-        state.set_children(&subdir_path, loaded_children);
+        state.set_children(&subdir_path, loaded_children, true);
 
         // Now visible: subdir, child.txt, file1.txt
         assert_eq!(state.visible_node_count(), 3);

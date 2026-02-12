@@ -1,6 +1,9 @@
 //! Application state machine and main event loop.
 
-use std::path::PathBuf;
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -79,6 +82,8 @@ pub struct ChildrenLoadResult {
     pub path: PathBuf,
     /// Loaded children, or an error message.
     pub children: Result<Vec<TreeNode>, String>,
+    /// Whether this was a background prefetch (one-level-ahead load).
+    pub prefetch: bool,
 }
 
 /// Convert config sort order to tree state sort order.
@@ -137,6 +142,15 @@ pub async fn run(args: &Args) -> Result<()> {
     let (children_tx, mut children_rx) =
         tokio::sync::mpsc::channel::<ChildrenLoadResult>(64);
 
+    // Prefetch root's child directories for instant first expansion.
+    trigger_prefetch(
+        &mut state.tree_state,
+        &root_path,
+        &children_tx,
+        show_hidden,
+        show_ignored,
+    );
+
     // Initialize terminal.
     let mut terminal = crate::terminal::init();
 
@@ -158,7 +172,22 @@ pub async fn run(args: &Args) -> Result<()> {
         while let Ok(result) = children_rx.try_recv() {
             match result.children {
                 Ok(children) => {
-                    state.tree_state.set_children(&result.path, children);
+                    let loaded_path = result.path.clone();
+                    let is_prefetch = result.prefetch;
+                    state
+                        .tree_state
+                        .set_children(&result.path, children, !is_prefetch);
+
+                    // Prefetch child directories one level ahead (user-initiated loads only).
+                    if !is_prefetch {
+                        trigger_prefetch(
+                            &mut state.tree_state,
+                            &loaded_path,
+                            &children_tx,
+                            show_hidden,
+                            show_ignored,
+                        );
+                    }
                 }
                 Err(err) => {
                     tracing::warn!(?result.path, %err, "failed to load children");
@@ -261,22 +290,27 @@ fn handle_tree_action(
         }
         TreeAction::Expand => {
             if let Some(result) = state.tree_state.expand_or_open() {
-                match result {
-                    crate::state::tree::ExpandResult::NeedsLoad(path) => {
-                        spawn_load_children(children_tx.clone(), path, show_hidden, show_ignored);
-                    }
-                    crate::state::tree::ExpandResult::OpenFile(_path) => {
-                        // File opening not implemented yet.
-                    }
-                }
+                handle_expand_result(
+                    &result,
+                    &mut state.tree_state,
+                    children_tx,
+                    show_hidden,
+                    show_ignored,
+                );
             }
         }
         TreeAction::Collapse => {
             state.tree_state.collapse();
         }
         TreeAction::ToggleExpand => {
-            if let Some(path) = state.tree_state.toggle_expand(state.tree_state.cursor()) {
-                spawn_load_children(children_tx.clone(), path, show_hidden, show_ignored);
+            if let Some(result) = state.tree_state.toggle_expand(state.tree_state.cursor()) {
+                handle_expand_result(
+                    &result,
+                    &mut state.tree_state,
+                    children_tx,
+                    show_hidden,
+                    show_ignored,
+                );
             }
         }
         TreeAction::JumpFirst => {
@@ -294,12 +328,54 @@ fn handle_tree_action(
     }
 }
 
+/// Handle an expand result: spawn loads or prefetch as appropriate.
+fn handle_expand_result(
+    result: &crate::state::tree::ExpandResult,
+    tree_state: &mut TreeState,
+    children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    show_hidden: bool,
+    show_ignored: bool,
+) {
+    use crate::state::tree::ExpandResult;
+
+    match *result {
+        ExpandResult::NeedsLoad(ref path) => {
+            spawn_load_children(children_tx.clone(), path.clone(), show_hidden, show_ignored, false);
+        }
+        ExpandResult::AlreadyLoaded(ref path) => {
+            // Directory was prefetched — trigger prefetch for its children.
+            trigger_prefetch(tree_state, path, children_tx, show_hidden, show_ignored);
+        }
+        ExpandResult::OpenFile(_) => {
+            // File opening not implemented yet.
+        }
+    }
+}
+
+/// Prefetch child directories one level ahead.
+///
+/// Transitions `NotLoaded` child directories to `Loading` and spawns
+/// background tasks to load their children.
+fn trigger_prefetch(
+    tree_state: &mut TreeState,
+    parent_path: &Path,
+    children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    show_hidden: bool,
+    show_ignored: bool,
+) {
+    let prefetch_paths = tree_state.start_prefetch(parent_path);
+    for path in prefetch_paths {
+        spawn_load_children(children_tx.clone(), path, show_hidden, show_ignored, true);
+    }
+}
+
 /// Spawn a blocking task to load directory children asynchronously.
 fn spawn_load_children(
     tx: tokio::sync::mpsc::Sender<ChildrenLoadResult>,
     path: PathBuf,
     show_hidden: bool,
     show_ignored: bool,
+    prefetch: bool,
 ) {
     tokio::spawn(async move {
         let load_path = path.clone();
@@ -316,7 +392,13 @@ fn spawn_load_children(
         };
 
         // Ignore send error (receiver dropped = app is shutting down).
-        let _ = tx.send(ChildrenLoadResult { path, children }).await;
+        let _ = tx
+            .send(ChildrenLoadResult {
+                path,
+                children,
+                prefetch,
+            })
+            .await;
     });
 }
 
