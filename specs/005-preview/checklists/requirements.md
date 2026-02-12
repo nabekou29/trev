@@ -40,6 +40,6 @@
 
 ## リスク・依存
 
-- [ ] ratatui-image の端末プロトコル自動検出の信頼性 → plan フェーズで検証
-- [ ] resvg による SVG ラスタライズのパフォーマンス → plan フェーズでベンチマーク
-- [ ] 001-user-config との統合（外部コマンド設定フォーマット）→ 001 の plan 完了後に具体化
+- [x] ratatui-image の端末プロトコル自動検出の信頼性 → Medium 信頼性。`Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks())` でフォールバック。halfblocks で常に表示可能
+- [x] resvg による SVG ラスタライズのパフォーマンス → resvg を常時依存として追加。+35クレート、+9秒ビルドだがアイコン100ms未満、複雑SVG 1-3秒で十分高速。SVG → resvg → DynamicImage → ratatui-image のフロー
+- [x] 001-user-config との統合（外部コマンド設定フォーマット）→ ブロッキング依存なし。既存 config.rs の TOML + serde で `[[preview.commands]]` を直接実装可能

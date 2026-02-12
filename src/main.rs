@@ -6,7 +6,7 @@ mod cli;
 mod config;
 mod error;
 mod git;
-mod highlight;
+
 mod input;
 mod ipc;
 mod preview;

@@ -4,9 +4,14 @@ use std::path::{
     Path,
     PathBuf,
 };
+use std::sync::{
+    Arc,
+    Mutex,
+};
 use std::time::Duration;
 
 use anyhow::Result;
+use ratatui_image::picker::Picker;
 use crossterm::event::{
     Event,
     KeyCode,
@@ -15,6 +20,18 @@ use crossterm::event::{
 
 use crate::cli::Args;
 use crate::config::Config;
+use crate::preview::cache::PreviewCache;
+use crate::preview::content::PreviewContent;
+use crate::preview::provider::{
+    LoadContext,
+    PreviewProvider,
+    PreviewRegistry,
+};
+use crate::preview::providers::external::ExternalCmdProvider;
+use crate::preview::providers::fallback::FallbackProvider;
+use crate::preview::providers::image::ImagePreviewProvider;
+use crate::preview::providers::text::TextPreviewProvider;
+use crate::preview::state::PreviewState;
 use crate::state::tree::{
     TreeNode,
     TreeState,
@@ -26,14 +43,24 @@ use crate::tree::builder::TreeBuilder;
 pub struct AppState {
     /// Tree state (cursor, sort, nodes).
     pub tree_state: TreeState,
+    /// Preview display state.
+    pub preview_state: PreviewState,
+    /// Preview content cache (LRU).
+    pub preview_cache: PreviewCache,
+    /// Preview provider registry.
+    pub preview_registry: PreviewRegistry,
     /// Whether the application should quit.
     pub should_quit: bool,
     /// Whether to show file icons (Nerd Fonts).
     pub show_icons: bool,
+    /// Whether the preview panel is visible.
+    pub show_preview: bool,
     /// Current viewport height (tree area rows).
     pub viewport_height: u16,
     /// Scroll state for the tree view.
     pub scroll: ScrollState,
+    /// Shared image picker (terminal graphics protocol).
+    pub image_picker: Arc<Mutex<Picker>>,
 }
 
 /// Scroll position management for the tree view.
@@ -86,6 +113,16 @@ pub struct ChildrenLoadResult {
     pub prefetch: bool,
 }
 
+/// Result of an async preview load operation.
+pub struct PreviewLoadResult {
+    /// Path of the file that was previewed.
+    pub path: PathBuf,
+    /// Provider name that produced this content.
+    pub provider_name: String,
+    /// Loaded preview content.
+    pub content: PreviewContent,
+}
+
 /// Convert config sort order to tree state sort order.
 const fn map_sort_order(order: crate::config::SortOrder) -> crate::state::tree::SortOrder {
     match order {
@@ -106,7 +143,7 @@ const fn map_sort_direction(direction: crate::config::SortDirection) -> crate::s
 }
 
 /// Run the application.
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::too_many_lines)]
 pub async fn run(args: &Args) -> Result<()> {
     let config = Config::load()?;
     tracing::info!(?args, "starting trev");
@@ -129,18 +166,47 @@ pub async fn run(args: &Args) -> Result<()> {
     let mut tree_state = TreeState::new(root, sort_order, sort_direction, directories_first);
     tree_state.apply_sort(sort_order, sort_direction, directories_first);
 
+    // Detect terminal graphics protocol (must be before terminal init/raw mode).
+    // Falls back to halfblocks if detection fails.
+    let picker = Picker::from_query_stdio()
+        .unwrap_or_else(|_| ImagePreviewProvider::fallback_picker());
+    let image_picker = Arc::new(Mutex::new(picker.clone()));
+    let mut providers: Vec<Box<dyn PreviewProvider>> = vec![
+        Box::new(ImagePreviewProvider::new(picker)),
+        Box::new(TextPreviewProvider::new()),
+        Box::new(FallbackProvider::new()),
+    ];
+    if !config.preview.commands.is_empty() {
+        providers.push(Box::new(ExternalCmdProvider::new(
+            config.preview.commands.clone(),
+            config.preview.command_timeout,
+        )));
+    }
+    let preview_registry = PreviewRegistry::new(providers);
+
+    let show_preview = config.display.show_preview;
+
     // Create app state.
     let mut state = AppState {
         tree_state,
+        preview_state: PreviewState::new(),
+        preview_cache: PreviewCache::new(config.preview.cache_size),
+        preview_registry,
         should_quit: false,
         show_icons: !args.no_icons,
+        show_preview,
         viewport_height: 0,
         scroll: ScrollState::new(),
+        image_picker,
     };
 
     // Set up async children load channel.
     let (children_tx, mut children_rx) =
         tokio::sync::mpsc::channel::<ChildrenLoadResult>(64);
+
+    // Set up async preview load channel.
+    let (preview_tx, mut preview_rx) =
+        tokio::sync::mpsc::channel::<PreviewLoadResult>(16);
 
     // Prefetch root's child directories for instant first expansion.
     trigger_prefetch(
@@ -151,8 +217,14 @@ pub async fn run(args: &Args) -> Result<()> {
         show_ignored,
     );
 
+    // Trigger initial preview for the currently selected file.
+    trigger_preview(&mut state, &preview_tx, &config.preview);
+
     // Initialize terminal.
     let mut terminal = crate::terminal::init();
+
+    // Track cursor for change detection.
+    let mut last_cursor = state.tree_state.cursor();
 
     // Main event loop.
     loop {
@@ -165,7 +237,7 @@ pub async fn run(args: &Args) -> Result<()> {
         if crossterm::event::poll(Duration::from_millis(50))?
             && let Event::Key(key) = crossterm::event::read()?
         {
-            handle_key_event(key, &mut state, &children_tx, show_hidden, show_ignored);
+            handle_key_event(key, &mut state, &children_tx, &preview_tx, &config.preview, show_hidden, show_ignored);
         }
 
         // Receive async children load results.
@@ -196,6 +268,28 @@ pub async fn run(args: &Args) -> Result<()> {
             }
         }
 
+        // Receive async preview load results.
+        while let Ok(result) = preview_rx.try_recv() {
+            // Only apply if the path still matches current preview request.
+            let is_current = state
+                .preview_state
+                .current_path
+                .as_deref()
+                .is_some_and(|p| p == result.path);
+            if is_current {
+                state.preview_state.set_content(result.content);
+            }
+        }
+
+        // Trigger preview when cursor changes.
+        let current_cursor = state.tree_state.cursor();
+        if current_cursor != last_cursor {
+            last_cursor = current_cursor;
+            if state.show_preview {
+                trigger_preview(&mut state, &preview_tx, &config.preview);
+            }
+        }
+
         // Update scroll position.
         state.scroll.clamp_to_cursor(
             state.tree_state.cursor(),
@@ -218,6 +312,8 @@ fn handle_key_event(
     key: crossterm::event::KeyEvent,
     state: &mut AppState,
     children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    preview_tx: &tokio::sync::mpsc::Sender<PreviewLoadResult>,
+    preview_config: &crate::config::PreviewConfig,
     show_hidden: bool,
     show_ignored: bool,
 ) {
@@ -232,6 +328,9 @@ fn handle_key_event(
         crate::action::Action::Tree(ref tree_action) => {
             handle_tree_action(tree_action, state, children_tx, show_hidden, show_ignored);
         }
+        crate::action::Action::Preview(ref preview_action) => {
+            handle_preview_action(preview_action, state, preview_tx, preview_config);
+        }
     }
 }
 
@@ -242,8 +341,11 @@ const fn map_key_event(key: crossterm::event::KeyEvent) -> Option<crate::action:
         TreeAction,
     };
 
+    use crate::action::PreviewAction;
+
     match (key.code, key.modifiers) {
         (KeyCode::Char('q'), KeyModifiers::NONE) => Some(Action::Quit),
+        // Tree navigation (vim-style).
         (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => {
             Some(Action::Tree(TreeAction::MoveDown))
         }
@@ -266,6 +368,29 @@ const fn map_key_event(key: crossterm::event::KeyEvent) -> Option<crate::action:
         }
         (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
             Some(Action::Tree(TreeAction::HalfPageUp))
+        }
+        // Preview scroll (Shift + vim-style).
+        (KeyCode::Char('J'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+            Some(Action::Preview(PreviewAction::ScrollDown))
+        }
+        (KeyCode::Char('K'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+            Some(Action::Preview(PreviewAction::ScrollUp))
+        }
+        (KeyCode::Char('L'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+            Some(Action::Preview(PreviewAction::ScrollRight))
+        }
+        (KeyCode::Char('H'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+            Some(Action::Preview(PreviewAction::ScrollLeft))
+        }
+        (KeyCode::Char('D'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+            Some(Action::Preview(PreviewAction::HalfPageDown))
+        }
+        (KeyCode::Char('U'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+            Some(Action::Preview(PreviewAction::HalfPageUp))
+        }
+        // Provider cycling (Tab).
+        (KeyCode::Tab, KeyModifiers::NONE) => {
+            Some(Action::Preview(PreviewAction::CycleProvider))
         }
         _ => None,
     }
@@ -324,6 +449,46 @@ fn handle_tree_action(
         }
         TreeAction::HalfPageUp => {
             state.tree_state.half_page_up(state.viewport_height as usize);
+        }
+    }
+}
+
+/// Handle a preview action.
+fn handle_preview_action(
+    action: &crate::action::PreviewAction,
+    state: &mut AppState,
+    preview_tx: &tokio::sync::mpsc::Sender<PreviewLoadResult>,
+    preview_config: &crate::config::PreviewConfig,
+) {
+    use crate::action::PreviewAction;
+
+    let viewport_height = state.viewport_height as usize;
+
+    match *action {
+        PreviewAction::ScrollDown => {
+            state.preview_state.scroll_down(1, viewport_height);
+        }
+        PreviewAction::ScrollUp => {
+            state.preview_state.scroll_up(1);
+        }
+        PreviewAction::ScrollRight => {
+            state.preview_state.scroll_right(1);
+        }
+        PreviewAction::ScrollLeft => {
+            state.preview_state.scroll_left(1);
+        }
+        PreviewAction::HalfPageDown => {
+            state
+                .preview_state
+                .scroll_down(viewport_height / 2, viewport_height);
+        }
+        PreviewAction::HalfPageUp => {
+            state.preview_state.scroll_up(viewport_height / 2);
+        }
+        PreviewAction::CycleProvider => {
+            if state.preview_state.cycle_provider() {
+                reload_preview(state, preview_tx, preview_config);
+            }
         }
     }
 }
@@ -397,6 +562,163 @@ fn spawn_load_children(
                 path,
                 children,
                 prefetch,
+            })
+            .await;
+    });
+}
+
+/// Trigger preview for a new file (cursor change).
+///
+/// Resets provider index, resolves providers, and spawns async load.
+fn trigger_preview(
+    state: &mut AppState,
+    preview_tx: &tokio::sync::mpsc::Sender<PreviewLoadResult>,
+    preview_config: &crate::config::PreviewConfig,
+) {
+    let Some((path, providers)) = resolve_preview_providers(state) else {
+        return;
+    };
+    state.preview_state.request_preview(path.clone());
+    spawn_preview_for(state, &path, &providers, preview_tx, preview_config);
+}
+
+/// Reload the current file with the (already-cycled) provider.
+///
+/// Preserves the provider index set by `cycle_provider()`.
+fn reload_preview(
+    state: &mut AppState,
+    preview_tx: &tokio::sync::mpsc::Sender<PreviewLoadResult>,
+    preview_config: &crate::config::PreviewConfig,
+) {
+    let Some((path, providers)) = resolve_preview_providers(state) else {
+        return;
+    };
+    state.preview_state.reload_preview(path.clone());
+    spawn_preview_for(state, &path, &providers, preview_tx, preview_config);
+}
+
+/// Resolve available providers for the current node.
+///
+/// Returns the path and provider name list, or `None` if no providers match.
+fn resolve_preview_providers(state: &mut AppState) -> Option<(PathBuf, Vec<String>)> {
+    let node_info = state.tree_state.current_node_info()?;
+    let path = node_info.path.clone();
+    let is_dir = node_info.is_dir;
+
+    let providers = state.preview_registry.resolve(&path, is_dir);
+    if providers.is_empty() {
+        state.preview_state.set_content(PreviewContent::Empty);
+        return None;
+    }
+
+    let provider_names: Vec<String> = providers.iter().map(|p| p.name().to_string()).collect();
+    state.preview_state.set_available_providers(provider_names.clone());
+
+    Some((path, provider_names))
+}
+
+/// Pick the active provider and spawn the async load task.
+fn spawn_preview_for(
+    state: &AppState,
+    path: &Path,
+    providers: &[String],
+    preview_tx: &tokio::sync::mpsc::Sender<PreviewLoadResult>,
+    preview_config: &crate::config::PreviewConfig,
+) {
+    let active_index = state.preview_state.active_provider_index;
+    let Some(provider_name) = providers.get(active_index) else {
+        return;
+    };
+    let provider_name = provider_name.clone();
+
+    spawn_preview_load(PreviewLoadParams {
+        tx: preview_tx.clone(),
+        path: path.to_path_buf(),
+        provider_name,
+        max_lines: preview_config.max_lines,
+        max_bytes: preview_config.max_bytes,
+        cancel_token: state.preview_state.cancel_token.clone(),
+        commands: preview_config.commands.clone(),
+        command_timeout: preview_config.command_timeout,
+        image_picker: Arc::clone(&state.image_picker),
+    });
+}
+
+/// Parameters for spawning a preview load task.
+struct PreviewLoadParams {
+    tx: tokio::sync::mpsc::Sender<PreviewLoadResult>,
+    path: PathBuf,
+    provider_name: String,
+    max_lines: usize,
+    max_bytes: u64,
+    cancel_token: tokio_util::sync::CancellationToken,
+    commands: Vec<crate::config::ExternalCommand>,
+    command_timeout: u64,
+    image_picker: Arc<Mutex<Picker>>,
+}
+
+/// Spawn a blocking task to load preview content.
+fn spawn_preview_load(params: PreviewLoadParams) {
+    let PreviewLoadParams {
+        tx,
+        path,
+        provider_name,
+        max_lines,
+        max_bytes,
+        cancel_token,
+        commands,
+        command_timeout,
+        image_picker,
+    } = params;
+    tokio::spawn(async move {
+        let load_path = path.clone();
+        let pname = provider_name.clone();
+        let token = cancel_token.clone();
+
+        let result = tokio::task::spawn_blocking(move || {
+            let ctx = LoadContext {
+                max_lines,
+                max_bytes,
+                cancel_token: token,
+            };
+
+            // Create the appropriate provider and load.
+            let content = match pname.as_str() {
+                "External" => {
+                    ExternalCmdProvider::new(commands, command_timeout).load(&load_path, &ctx)
+                }
+                "Image" => {
+                    ImagePreviewProvider::load_with_picker(&load_path, &ctx, &image_picker)
+                }
+                "Text" => TextPreviewProvider::new().load(&load_path, &ctx),
+                "Fallback" => FallbackProvider::new().load(&load_path, &ctx),
+                _ => Ok(PreviewContent::Error {
+                    message: format!("Unknown provider: {pname}"),
+                }),
+            };
+
+            match content {
+                Ok(c) => c,
+                Err(e) => PreviewContent::Error {
+                    message: e.to_string(),
+                },
+            }
+        })
+        .await;
+
+        let content = match result {
+            Ok(content) => content,
+            Err(e) => PreviewContent::Error {
+                message: e.to_string(),
+            },
+        };
+
+        // Ignore send error (receiver dropped = app shutting down).
+        let _ = tx
+            .send(PreviewLoadResult {
+                path,
+                provider_name,
+                content,
             })
             .await;
     });

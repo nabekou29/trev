@@ -18,6 +18,8 @@ pub struct Config {
     pub sort: SortConfig,
     /// Display settings.
     pub display: DisplayConfig,
+    /// Preview settings.
+    pub preview: PreviewConfig,
 }
 
 /// Sort configuration.
@@ -70,6 +72,46 @@ pub enum SortDirection {
     Asc,
     /// Descending order.
     Desc,
+}
+
+/// Preview configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PreviewConfig {
+    /// Maximum number of lines to preview (default: 1000).
+    pub max_lines: usize,
+    /// Maximum bytes to read per file (default: 10 MB).
+    pub max_bytes: u64,
+    /// LRU cache capacity (default: 10).
+    pub cache_size: usize,
+    /// External preview commands.
+    pub commands: Vec<ExternalCommand>,
+    /// Timeout for external commands in seconds (default: 3).
+    pub command_timeout: u64,
+}
+
+/// External command configuration for preview.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalCommand {
+    /// File extensions this command applies to.
+    pub extensions: Vec<String>,
+    /// Command name (must be in `$PATH`).
+    pub command: String,
+    /// Command arguments.
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+impl Default for PreviewConfig {
+    fn default() -> Self {
+        Self {
+            max_lines: 1000,
+            max_bytes: 10 * 1024 * 1024, // 10 MB
+            cache_size: 10,
+            commands: Vec::new(),
+            command_timeout: 3,
+        }
+    }
 }
 
 impl Default for SortConfig {

@@ -5,6 +5,8 @@
 pub enum Action {
     /// Tree-related actions.
     Tree(TreeAction),
+    /// Preview-related actions.
+    Preview(PreviewAction),
     /// Quit the application.
     Quit,
 }
@@ -30,4 +32,23 @@ pub enum TreeAction {
     HalfPageDown,
     /// Move cursor half a page up.
     HalfPageUp,
+}
+
+/// Actions for the preview panel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreviewAction {
+    /// Scroll preview content down.
+    ScrollDown,
+    /// Scroll preview content up.
+    ScrollUp,
+    /// Scroll preview content right.
+    ScrollRight,
+    /// Scroll preview content left.
+    ScrollLeft,
+    /// Scroll preview half a page down.
+    HalfPageDown,
+    /// Scroll preview half a page up.
+    HalfPageUp,
+    /// Cycle to the next available preview provider.
+    CycleProvider,
 }
