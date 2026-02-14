@@ -145,7 +145,12 @@ const fn map_sort_direction(direction: crate::config::SortDirection) -> crate::s
 /// Run the application.
 #[allow(clippy::unused_async, clippy::too_many_lines)]
 pub async fn run(args: &Args) -> Result<()> {
-    let config = Config::load()?;
+    let load_result = Config::load()?;
+    for warning in &load_result.warnings {
+        tracing::warn!("{warning}");
+    }
+    let mut config = load_result.config;
+    config.apply_cli_overrides(args);
     tracing::info!(?args, "starting trev");
 
     // Resolve the root path.
@@ -157,8 +162,8 @@ pub async fn run(args: &Args) -> Result<()> {
     let directories_first = config.sort.directories_first;
 
     // Build the initial tree (depth 1).
-    let show_hidden = args.show_hidden || config.display.show_hidden;
-    let show_ignored = false;
+    let show_hidden = config.display.show_hidden;
+    let show_ignored = config.display.show_ignored;
     let builder = TreeBuilder::new(show_hidden, show_ignored);
     let root = builder.build(&root_path)?;
 

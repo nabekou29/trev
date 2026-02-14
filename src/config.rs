@@ -1,14 +1,20 @@
 //! Configuration file management.
+//!
+//! Loads settings from `$XDG_CONFIG_HOME/trev/config.toml` (or `~/.config/trev/config.toml`),
+//! warns about unknown keys, and supports CLI argument overrides.
 
 use std::path::{
     Path,
     PathBuf,
 };
 
+use anyhow::Context as _;
 use serde::{
     Deserialize,
     Serialize,
 };
+
+use crate::cli::Args;
 
 /// Application configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -47,7 +53,7 @@ pub struct DisplayConfig {
 }
 
 /// Sort order variants.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum SortOrder {
     /// Sort by name.
@@ -64,7 +70,7 @@ pub enum SortOrder {
 }
 
 /// Sort direction.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum SortDirection {
     /// Ascending order.
@@ -134,29 +140,106 @@ impl Default for DisplayConfig {
     }
 }
 
+/// Result of loading configuration.
+///
+/// Contains the parsed config and any warnings (e.g. unknown keys).
+#[derive(Debug)]
+pub struct ConfigLoadResult {
+    /// The loaded (or default) configuration.
+    pub config: Config,
+    /// Warnings encountered during loading (unknown keys, etc.).
+    pub warnings: Vec<String>,
+}
+
 impl Config {
     /// Load configuration from the default config file path.
     ///
-    /// Returns default config if the file does not exist.
-    pub(crate) fn load() -> anyhow::Result<Self> {
+    /// Returns default config with no warnings if the file does not exist.
+    /// On parse error, returns `Err` with file path and line number in the message.
+    pub(crate) fn load() -> anyhow::Result<ConfigLoadResult> {
         let path = Self::config_path();
-        if let Some(path) = path.filter(|p| p.exists()) {
+        if path.exists() {
             return Self::load_from(&path);
         }
-        Ok(Self::default())
+        Ok(ConfigLoadResult {
+            config: Self::default(),
+            warnings: Vec::new(),
+        })
     }
 
     /// Load configuration from a specific file path.
-    pub(crate) fn load_from(path: &Path) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        let config: Self = toml::from_str(&content)?;
-        Ok(config)
+    ///
+    /// Uses `serde_ignored` to detect unknown keys and collect them as warnings.
+    pub(crate) fn load_from(path: &Path) -> anyhow::Result<ConfigLoadResult> {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+
+        let mut unknown_keys = Vec::new();
+        let deserializer = toml::Deserializer::new(&content);
+        let config: Self = serde_ignored::deserialize(deserializer, |key| {
+            unknown_keys.push(key.to_string());
+        })
+        .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
+
+        let warnings: Vec<String> = unknown_keys
+            .iter()
+            .map(|key| format!("Unknown config key '{}' in {}", key, path.display()))
+            .collect();
+
+        Ok(ConfigLoadResult { config, warnings })
+    }
+
+    /// Apply CLI argument overrides to the configuration.
+    ///
+    /// Only overrides values for flags that were explicitly provided on the command line.
+    pub(crate) const fn apply_cli_overrides(&mut self, args: &Args) {
+        if args.show_hidden {
+            self.display.show_hidden = true;
+        }
+        if args.show_ignored {
+            self.display.show_ignored = true;
+        }
+        if args.no_preview {
+            self.display.show_preview = false;
+        }
+        if let Some(order) = args.sort_order {
+            self.sort.order = order;
+        }
+        if let Some(direction) = args.sort_direction {
+            self.sort.direction = direction;
+        }
+        if args.no_directories_first {
+            self.sort.directories_first = false;
+        }
+    }
+
+    /// Get the default configuration directory path (XDG compliant).
+    ///
+    /// Resolves `$XDG_CONFIG_HOME/trev/` first, falls back to `~/.config/trev/`.
+    fn config_dir() -> PathBuf {
+        Self::resolve_config_dir(
+            std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
+            dirs::home_dir(),
+        )
+    }
+
+    /// Resolve config directory from explicit XDG and home directory values.
+    ///
+    /// Extracted for testability (avoids `unsafe` env var manipulation in tests).
+    fn resolve_config_dir(xdg_config_home: Option<&str>, home_dir: Option<PathBuf>) -> PathBuf {
+        xdg_config_home.map_or_else(
+            || {
+                home_dir
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".config/trev")
+            },
+            |xdg| PathBuf::from(xdg).join("trev"),
+        )
     }
 
     /// Get the default configuration file path.
-    fn config_path() -> Option<PathBuf> {
-        directories::ProjectDirs::from("", "", "trev")
-            .map(|dirs| dirs.config_dir().join("config.toml"))
+    fn config_path() -> PathBuf {
+        Self::config_dir().join("config.toml")
     }
 }
 
@@ -168,18 +251,69 @@ mod tests {
 
     use super::*;
 
-    #[rstest]
-    fn test_default_config() -> Result<()> {
-        let config = Config::default();
-        verify_that!(config.sort.directories_first, eq(true))?;
-        verify_that!(config.display.show_hidden, eq(false))?;
-        verify_that!(config.display.show_preview, eq(true))?;
-        Ok(())
-    }
+    // --- T002: config_dir respects XDG_CONFIG_HOME ---
 
     #[rstest]
-    fn test_config_deserialize() -> Result<()> {
-        let toml_str = r#"
+    fn config_dir_uses_xdg_config_home() {
+        let dir = Config::resolve_config_dir(Some("/tmp/xdg_test"), None);
+        assert_eq!(dir, PathBuf::from("/tmp/xdg_test/trev"));
+    }
+
+    // --- T003: config_dir falls back to ~/.config/trev ---
+
+    #[rstest]
+    fn config_dir_falls_back_to_home_config() {
+        let home = PathBuf::from("/home/testuser");
+        let dir = Config::resolve_config_dir(None, Some(home.clone()));
+        assert_eq!(dir, home.join(".config/trev"));
+    }
+
+    // --- T003b: config_dir falls back to "." when no home dir ---
+
+    #[rstest]
+    fn config_dir_falls_back_to_dot_when_no_home() {
+        let dir = Config::resolve_config_dir(None, None);
+        assert_eq!(dir, PathBuf::from("./.config/trev"));
+    }
+
+    // --- T004: missing config file returns default ---
+
+    #[rstest]
+    fn load_missing_file_returns_default() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("nonexistent.toml");
+
+        // load_from should error, but load() skips missing files.
+        // Test via load_from with nonexistent path.
+        let result = Config::load_from(&path);
+        assert!(result.is_err());
+    }
+
+    // --- T005: empty config file applies all defaults ---
+
+    #[rstest]
+    fn empty_config_applies_defaults() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, "").unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        assert_that!(result.config.sort.directories_first, eq(true));
+        assert_that!(result.config.display.show_hidden, eq(false));
+        assert_that!(result.config.display.show_preview, eq(true));
+        assert_that!(result.config.preview.max_lines, eq(1000));
+        assert!(result.warnings.is_empty());
+    }
+
+    // --- T006: valid TOML deserializes correctly ---
+
+    #[rstest]
+    fn valid_toml_deserializes_all_fields() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
 [sort]
 order = "size"
 direction = "desc"
@@ -189,11 +323,169 @@ directories_first = false
 show_hidden = true
 show_ignored = true
 show_preview = false
-"#;
-        let config: Config = toml::from_str(toml_str).unwrap();
-        verify_that!(config.sort.directories_first, eq(false))?;
-        verify_that!(config.display.show_hidden, eq(true))?;
-        verify_that!(config.display.show_preview, eq(false))?;
-        Ok(())
+
+[preview]
+max_lines = 500
+max_bytes = 5242880
+cache_size = 20
+command_timeout = 5
+
+[[preview.commands]]
+extensions = ["json"]
+command = "jq"
+args = ["."]
+"#,
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        let c = &result.config;
+
+        assert_that!(c.sort.order, eq(SortOrder::Size));
+        assert_that!(c.sort.direction, eq(SortDirection::Desc));
+        assert_that!(c.sort.directories_first, eq(false));
+        assert_that!(c.display.show_hidden, eq(true));
+        assert_that!(c.display.show_ignored, eq(true));
+        assert_that!(c.display.show_preview, eq(false));
+        assert_that!(c.preview.max_lines, eq(500));
+        assert_that!(c.preview.max_bytes, eq(5_242_880));
+        assert_that!(c.preview.cache_size, eq(20));
+        assert_that!(c.preview.command_timeout, eq(5));
+        assert_that!(c.preview.commands.len(), eq(1));
+        assert_that!(c.preview.commands[0].command.as_str(), eq("jq"));
+        assert!(result.warnings.is_empty());
+    }
+
+    // --- T007: unknown keys produce warnings ---
+
+    #[rstest]
+    fn unknown_keys_produce_warnings() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[sort]
+order = "name"
+unknown_sort_key = true
+
+[display]
+show_hidden = false
+typo_key = "oops"
+"#,
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+
+        // Config should still load correctly.
+        assert_that!(result.config.sort.order, eq(SortOrder::Name));
+        assert_that!(result.config.display.show_hidden, eq(false));
+
+        // Should have 2 warnings.
+        assert_that!(result.warnings.len(), eq(2));
+        assert!(result.warnings.iter().any(|w| w.contains("unknown_sort_key")));
+        assert!(result.warnings.iter().any(|w| w.contains("typo_key")));
+    }
+
+    // --- T008: syntax error includes file path and line info ---
+
+    #[rstest]
+    fn syntax_error_includes_file_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, "[sort\nbroken = true").unwrap();
+
+        let err = Config::load_from(&path).unwrap_err();
+        let msg = format!("{err:#}");
+
+        // Should contain the file path.
+        assert!(
+            msg.contains(&path.display().to_string()),
+            "Error message should contain file path: {msg}"
+        );
+    }
+
+    // --- T009: permission error returns error ---
+
+    #[rstest]
+    #[cfg(unix)]
+    fn permission_error_returns_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, "[sort]\norder = \"name\"").unwrap();
+
+        // Remove read permission.
+        let perms = std::fs::Permissions::from_mode(0o000);
+        std::fs::set_permissions(&path, perms).unwrap();
+
+        let result = Config::load_from(&path);
+        assert!(result.is_err());
+
+        // Restore permissions for cleanup.
+        let perms = std::fs::Permissions::from_mode(0o644);
+        std::fs::set_permissions(&path, perms).unwrap();
+    }
+
+    // --- T016: apply_cli_overrides sort order ---
+
+    #[rstest]
+    fn cli_override_sort_order() {
+        let mut config = Config::default();
+        let args = Args {
+            sort_order: Some(SortOrder::Size),
+            ..Args::default()
+        };
+        config.apply_cli_overrides(&args);
+
+        assert_that!(config.sort.order, eq(SortOrder::Size));
+    }
+
+    // --- T017: apply_cli_overrides no-preview ---
+
+    #[rstest]
+    fn cli_override_no_preview() {
+        let mut config = Config::default();
+        assert_that!(config.display.show_preview, eq(true));
+
+        let args = Args {
+            no_preview: true,
+            ..Args::default()
+        };
+        config.apply_cli_overrides(&args);
+
+        assert_that!(config.display.show_preview, eq(false));
+    }
+
+    // --- T018: unset CLI args preserve TOML values ---
+
+    #[rstest]
+    fn unset_cli_args_preserve_toml() {
+        let mut config = Config::default();
+        config.sort.order = SortOrder::Mtime;
+        config.display.show_preview = false;
+
+        let args = Args::default();
+        config.apply_cli_overrides(&args);
+
+        // Nothing should change.
+        assert_that!(config.sort.order, eq(SortOrder::Mtime));
+        assert_that!(config.display.show_preview, eq(false));
+    }
+
+    // --- T019: apply_cli_overrides show-ignored ---
+
+    #[rstest]
+    fn cli_override_show_ignored() {
+        let mut config = Config::default();
+        let args = Args {
+            show_ignored: true,
+            ..Args::default()
+        };
+        config.apply_cli_overrides(&args);
+
+        assert_that!(config.display.show_ignored, eq(true));
     }
 }

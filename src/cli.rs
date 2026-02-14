@@ -7,6 +7,11 @@ use clap::{
     Subcommand,
 };
 
+use crate::config::{
+    SortDirection,
+    SortOrder,
+};
+
 /// Fast TUI file viewer with tree view and Neovim integration.
 #[derive(Debug, Parser)]
 #[command(name = "trev", version, about)]
@@ -19,6 +24,26 @@ pub struct Args {
     /// Show hidden files.
     #[arg(short = 'a', long)]
     pub show_hidden: bool,
+
+    /// Show gitignored files.
+    #[arg(long)]
+    pub show_ignored: bool,
+
+    /// Disable preview panel.
+    #[arg(long)]
+    pub no_preview: bool,
+
+    /// Sort order (name, size, mtime, type, extension).
+    #[arg(long)]
+    pub sort_order: Option<SortOrder>,
+
+    /// Sort direction (asc, desc).
+    #[arg(long)]
+    pub sort_direction: Option<SortDirection>,
+
+    /// Do not sort directories before files.
+    #[arg(long)]
+    pub no_directories_first: bool,
 
     /// Disable file icons (Nerd Fonts).
     #[arg(long)]
@@ -114,5 +139,26 @@ impl Args {
     /// Parse CLI arguments.
     pub(crate) fn parse_args() -> Self {
         Self::parse()
+    }
+}
+
+impl Default for Args {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::from("."),
+            show_hidden: false,
+            show_ignored: false,
+            no_preview: false,
+            sort_order: None,
+            sort_direction: None,
+            no_directories_first: false,
+            no_icons: false,
+            daemon: false,
+            emit: false,
+            emit_format: EmitFormat::default(),
+            action: OpenAction::default(),
+            reveal: None,
+            command: None,
+        }
     }
 }
