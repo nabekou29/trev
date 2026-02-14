@@ -162,11 +162,13 @@ impl TreeState {
     }
 
     /// Get a reference to the root node.
+    #[expect(dead_code, reason = "Public API for future use")]
     pub const fn root(&self) -> &TreeNode {
         &self.root
     }
 
     /// Get a mutable reference to the root node.
+    #[expect(dead_code, reason = "Public API for future use")]
     pub const fn root_mut(&mut self) -> &mut TreeNode {
         &mut self.root
     }
@@ -177,16 +179,19 @@ impl TreeState {
     }
 
     /// Get the current sort order.
+    #[expect(dead_code, reason = "Public API for future use")]
     pub const fn sort_order(&self) -> SortOrder {
         self.sort_order
     }
 
     /// Get the current sort direction.
+    #[expect(dead_code, reason = "Public API for future use")]
     pub const fn sort_direction(&self) -> SortDirection {
         self.sort_direction
     }
 
     /// Get whether directories come first.
+    #[expect(dead_code, reason = "Public API for future use")]
     pub const fn directories_first(&self) -> bool {
         self.directories_first
     }
@@ -332,6 +337,7 @@ impl TreeState {
     }
 
     /// Move cursor to a specific index with bounds checking.
+    #[cfg_attr(not(test), expect(dead_code, reason = "Public API for future use"))]
     pub fn move_cursor_to(&mut self, index: usize) {
         let count = self.visible_node_count();
         if count == 0 {

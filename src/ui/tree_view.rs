@@ -17,7 +17,7 @@ use crate::app::AppState;
 use crate::state::tree::ChildrenState;
 
 /// Render the tree view into the given area.
-pub fn render_tree(frame: &mut Frame, area: Rect, state: &AppState) {
+pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let visible = state.tree_state.visible_nodes();
     let offset = state.scroll.offset();
     let height = area.height as usize;

@@ -14,7 +14,7 @@ use crate::app::AppState;
 /// Render the status bar into the given area.
 ///
 /// Shows the current file path and cursor position (N/Total).
-pub fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
+pub fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let visible_count = state.tree_state.visible_node_count();
     let cursor = state.tree_state.cursor();
 

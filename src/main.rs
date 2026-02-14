@@ -1,5 +1,11 @@
 //! trev - Fast TUI file viewer with tree view and Neovim integration.
 
+#![expect(
+    unreachable_pub,
+    reason = "Binary crate: all modules are private, so pub vs pub(crate) is irrelevant. \
+              Conflicts with clippy::redundant_pub_crate from nursery group."
+)]
+
 mod action;
 mod app;
 mod cli;

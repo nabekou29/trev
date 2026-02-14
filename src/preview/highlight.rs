@@ -69,6 +69,7 @@ fn auto_theme() -> EmbeddedThemeName {
 }
 
 /// Get a reference to the global syntax set.
+#[expect(dead_code, reason = "Public API for future use by external providers")]
 pub fn syntax_set() -> &'static SyntaxSet {
     &SYNTAX_SET
 }
