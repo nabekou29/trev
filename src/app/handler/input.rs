@@ -54,7 +54,11 @@ pub fn handle_input_mode_key(
             let AppMode::Input(input) = std::mem::take(&mut state.mode) else {
                 return;
             };
+            let status_msg = status_message_for(&input);
             execute_input_confirm(state, input, ctx);
+            if let Some(msg) = status_msg {
+                state.set_status(msg);
+            }
         }
         Some(false) => {
             // Cancelled — return to Normal mode.
@@ -63,6 +67,20 @@ pub fn handle_input_mode_key(
         None => {
             // Regular editing key — state already mutated.
         }
+    }
+}
+
+/// Build a status message for the given input action.
+fn status_message_for(input: &crate::input::InputState) -> Option<String> {
+    use crate::input::InputAction;
+
+    if input.value.trim().is_empty() {
+        return None;
+    }
+
+    match &input.on_confirm {
+        InputAction::Create { .. } => Some(format!("Created {}", input.value)),
+        InputAction::Rename { .. } => Some(format!("Renamed to {}", input.value)),
     }
 }
 

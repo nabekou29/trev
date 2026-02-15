@@ -12,6 +12,7 @@ use crate::app::state::{
     AppContext,
     AppState,
 };
+use crate::file_op::selection::SelectionMode;
 use crate::input::AppMode;
 
 /// Handle a file operation action.
@@ -30,10 +31,13 @@ pub fn handle_file_op_action(
     match *action {
         FileOpAction::ToggleMark => {
             if let Some(info) = state.tree_state.current_node_info() {
-                state.mark_set.toggle(info.path);
+                state.selection.toggle_mark(info.path);
                 // Move cursor down after toggling mark.
                 state.tree_state.move_cursor(1);
             }
+        }
+        FileOpAction::ClearSelections => {
+            state.selection.clear();
         }
         FileOpAction::CreateFile => {
             if let Some(info) = state.tree_state.current_node_info() {
@@ -53,16 +57,18 @@ pub fn handle_file_op_action(
         }
         FileOpAction::Yank => {
             if let Some(info) = state.tree_state.current_node_info() {
-                let targets = state.mark_set.targets_or_cursor(&info.path);
-                state.yank_buffer.set(targets, crate::file_op::yank::YankMode::Copy);
-                state.mark_set.clear();
+                let targets = state.selection.mark_targets_or_cursor(&info.path);
+                let count = targets.len();
+                state.selection.set(targets, SelectionMode::Copy);
+                state.set_status(format!("Yanked {count} file(s)"));
             }
         }
         FileOpAction::Cut => {
             if let Some(info) = state.tree_state.current_node_info() {
-                let targets = state.mark_set.targets_or_cursor(&info.path);
-                state.yank_buffer.set(targets, crate::file_op::yank::YankMode::Cut);
-                state.mark_set.clear();
+                let targets = state.selection.mark_targets_or_cursor(&info.path);
+                let count = targets.len();
+                state.selection.set(targets, SelectionMode::Cut);
+                state.set_status(format!("Cut {count} file(s)"));
             }
         }
         FileOpAction::Paste => {
@@ -70,7 +76,7 @@ pub fn handle_file_op_action(
         }
         FileOpAction::Delete => {
             if let Some(info) = state.tree_state.current_node_info() {
-                let targets = state.mark_set.targets_or_cursor(&info.path);
+                let targets = state.selection.mark_targets_or_cursor(&info.path);
                 let confirm_action = match ctx.file_op_config.delete_mode {
                     crate::config::DeleteMode::Permanent => ConfirmAction::PermanentDelete,
                     crate::config::DeleteMode::CustomTrash => ConfirmAction::CustomTrash,
@@ -85,7 +91,7 @@ pub fn handle_file_op_action(
         }
         FileOpAction::SystemTrash => {
             if let Some(info) = state.tree_state.current_node_info() {
-                let targets = state.mark_set.targets_or_cursor(&info.path);
+                let targets = state.selection.mark_targets_or_cursor(&info.path);
                 let count = targets.len();
                 state.mode = AppMode::Confirm(ConfirmState {
                     message: format!("Move {count} item(s) to system trash?"),
@@ -111,6 +117,8 @@ pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState,
 
     let mut affected_parents: HashSet<PathBuf> = HashSet::new();
     let crate::input::ConfirmState { paths, on_confirm, .. } = confirm;
+    let delete_count = paths.len();
+    let is_system_trash = matches!(on_confirm, ConfirmAction::SystemTrash);
 
     match on_confirm {
         ConfirmAction::PermanentDelete => {
@@ -159,10 +167,17 @@ pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState,
         }
     }
 
-    state.mark_set.clear();
+    state.selection.clear();
 
     for parent in &affected_parents {
         refresh_directory(state, parent, ctx);
+    }
+
+    // Status message based on delete mode.
+    if is_system_trash {
+        state.set_status(format!("Moved {delete_count} item(s) to trash"));
+    } else {
+        state.set_status(format!("Deleted {delete_count} item(s)"));
     }
 }
 
@@ -222,7 +237,7 @@ pub fn execute_rename(target: &Path, new_name: &str, state: &AppState, ctx: &App
     refresh_directory(state, parent, ctx);
 }
 
-/// Execute paste operation: copy or move yanked files to the cursor directory.
+/// Execute paste operation: copy or move selected files to the cursor directory.
 fn execute_paste(state: &mut AppState, ctx: &AppContext) {
     use std::collections::HashSet;
 
@@ -232,9 +247,12 @@ fn execute_paste(state: &mut AppState, ctx: &AppContext) {
         execute,
         is_ancestor,
     };
-    use crate::file_op::yank::YankMode;
 
-    if state.yank_buffer.is_empty() {
+    let mode = state.selection.mode().cloned();
+    let is_cut = matches!(mode, Some(SelectionMode::Cut));
+
+    // Paste only works in Copy or Cut mode.
+    if !matches!(mode, Some(SelectionMode::Copy | SelectionMode::Cut)) {
         return;
     }
 
@@ -249,13 +267,11 @@ fn execute_paste(state: &mut AppState, ctx: &AppContext) {
         info.path.parent().map_or_else(|| info.path.clone(), Path::to_path_buf)
     };
 
-    let mode = state.yank_buffer.mode().cloned();
-    let is_cut = matches!(mode, Some(YankMode::Cut));
-
     // Track source parent directories that need refresh (for cut operations).
     let mut src_parents: HashSet<PathBuf> = HashSet::new();
 
-    for src in state.yank_buffer.paths().to_vec() {
+    let sources = state.selection.deduplicated_paths();
+    for src in sources {
         // Self-reference check: prevent copying/moving a directory into itself.
         if src.is_dir() && is_ancestor(&src, &dst_dir) {
             tracing::warn!(?src, ?dst_dir, "skipping: cannot copy/move directory into itself");
@@ -287,11 +303,8 @@ fn execute_paste(state: &mut AppState, ctx: &AppContext) {
         }
     }
 
-    // Clear yank buffer after cut (files moved), retain after copy.
-    if is_cut {
-        state.yank_buffer.clear();
-    }
-    state.mark_set.clear();
+    let paste_count = state.selection.count();
+    state.selection.clear();
 
     // Refresh destination directory.
     refresh_directory(state, &dst_dir, ctx);
@@ -302,4 +315,7 @@ fn execute_paste(state: &mut AppState, ctx: &AppContext) {
             refresh_directory(state, parent, ctx);
         }
     }
+
+    let action = if is_cut { "Moved" } else { "Pasted" };
+    state.set_status(format!("{action} {paste_count} file(s)"));
 }

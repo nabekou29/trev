@@ -14,6 +14,7 @@ use ratatui::text::{
 use ratatui::widgets::Paragraph;
 
 use crate::app::AppState;
+use crate::file_op::selection::SelectionMode;
 use crate::input::AppMode;
 use crate::state::tree::ChildrenState;
 
@@ -43,14 +44,28 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             "  "
         };
 
-        // Mark indicator (shown before other content).
-        let is_marked = state.mark_set.is_marked(&vnode.node.path);
+        // State indicator based on selection mode.
+        let in_selection = state.selection.contains(&vnode.node.path);
+        let selection_mode = state.selection.mode();
 
         // Build spans for the line.
         let mut spans = Vec::new();
 
-        if is_marked {
-            spans.push(Span::styled("● ", Style::default().fg(Color::Yellow)));
+        if in_selection {
+            match selection_mode {
+                Some(SelectionMode::Mark) => {
+                    spans.push(Span::styled("● ", Style::default().fg(Color::Green)));
+                }
+                Some(SelectionMode::Cut) => {
+                    spans.push(Span::styled("◆ ", Style::default().fg(Color::Yellow)));
+                }
+                Some(SelectionMode::Copy) => {
+                    spans.push(Span::styled("◇ ", Style::default().fg(Color::Cyan)));
+                }
+                None => {
+                    spans.push(Span::raw("  "));
+                }
+            }
         } else {
             spans.push(Span::raw("  "));
         }

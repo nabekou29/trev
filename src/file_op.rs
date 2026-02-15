@@ -2,7 +2,6 @@
 
 pub mod conflict;
 pub mod executor;
-pub mod mark;
+pub mod selection;
 pub mod trash;
 pub mod undo;
-pub mod yank;

@@ -24,7 +24,7 @@ pub use state::*;
 
 use crate::cli::Args;
 use crate::config::Config;
-use crate::file_op::mark::MarkSet;
+use crate::file_op::selection::SelectionBuffer;
 use crate::input::AppMode;
 use crate::preview::cache::PreviewCache;
 use crate::preview::provider::{
@@ -98,8 +98,7 @@ pub async fn run(args: &Args) -> Result<()> {
         preview_cache: PreviewCache::new(config.preview.cache_size),
         preview_registry,
         mode: AppMode::default(),
-        mark_set: MarkSet::new(),
-        yank_buffer: crate::file_op::yank::YankBuffer::new(),
+        selection: SelectionBuffer::new(),
         should_quit: false,
         show_icons: !args.no_icons,
         show_preview,
@@ -107,6 +106,8 @@ pub async fn run(args: &Args) -> Result<()> {
         show_ignored,
         viewport_height: 0,
         scroll: ScrollState::new(),
+        status_message: None,
+        processing: false,
     };
 
     // Set up async children load channel.
@@ -144,6 +145,9 @@ pub async fn run(args: &Args) -> Result<()> {
 
     // Main event loop.
     loop {
+        // Clear expired status messages.
+        state.clear_expired_status();
+
         // Draw UI.
         terminal.draw(|frame| {
             crate::ui::render(frame, &mut state);

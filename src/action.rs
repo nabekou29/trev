@@ -37,6 +37,8 @@ pub enum FileOpAction {
     Redo,
     /// Toggle mark on cursor file.
     ToggleMark,
+    /// Clear yank buffer and mark set.
+    ClearSelections,
 }
 
 /// Actions that modify the tree state.

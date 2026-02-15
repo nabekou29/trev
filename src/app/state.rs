@@ -1,13 +1,17 @@
 //! Application state, context, and result types.
 
 use std::path::PathBuf;
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use super::keymap::KeyMap;
 use crate::config::{
     FileOpConfig,
     PreviewConfig,
 };
-use crate::file_op::mark::MarkSet;
+use crate::file_op::selection::SelectionBuffer;
 use crate::input::AppMode;
 use crate::preview::cache::PreviewCache;
 use crate::preview::content::PreviewContent;
@@ -33,10 +37,8 @@ pub struct AppState {
     pub preview_registry: PreviewRegistry,
     /// Current application mode (Normal, Input, Confirm).
     pub mode: AppMode,
-    /// Set of marked file paths for batch operations.
-    pub mark_set: MarkSet,
-    /// Yank buffer for copy/cut operations.
-    pub yank_buffer: crate::file_op::yank::YankBuffer,
+    /// Unified selection buffer for mark, copy, and cut operations.
+    pub selection: SelectionBuffer,
     /// Whether the application should quit.
     pub should_quit: bool,
     /// Whether to show file icons (Nerd Fonts).
@@ -51,6 +53,48 @@ pub struct AppState {
     pub viewport_height: u16,
     /// Scroll state for the tree view.
     pub scroll: ScrollState,
+    /// Temporary status message displayed in the status bar.
+    pub status_message: Option<StatusMessage>,
+    /// Whether a blocking file operation is in progress.
+    pub processing: bool,
+}
+
+impl AppState {
+    /// Set a temporary status message (auto-clears after 3 seconds).
+    pub fn set_status(&mut self, text: impl Into<String>) {
+        self.status_message = Some(StatusMessage::new(text));
+    }
+
+    /// Clear the status message if it has expired.
+    pub fn clear_expired_status(&mut self) {
+        if self.status_message.as_ref().is_some_and(StatusMessage::is_expired) {
+            self.status_message = None;
+        }
+    }
+}
+
+/// Temporary status message with auto-expiry.
+#[derive(Debug)]
+pub struct StatusMessage {
+    /// Message text.
+    pub text: String,
+    /// When the message was created.
+    created_at: Instant,
+}
+
+impl StatusMessage {
+    /// Status message display duration.
+    const DURATION: Duration = Duration::from_secs(3);
+
+    /// Create a new status message timestamped to now.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self { text: text.into(), created_at: Instant::now() }
+    }
+
+    /// Whether the message has expired.
+    pub fn is_expired(&self) -> bool {
+        self.created_at.elapsed() >= Self::DURATION
+    }
 }
 
 /// Scroll position management for the tree view.
