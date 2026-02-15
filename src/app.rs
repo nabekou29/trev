@@ -179,14 +179,16 @@ pub async fn run(args: &Args) -> Result<()> {
     let mut tree_state = TreeState::new(root, sort_order, sort_direction, directories_first);
     tree_state.apply_sort(sort_order, sort_direction, directories_first);
 
+    // Detect terminal graphics protocol (must be before terminal init/raw mode).
+    // Falls back to halfblocks if detection fails.
+    // IMPORTANT: must run before init_theme() — init_theme sends an OSC 11 query
+    // whose response would pollute stdin and corrupt Picker's font-size detection.
+    let picker = Picker::from_query_stdio()
+        .unwrap_or_else(|_| ImagePreviewProvider::fallback_picker());
+
     // Detect terminal background for theme selection (must be before raw mode).
     // terminal_light::luma() sends OSC 11 query — safe only in cooked mode.
     crate::preview::highlight::init_theme();
-
-    // Detect terminal graphics protocol (must be before terminal init/raw mode).
-    // Falls back to halfblocks if detection fails.
-    let picker = Picker::from_query_stdio()
-        .unwrap_or_else(|_| ImagePreviewProvider::fallback_picker());
     let image_picker = Arc::new(Mutex::new(picker.clone()));
     let mut providers: Vec<Box<dyn PreviewProvider>> = vec![
         Box::new(ImagePreviewProvider::new(picker)),
