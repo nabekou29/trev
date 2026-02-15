@@ -123,6 +123,15 @@ impl ScrollState {
         self.offset
     }
 
+    /// Set the scroll offset so the cursor is centered in the viewport.
+    pub const fn center_on_cursor(&mut self, cursor: usize, viewport_height: usize) {
+        if viewport_height == 0 {
+            self.offset = 0;
+            return;
+        }
+        self.offset = cursor.saturating_sub(viewport_height / 2);
+    }
+
     /// Clamp the scroll offset so the cursor stays visible.
     ///
     /// Ensures `cursor - viewport_height + 1 <= offset <= cursor`.
@@ -221,6 +230,29 @@ mod tests {
     fn scroll_state_clamp_zero_viewport() {
         let mut scroll = ScrollState { offset: 5 };
         scroll.clamp_to_cursor(3, 0);
+        assert_that!(scroll.offset(), eq(0));
+    }
+
+    #[rstest]
+    fn scroll_state_center_on_cursor() {
+        let mut scroll = ScrollState::new();
+        // Cursor at 20, viewport 10 → offset = 20 - 5 = 15.
+        scroll.center_on_cursor(20, 10);
+        assert_that!(scroll.offset(), eq(15));
+    }
+
+    #[rstest]
+    fn scroll_state_center_on_cursor_near_top() {
+        let mut scroll = ScrollState::new();
+        // Cursor at 2, viewport 10 → offset = 0 (saturating_sub).
+        scroll.center_on_cursor(2, 10);
+        assert_that!(scroll.offset(), eq(0));
+    }
+
+    #[rstest]
+    fn scroll_state_center_on_cursor_zero_viewport() {
+        let mut scroll = ScrollState { offset: 5 };
+        scroll.center_on_cursor(10, 0);
         assert_that!(scroll.offset(), eq(0));
     }
 }

@@ -120,7 +120,7 @@ pub async fn run(args: &Args) -> Result<()> {
     };
 
     // Restore session and clean up expired sessions.
-    let (selection, undo_history) =
+    let (selection, undo_history, session_restored) =
         restore_session_if_needed(args, &config, &root_path, &builder, &mut tree_state);
 
     // Create app state.
@@ -177,6 +177,7 @@ pub async fn run(args: &Args) -> Result<()> {
 
     // Track cursor for change detection.
     let mut last_cursor = state.tree_state.cursor();
+    let mut needs_center_scroll = session_restored;
 
     // Main event loop.
     loop {
@@ -187,6 +188,14 @@ pub async fn run(args: &Args) -> Result<()> {
         terminal.draw(|frame| {
             crate::ui::render(frame, &mut state);
         })?;
+
+        // Center scroll on cursor after first draw (viewport_height is now known).
+        if needs_center_scroll {
+            needs_center_scroll = false;
+            state
+                .scroll
+                .center_on_cursor(state.tree_state.cursor(), state.viewport_height as usize);
+        }
 
         // Poll for events (50ms timeout for responsive async result handling).
         if crossterm::event::poll(Duration::from_millis(50))?
@@ -271,14 +280,15 @@ pub async fn run(args: &Args) -> Result<()> {
 
 /// Restore session state and schedule expired session cleanup.
 ///
-/// Returns the selection buffer and undo history (restored or fresh).
+/// Returns `(selection, undo_history, restored)` where `restored` is true
+/// when a session was successfully restored (caller should center scroll).
 fn restore_session_if_needed(
     args: &Args,
     config: &Config,
     root_path: &Path,
     builder: &TreeBuilder,
     tree_state: &mut TreeState,
-) -> (SelectionBuffer, UndoHistory) {
+) -> (SelectionBuffer, UndoHistory, bool) {
     let should_restore = if args.restore {
         true
     } else if args.no_restore {
@@ -289,6 +299,7 @@ fn restore_session_if_needed(
 
     let mut selection = SelectionBuffer::new();
     let mut undo_history = UndoHistory::new(config.file_operations.undo_stack_size);
+    let mut restored = false;
 
     if should_restore {
         match session::restore(root_path) {
@@ -320,6 +331,7 @@ fn restore_session_if_needed(
                     config.file_operations.undo_stack_size,
                 );
 
+                restored = true;
                 tracing::info!("session restored");
             }
             Ok(None) => {
@@ -341,7 +353,7 @@ fn restore_session_if_needed(
         }
     });
 
-    (selection, undo_history)
+    (selection, undo_history, restored)
 }
 
 /// Process pending file system watcher events and refresh affected directories.
