@@ -12,6 +12,7 @@ Auto-generated from all feature plans. Last updated: 2026-02-11
 - JSON ファイル（セッション永続化、undo 履歴）、ローカルファイルシステム (012-file-operations)
 - Rust 2024 edition, nightly-2026-01-24 + serde + serde_json (OpGroup 永続化用), 既存の FsOp / executor (012-file-operations)
 - N/A (メモリ内スタック。セッション永続化は Phase 10 で対応) (012-file-operations)
+- Rust 2024 edition, nightly-2026-01-24 + notify 8, notify-debouncer-mini 0.5, tokio (既存) (012-file-operations)
 
 - Rust 2024 edition, nightly-2026-01-24 + ignore 0.4 (WalkBuilder), tokio (background tasks), serde + serde_json (シリアライズ) (002-core-tree)
 
@@ -31,9 +32,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 2024 edition, nightly-2026-01-24: Follow standard conventions
 
 ## Recent Changes
+- 012-file-operations: Added Rust 2024 edition, nightly-2026-01-24 + notify 8, notify-debouncer-mini 0.5, tokio (既存)
 - 012-file-operations: Added Rust 2024 edition, nightly-2026-01-24 + serde + serde_json (OpGroup 永続化用), 既存の FsOp / executor
 - 012-file-operations: Added Rust 2024 edition, nightly-2026-01-24 + ratatui 0.30, crossterm 0.29, tokio (full), notify 8, notify-debouncer-mini 0.5, trash 5, chrono 0.4, sha2 0.10
-- 001-user-config: Added Rust 2024 edition, nightly-2026-01-24 + oml (既存), serde (既存), serde_ignored (新規), dirs (新規, `directories` を置換)
 
 
 <!-- MANUAL ADDITIONS START -->

@@ -1,159 +1,150 @@
-# Implementation Plan: Undo/Redo (Phase 8)
+# Implementation Plan: FS Change Detection (Phase 9)
 
 **Branch**: `012-file-operations` | **Date**: 2026-02-16 | **Spec**: [spec.md](spec.md)
-**Input**: Feature specification — User Story 4 (FR-021 〜 FR-028)
+**Input**: Feature specification — User Story 5 (FS 変更検出)
 
 ## Summary
 
-ファイル操作（paste, create, rename, custom trash delete）に undo/redo を追加する。
-操作は OpGroup 単位でグループ化し、`u` で undo、`Ctrl+r` で redo。
-Permanent delete と System Trash は undo 不可。
+展開中のディレクトリをファイルシステム監視し、外部からの変更を自動的にツリーに反映する。
+`notify` + `notify-debouncer-mini` で 250ms デバウンスの NonRecursive 監視を行い、
+trev 自身のファイル操作中はイベントを抑制して重複更新を防ぐ。
 
 ## Technical Context
 
 **Language/Version**: Rust 2024 edition, nightly-2026-01-24
-**Primary Dependencies**: serde + serde_json (OpGroup 永続化用), 既存の FsOp / executor
-**Storage**: N/A (メモリ内スタック。セッション永続化は Phase 10 で対応)
+**Primary Dependencies**: notify 8, notify-debouncer-mini 0.5, tokio (既存)
+**Storage**: N/A
 **Testing**: cargo test (googletest + rstest + tempfile)
 **Target Platform**: macOS / Linux
 **Project Type**: Single Rust binary (TUI)
-**Performance Goals**: undo/redo 操作が 1 秒以内に完了 (SC-002)
-**Constraints**: undo スタックサイズ設定可能 (default 100)
-**Scale/Scope**: 操作履歴 100 エントリ以内
+**Performance Goals**: 外部変更が 250ms デバウンス後にツリーに反映 (AS-1)
+**Constraints**: 自己操作の重複更新を回避 (AS-3)
+**Scale/Scope**: 展開中ディレクトリ数に比例（通常数十件以下）
 
 ## Constitution Check
 
 | Principle | Status | Notes |
 |---|---|---|
-| I. Safe Rust | ✅ | unwrap/expect 禁止、Result 返却 |
-| II. TDD | ✅ | UndoHistory, OpGroup のユニットテスト先行 |
-| III. Performance | ✅ | スタック操作は O(1)、FS 検証は操作数に比例 |
-| IV. YAGNI | ✅ | 存在チェックのみで検証、ハッシュ検証は不要 |
-| V. Incremental | ✅ | データ型 → ロジック → ハンドラ統合 → UI の順 |
+| I. Safe Rust | ✅ | Arc + AtomicBool で安全な共有状態 |
+| II. TDD | ✅ | FsWatcher のユニットテスト先行 |
+| III. Performance | ✅ | NonRecursive で展開ディレクトリのみ監視、デバウンスで過剰更新を防止 |
+| IV. YAGNI | ✅ | AtomicBool 抑制（muted path set より単純）、Stale 状態は不要（NotLoaded で十分） |
+| V. Incremental | ✅ | Watcher 型 → 初期化 → イベント処理 → 動的 watch/unwatch → 抑制 の順 |
 
 ## Data Model
 
-### OpGroup — 操作グループ
+### FsWatcher
 
 ```rust
-/// A single undoable file system operation with its reverse.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UndoOp {
-    /// Forward operation (what was done).
-    pub forward: FsOp,
-    /// Reverse operation (how to undo it).
-    pub reverse: FsOp,
-}
-
-/// A group of operations performed as a single user action.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpGroup {
-    /// Human-readable description for status messages.
-    pub description: String,
-    /// Individual operations in execution order.
-    pub ops: Vec<UndoOp>,
+/// File system change watcher with debouncing and self-operation suppression.
+pub struct FsWatcher {
+    /// Debounced file watcher (kept alive for the watcher lifetime).
+    debouncer: Debouncer<RecommendedWatcher>,
+    /// Set of currently watched directory paths.
+    watched_dirs: HashSet<PathBuf>,
+    /// Flag to suppress events during self-initiated file operations.
+    suppressed: Arc<AtomicBool>,
 }
 ```
 
-### UndoHistory — 操作履歴スタック
+### メソッド
 
-```rust
-/// Bounded undo/redo history.
-#[derive(Debug)]
-pub struct UndoHistory {
-    /// Completed operations (undo target). Last = most recent.
-    undo_stack: Vec<OpGroup>,
-    /// Undone operations (redo target). Last = most recent undo.
-    redo_stack: Vec<OpGroup>,
-    /// Maximum undo stack size.
-    max_size: usize,
-}
+| メソッド | 用途 |
+|---|---|
+| `new(config, tx)` | WatcherConfig からデバウンサーを生成、イベントを `tx` に送信 |
+| `watch(path)` | ディレクトリを NonRecursive で監視開始 |
+| `unwatch(path)` | ディレクトリの監視を停止 |
+| `suppressed()` | `Arc<AtomicBool>` のクローンを返す（ハンドラで共有用） |
+
+### イベント処理フロー
+
+```text
+notify → debouncer (250ms) → UnboundedSender → event loop
+  ↓
+  affected_dirs = events.map(|e| e.path.parent()).dedup()
+  ↓
+  for each dir:
+    if expanded → refresh_directory() (re-read children)
+    if collapsed + loaded → invalidate_children() (mark as NotLoaded on next expand)
 ```
 
-### 操作ごとの undo マッピング
+### 自己操作抑制
 
-| 操作 | Forward FsOp | Reverse FsOp | Undo 可否 |
-|---|---|---|---|
-| Paste (Copy) | `Copy {src, dst}` | `RemoveFile/Dir {dst}` | ✅ |
-| Paste (Move) | `Move {src, dst}` | `Move {dst, src}` | ✅ |
-| Create file | `CreateFile {path}` | `RemoveFile {path}` | ✅ |
-| Create dir | `CreateDir {path}` | `RemoveDir {path}` | ✅ |
-| Rename | `Move {old, new}` | `Move {new, old}` | ✅ |
-| Delete (CustomTrash) | `Move {orig, trash}` | `Move {trash, orig}` | ✅ |
-| Delete (Permanent) | — | — | ❌ |
-| System Trash (D) | — | — | ❌ |
+```text
+file op handler:
+  suppressed.store(true)
+  execute ops...
+  refresh_directory() (trev 自身で更新)
+  suppressed.store(false)
 
-### FS 状態検証 (undo/redo 前)
+watcher event handler:
+  if suppressed.load() → skip all events
+```
 
-各 reverse/forward op の事前条件を検証:
-- `Move {src, dst}`: src が存在、dst が存在しない
-- `Copy {src, dst}`: src が存在、dst が存在しない
-- `RemoveFile {path}`: path が存在
-- `RemoveDir {path}`: path が存在
-- `CreateFile {path}`: path が存在しない
-- `CreateDir {path}`: path が存在しない
+### 動的 watch/unwatch タイミング
 
-1 つでも失敗 → エラーメッセージ表示、操作中止。
-
-### スタック溢れ時の Trash クリーンアップ
-
-undo スタックが max_size を超えた場合:
-1. 最古の OpGroup を pop
-2. reverse op に trash パスへの参照があれば `clean_trash_file()` で削除
+| イベント | アクション |
+|---|---|
+| ディレクトリ展開 (expand) | `watcher.watch(dir)` |
+| ディレクトリ折り畳み (collapse) | `watcher.unwatch(dir)` |
+| 起動時 | root + 初期展開ディレクトリを watch |
+| 終了時 | FsWatcher drop で自動停止 |
 
 ## Project Structure
 
 ```text
-src/file_op/
-├── undo.rs         # UndoOp, OpGroup, UndoHistory (実装対象)
-├── executor.rs     # FsOp, execute() (既存)
-├── trash.rs        # trash_path(), clean_trash_file() (既存)
-├── selection.rs    # SelectionBuffer (既存)
-└── conflict.rs     # resolve_conflict() (既存)
-
-src/app/
-├── state.rs        # AppState に undo_history フィールド追加
-├── handler/
-│   └── file_op.rs  # OpGroup 生成 + undo/redo ハンドラ
-└── keymap.rs       # Ctrl+r バインド追加
+src/
+├── watcher.rs          # FsWatcher (実装対象)
+├── app.rs              # watcher 初期化 + イベントループ統合
+├── app/
+│   ├── state.rs        # AppContext に suppressed 追加
+│   └── handler/
+│       ├── tree.rs     # expand/collapse で watch/unwatch
+│       └── file_op.rs  # 操作前後で suppress/unsuppress
+└── state/
+    └── tree.rs         # invalidate_children() (既存)
 ```
 
 ## Implementation Steps
 
-### Step 1: `src/file_op/undo.rs` — データ型 + UndoHistory
+### Step 1: `src/watcher.rs` — FsWatcher 型 + テスト
 
-- `UndoOp`, `OpGroup` 構造体
-- `UndoHistory`: `new(max_size)`, `push(group)`, `undo()`, `redo()`, `can_undo()`, `can_redo()`
-- `push` 時: redo スタッククリア、max_size 超過時に最古を evict + trash cleanup
-- `validate_preconditions(ops)` — FS 存在チェック
-- テスト: push/undo/redo サイクル、スタック溢れ、検証失敗
+- `FsWatcher` 構造体: `Debouncer`, `watched_dirs: HashSet`, `suppressed: Arc<AtomicBool>`
+- `new(config: &WatcherConfig, tx: UnboundedSender)` — デバウンサー生成
+- `watch(path)` / `unwatch(path)` — NonRecursive 監視の追加/削除
+- `suppressed()` — Arc clone 取得
+- テスト: watch/unwatch の追跡、二重 watch の冪等性
 
-### Step 2: `src/app/state.rs` — AppState にフィールド追加
+### Step 2: `src/app/state.rs` — AppContext に suppressed 追加
 
-- `pub undo_history: UndoHistory`
+- `pub suppressed: Arc<AtomicBool>` フィールドを AppContext に追加
+- ファイル操作ハンドラと watcher イベントハンドラの両方から参照可能に
 
-### Step 3: `src/app.rs` — 初期化
+### Step 3: `src/app.rs` — Watcher 初期化 + イベントループ統合
 
-- `undo_history: UndoHistory::new(config.file_op.undo_stack_size)`
+- `tokio::sync::mpsc::unbounded_channel` で watcher イベントチャネル作成
+- `FsWatcher::new(&config.watcher, watcher_tx)` で watcher 生成
+- root ディレクトリを初期 watch
+- イベントループ内で `watcher_rx.try_recv()` → 影響ディレクトリ特定 → refresh/invalidate
+- `config.watcher.enabled == false` の場合は watcher 生成をスキップ
 
-### Step 4: `src/app/handler/file_op.rs` — OpGroup 生成
+### Step 4: `src/app/handler/tree.rs` — expand/collapse で watch/unwatch
 
-各操作で OpGroup を構築して `undo_history.push()`:
-- `execute_paste()` → Copy/Move ops のグループ
-- `execute_create()` → CreateFile/CreateDir の単一 op
-- `execute_rename()` → Move の単一 op
-- `execute_delete()` (CustomTrash のみ) → Move ops のグループ
-- Permanent delete / System trash → push しない、"This operation cannot be undone" 表示
+- expand 時: watch 対象に追加
+- collapse 時: watch 対象から除外
+- FsWatcher への参照は `Option<&mut FsWatcher>` で渡す（enabled=false 時は None）
 
-### Step 5: `src/app/handler/file_op.rs` — Undo/Redo ハンドラ
+### Step 5: `src/app/handler/file_op.rs` — 自己操作抑制
 
-- `FileOpAction::Undo` → `undo_history.undo()` → 逆操作を実行 → ステータスメッセージ
-- `FileOpAction::Redo` → `undo_history.redo()` → 順操作を再実行 → ステータスメッセージ
-- 検証失敗時: "Cannot undo/redo: file state has changed" 表示
+- `execute_paste`, `execute_create`, `execute_rename`, `execute_delete` の前後で
+  `suppressed.store(true/false, Ordering::SeqCst)`
+- `execute_undo`, `execute_redo` も同様
 
-### Step 6: `src/app/keymap.rs` — Ctrl+r バインド
+### Step 6: Watcher イベントから refresh/invalidate ロジック
 
-- `Ctrl+r` → `FileOpAction::Redo` (u → Undo は既存)
+- 受信した `DebouncedEvent` のパス群から親ディレクトリを抽出
+- 展開中 (expanded + loaded) なら `refresh_directory()`
+- 折り畳み中 (collapsed + loaded) なら `invalidate_children()` で NotLoaded に戻す
 
 ### Step 7: テスト + lint + format
 
