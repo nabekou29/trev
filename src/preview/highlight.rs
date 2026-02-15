@@ -54,18 +54,26 @@ fn syntect_to_ratatui_style(style: &SyntectStyle) -> RatatuiStyle {
     s
 }
 
-/// Auto-detect terminal background and choose an appropriate theme.
+/// Cached theme name, detected once at first use.
 ///
-/// Uses `terminal-light` to detect luma. Dark terminals get
-/// `Base16OceanDark`, light terminals get `Base16OceanLight`.
-fn auto_theme() -> EmbeddedThemeName {
+/// `terminal_light::luma()` sends an OSC 11 query to the terminal.
+/// This must only run once — repeated queries during the event loop
+/// produce responses on stdin that crossterm misinterprets as key events.
+static AUTO_THEME: LazyLock<EmbeddedThemeName> = LazyLock::new(|| {
     let is_light = terminal_light::luma().is_ok_and(|l| l > 0.6);
-
     if is_light {
         EmbeddedThemeName::Base16OceanLight
     } else {
         EmbeddedThemeName::Base16OceanDark
     }
+});
+
+/// Force-initialize the theme cache.
+///
+/// Must be called before entering raw mode, as `terminal_light::luma()`
+/// sends an OSC 11 query whose response would pollute stdin in raw mode.
+pub fn init_theme() {
+    let _ = *AUTO_THEME;
 }
 
 /// Get a reference to the global syntax set.
@@ -82,7 +90,7 @@ pub fn highlight_lines(code: &str, extension: &str) -> Vec<Line<'static>> {
     let ss = &*SYNTAX_SET;
     // Index is safe: EmbeddedLazyThemeSet always contains all EmbeddedThemeName variants.
     #[allow(clippy::indexing_slicing)]
-    let theme = &THEME_SET[auto_theme()];
+    let theme = &THEME_SET[*AUTO_THEME];
 
     let syntax = ss
         .find_syntax_by_extension(extension)

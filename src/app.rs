@@ -15,7 +15,6 @@ use ratatui_image::picker::Picker;
 use crossterm::event::{
     Event,
     KeyCode,
-    KeyEventKind,
     KeyModifiers,
 };
 
@@ -180,6 +179,10 @@ pub async fn run(args: &Args) -> Result<()> {
     let mut tree_state = TreeState::new(root, sort_order, sort_direction, directories_first);
     tree_state.apply_sort(sort_order, sort_direction, directories_first);
 
+    // Detect terminal background for theme selection (must be before raw mode).
+    // terminal_light::luma() sends OSC 11 query — safe only in cooked mode.
+    crate::preview::highlight::init_theme();
+
     // Detect terminal graphics protocol (must be before terminal init/raw mode).
     // Falls back to halfblocks if detection fails.
     let picker = Picker::from_query_stdio()
@@ -250,10 +253,8 @@ pub async fn run(args: &Args) -> Result<()> {
         })?;
 
         // Poll for events (50ms timeout for responsive async result handling).
-        // Only process Press events — Release/Repeat from kitty keyboard protocol are ignored.
         if crossterm::event::poll(Duration::from_millis(50))?
             && let Event::Key(key) = crossterm::event::read()?
-            && key.kind == KeyEventKind::Press
         {
             handle_key_event(key, &mut state, &children_tx, &preview_tx, &config.preview, show_hidden, show_ignored);
         }
