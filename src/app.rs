@@ -5,7 +5,10 @@ mod keymap;
 mod state;
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -37,6 +40,7 @@ use crate::preview::providers::fallback::FallbackProvider;
 use crate::preview::providers::image::ImagePreviewProvider;
 use crate::preview::providers::text::TextPreviewProvider;
 use crate::preview::state::PreviewState;
+use crate::session;
 use crate::state::tree::TreeState;
 use crate::tree::builder::TreeBuilder;
 use crate::watcher::FsWatcher;
@@ -115,6 +119,10 @@ pub async fn run(args: &Args) -> Result<()> {
         (None, Arc::new(AtomicBool::new(false)))
     };
 
+    // Restore session and clean up expired sessions.
+    let (selection, undo_history) =
+        restore_session_if_needed(args, &config, &root_path, &builder, &mut tree_state);
+
     // Create app state.
     let mut state = AppState {
         tree_state,
@@ -122,8 +130,8 @@ pub async fn run(args: &Args) -> Result<()> {
         preview_cache: PreviewCache::new(config.preview.cache_size),
         preview_registry,
         mode: AppMode::default(),
-        selection: SelectionBuffer::new(),
-        undo_history: UndoHistory::new(config.file_operations.undo_stack_size),
+        selection,
+        undo_history,
         watcher: fs_watcher,
         should_quit: false,
         show_icons: !args.no_icons,
@@ -243,10 +251,97 @@ pub async fn run(args: &Args) -> Result<()> {
         }
     }
 
+    // Save session state before exiting.
+    let session_state = session::build_session_state(
+        &root_path,
+        state.tree_state.expanded_paths(),
+        state.tree_state.cursor_path(),
+        &state.selection,
+        &state.undo_history,
+    );
+    if let Err(e) = session::save(&session_state) {
+        tracing::warn!(%e, "failed to save session");
+    }
+
     // Restore terminal.
     crate::terminal::restore();
 
     Ok(())
+}
+
+/// Restore session state and schedule expired session cleanup.
+///
+/// Returns the selection buffer and undo history (restored or fresh).
+fn restore_session_if_needed(
+    args: &Args,
+    config: &Config,
+    root_path: &Path,
+    builder: &TreeBuilder,
+    tree_state: &mut TreeState,
+) -> (SelectionBuffer, UndoHistory) {
+    let should_restore = if args.restore {
+        true
+    } else if args.no_restore {
+        false
+    } else {
+        config.session.restore_by_default
+    };
+
+    let mut selection = SelectionBuffer::new();
+    let mut undo_history = UndoHistory::new(config.file_operations.undo_stack_size);
+
+    if should_restore {
+        match session::restore(root_path) {
+            Ok(Some(session_state)) => {
+                // Restore expanded directories (sorted so parents load before children).
+                let mut paths = session_state.expanded_paths;
+                paths.sort_by_key(|p| p.as_os_str().len());
+                for path in &paths {
+                    if let Ok(children) = builder.load_children(path) {
+                        tree_state.set_children(path, children, true);
+                    }
+                }
+
+                // Restore cursor position.
+                if let Some(ref cursor_path) = session_state.cursor_path {
+                    tree_state.move_cursor_to_path(cursor_path);
+                }
+
+                // Restore selection buffer.
+                selection = SelectionBuffer::from_parts(
+                    session_state.selection_paths,
+                    session_state.selection_mode,
+                );
+
+                // Restore undo history.
+                undo_history = UndoHistory::from_stacks(
+                    session_state.undo_stack,
+                    session_state.redo_stack,
+                    config.file_operations.undo_stack_size,
+                );
+
+                tracing::info!("session restored");
+            }
+            Ok(None) => {
+                tracing::debug!("no session to restore");
+            }
+            Err(e) => {
+                tracing::warn!(%e, "failed to restore session");
+            }
+        }
+    }
+
+    // Clean up expired sessions in background.
+    let expiry_days = config.session.expiry_days;
+    tokio::spawn(async move {
+        match session::cleanup_expired(expiry_days) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(n, "cleaned up expired sessions"),
+            Err(e) => tracing::warn!(%e, "failed to clean up expired sessions"),
+        }
+    });
+
+    (selection, undo_history)
 }
 
 /// Process pending file system watcher events and refresh affected directories.
