@@ -119,26 +119,6 @@ impl Default for KeyMap {
     }
 }
 
-/// Convert config sort order to tree state sort order.
-pub const fn map_sort_order(order: crate::config::SortOrder) -> crate::state::tree::SortOrder {
-    match order {
-        crate::config::SortOrder::Name => crate::state::tree::SortOrder::Name,
-        crate::config::SortOrder::Size => crate::state::tree::SortOrder::Size,
-        crate::config::SortOrder::Mtime => crate::state::tree::SortOrder::Modified,
-        crate::config::SortOrder::Type => crate::state::tree::SortOrder::Type,
-        crate::config::SortOrder::Extension => crate::state::tree::SortOrder::Extension,
-    }
-}
-
-/// Convert config sort direction to tree state sort direction.
-pub const fn map_sort_direction(
-    direction: crate::config::SortDirection,
-) -> crate::state::tree::SortDirection {
-    match direction {
-        crate::config::SortDirection::Asc => crate::state::tree::SortDirection::Asc,
-        crate::config::SortDirection::Desc => crate::state::tree::SortDirection::Desc,
-    }
-}
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]

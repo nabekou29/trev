@@ -60,6 +60,18 @@ pub enum SortOrder {
     Extension,
 }
 
+impl From<crate::config::SortOrder> for SortOrder {
+    fn from(order: crate::config::SortOrder) -> Self {
+        match order {
+            crate::config::SortOrder::Name => Self::Name,
+            crate::config::SortOrder::Size => Self::Size,
+            crate::config::SortOrder::Mtime => Self::Modified,
+            crate::config::SortOrder::Type => Self::Type,
+            crate::config::SortOrder::Extension => Self::Extension,
+        }
+    }
+}
+
 /// Sort direction.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -69,6 +81,15 @@ pub enum SortDirection {
     Asc,
     /// Descending order.
     Desc,
+}
+
+impl From<crate::config::SortDirection> for SortDirection {
+    fn from(direction: crate::config::SortDirection) -> Self {
+        match direction {
+            crate::config::SortDirection::Asc => Self::Asc,
+            crate::config::SortDirection::Desc => Self::Desc,
+        }
+    }
 }
 
 /// A visible node for UI rendering — a flattened reference into the tree.

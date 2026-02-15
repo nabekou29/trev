@@ -15,10 +15,6 @@ use handler::{
     trigger_preview,
 };
 pub use keymap::KeyMap;
-use keymap::{
-    map_sort_direction,
-    map_sort_order,
-};
 use ratatui_image::picker::Picker;
 pub use state::*;
 
@@ -54,8 +50,8 @@ pub async fn run(args: &Args) -> Result<()> {
     let root_path = std::fs::canonicalize(&args.path)?;
 
     // Map config sort settings to tree state types.
-    let sort_order = map_sort_order(config.sort.order);
-    let sort_direction = map_sort_direction(config.sort.direction);
+    let sort_order = config.sort.order.into();
+    let sort_direction = config.sort.direction.into();
     let directories_first = config.sort.directories_first;
 
     // Build the initial tree (depth 1).
