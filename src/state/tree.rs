@@ -260,6 +260,7 @@ impl TreeState {
     /// Invalidate children for a directory, setting it back to Loading state.
     ///
     /// Used to trigger a re-read of a directory after file operations (create, rename, delete).
+    #[expect(dead_code, reason = "Will be used by FS watcher for explicit invalidation")]
     pub fn invalidate_children(&mut self, path: &Path) {
         if let Some(node) = self.find_node_mut(path) {
             node.children = ChildrenState::Loading;

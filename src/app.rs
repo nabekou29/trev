@@ -56,6 +56,8 @@ pub struct AppState {
     pub mode: AppMode,
     /// Set of marked file paths for batch operations.
     pub mark_set: MarkSet,
+    /// Yank buffer for copy/cut operations.
+    pub yank_buffer: crate::file_op::yank::YankBuffer,
     /// Whether the application should quit.
     pub should_quit: bool,
     /// Whether to show file icons (Nerd Fonts).
@@ -213,6 +215,7 @@ pub async fn run(args: &Args) -> Result<()> {
         preview_registry,
         mode: AppMode::default(),
         mark_set: MarkSet::new(),
+        yank_buffer: crate::file_op::yank::YankBuffer::new(),
         should_quit: false,
         show_icons: !args.no_icons,
         show_preview,
@@ -436,6 +439,15 @@ const fn map_key_event(key: crossterm::event::KeyEvent) -> Option<crate::action:
         (KeyCode::Char('r'), KeyModifiers::NONE) => {
             Some(Action::FileOp(crate::action::FileOpAction::Rename))
         }
+        (KeyCode::Char('y'), KeyModifiers::NONE) => {
+            Some(Action::FileOp(crate::action::FileOpAction::Yank))
+        }
+        (KeyCode::Char('x'), KeyModifiers::NONE) => {
+            Some(Action::FileOp(crate::action::FileOpAction::Cut))
+        }
+        (KeyCode::Char('p'), KeyModifiers::NONE) => {
+            Some(Action::FileOp(crate::action::FileOpAction::Paste))
+        }
         _ => None,
     }
 }
@@ -572,12 +584,25 @@ fn handle_file_op_action(
                 state.mode = AppMode::Input(InputState::for_rename(info.path));
             }
         }
-        // Yank/Cut: will clear marks after collecting targets (US1 integration).
+        FileOpAction::Yank => {
+            if let Some(info) = state.tree_state.current_node_info() {
+                let targets = state.mark_set.targets_or_cursor(&info.path);
+                state.yank_buffer.set(targets, crate::file_op::yank::YankMode::Copy);
+                state.mark_set.clear();
+            }
+        }
+        FileOpAction::Cut => {
+            if let Some(info) = state.tree_state.current_node_info() {
+                let targets = state.mark_set.targets_or_cursor(&info.path);
+                state.yank_buffer.set(targets, crate::file_op::yank::YankMode::Cut);
+                state.mark_set.clear();
+            }
+        }
+        FileOpAction::Paste => {
+            execute_paste(state, children_tx, show_hidden, show_ignored);
+        }
         // Delete/SystemTrash: will clear marks after confirmation (US3 integration).
-        FileOpAction::Yank
-        | FileOpAction::Cut
-        | FileOpAction::Paste
-        | FileOpAction::Delete
+        FileOpAction::Delete
         | FileOpAction::SystemTrash
         | FileOpAction::Undo
         | FileOpAction::Redo => {}
@@ -714,16 +739,116 @@ fn execute_rename(
     refresh_directory(state, parent, children_tx, show_hidden, show_ignored);
 }
 
-/// Refresh a directory in the tree by triggering a re-read of its children.
-fn refresh_directory(
+/// Execute paste operation: copy or move yanked files to the cursor directory.
+fn execute_paste(
     state: &mut AppState,
+    children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    show_hidden: bool,
+    show_ignored: bool,
+) {
+    use std::collections::HashSet;
+
+    use crate::file_op::conflict::resolve_conflict;
+    use crate::file_op::executor::{
+        FsOp,
+        execute,
+        is_ancestor,
+    };
+    use crate::file_op::yank::YankMode;
+
+    if state.yank_buffer.is_empty() {
+        return;
+    }
+
+    let Some(info) = state.tree_state.current_node_info() else {
+        return;
+    };
+
+    // Determine destination directory.
+    let dst_dir = if info.is_dir {
+        info.path
+    } else {
+        info.path
+            .parent()
+            .map_or_else(|| info.path.clone(), Path::to_path_buf)
+    };
+
+    let mode = state.yank_buffer.mode().cloned();
+    let is_cut = matches!(mode, Some(YankMode::Cut));
+
+    // Track source parent directories that need refresh (for cut operations).
+    let mut src_parents: HashSet<PathBuf> = HashSet::new();
+
+    for src in state.yank_buffer.paths().to_vec() {
+        // Self-reference check: prevent copying/moving a directory into itself.
+        if src.is_dir() && is_ancestor(&src, &dst_dir) {
+            tracing::warn!(?src, ?dst_dir, "skipping: cannot copy/move directory into itself");
+            continue;
+        }
+
+        let Some(file_name) = src.file_name() else {
+            tracing::warn!(?src, "skipping: no file name");
+            continue;
+        };
+
+        let desired_dst = dst_dir.join(file_name);
+        let final_dst = resolve_conflict(&desired_dst);
+
+        let op = if is_cut {
+            FsOp::Move {
+                src: src.clone(),
+                dst: final_dst,
+            }
+        } else {
+            FsOp::Copy {
+                src: src.clone(),
+                dst: final_dst,
+            }
+        };
+
+        if let Err(e) = execute(&op) {
+            tracing::error!(%e, ?src, "paste operation failed");
+            continue;
+        }
+
+        // Track source parent for cut operations.
+        if is_cut {
+            if let Some(parent) = src.parent() {
+                src_parents.insert(parent.to_path_buf());
+            }
+        }
+    }
+
+    // Clear yank buffer after cut (files moved), retain after copy.
+    if is_cut {
+        state.yank_buffer.clear();
+    }
+    state.mark_set.clear();
+
+    // Refresh destination directory.
+    refresh_directory(state, &dst_dir, children_tx, show_hidden, show_ignored);
+
+    // Refresh source parent directories (for cut operations).
+    for parent in &src_parents {
+        if *parent != dst_dir {
+            refresh_directory(state, parent, children_tx, show_hidden, show_ignored);
+        }
+    }
+}
+
+/// Refresh a directory in the tree by triggering a re-read of its children.
+///
+/// Keeps existing children visible during reload to avoid a visual flash
+/// where the directory briefly appears collapsed.
+fn refresh_directory(
+    _state: &mut AppState,
     dir: &Path,
     children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
     show_hidden: bool,
     show_ignored: bool,
 ) {
-    // Mark directory as needing reload, then spawn load.
-    state.tree_state.invalidate_children(dir);
+    // Spawn reload without invalidating: old children remain visible until
+    // set_children() replaces them with the fresh listing.
     spawn_load_children(children_tx.clone(), dir.to_path_buf(), show_hidden, show_ignored, false);
 }
 
