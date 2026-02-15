@@ -13,6 +13,8 @@ Auto-generated from all feature plans. Last updated: 2026-02-11
 - Rust 2024 edition, nightly-2026-01-24 + serde + serde_json (OpGroup 永続化用), 既存の FsOp / executor (012-file-operations)
 - N/A (メモリ内スタック。セッション永続化は Phase 10 で対応) (012-file-operations)
 - Rust 2024 edition, nightly-2026-01-24 + notify 8, notify-debouncer-mini 0.5, tokio (既存) (012-file-operations)
+- Rust 2024 edition, nightly-2026-01-24 + serde + serde_json (既存), sha2 (既存), dirs (既存) (012-file-operations)
+- JSON ファイル (`{data_dir}/trev/sessions/{hash}.json`) (012-file-operations)
 
 - Rust 2024 edition, nightly-2026-01-24 + ignore 0.4 (WalkBuilder), tokio (background tasks), serde + serde_json (シリアライズ) (002-core-tree)
 
@@ -32,9 +34,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 2024 edition, nightly-2026-01-24: Follow standard conventions
 
 ## Recent Changes
+- 012-file-operations: Added Rust 2024 edition, nightly-2026-01-24 + serde + serde_json (既存), sha2 (既存), dirs (既存)
 - 012-file-operations: Added Rust 2024 edition, nightly-2026-01-24 + notify 8, notify-debouncer-mini 0.5, tokio (既存)
 - 012-file-operations: Added Rust 2024 edition, nightly-2026-01-24 + serde + serde_json (OpGroup 永続化用), 既存の FsOp / executor
-- 012-file-operations: Added Rust 2024 edition, nightly-2026-01-24 + ratatui 0.30, crossterm 0.29, tokio (full), notify 8, notify-debouncer-mini 0.5, trash 5, chrono 0.4, sha2 0.10
 
 
 <!-- MANUAL ADDITIONS START -->
