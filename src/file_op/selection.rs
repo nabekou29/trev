@@ -100,6 +100,18 @@ impl SelectionBuffer {
         self.paths.contains(path)
     }
 
+    /// Export the buffer contents for serialization.
+    pub fn export(&self) -> (Vec<PathBuf>, Option<&SelectionMode>) {
+        let mut paths: Vec<PathBuf> = self.paths.iter().cloned().collect();
+        paths.sort();
+        (paths, self.mode.as_ref())
+    }
+
+    /// Reconstruct a `SelectionBuffer` from previously exported parts.
+    pub fn from_parts(paths: Vec<PathBuf>, mode: Option<SelectionMode>) -> Self {
+        Self { paths: paths.into_iter().collect(), mode }
+    }
+
     /// Get selected paths with children removed when a parent is also selected.
     ///
     /// If both `/a` and `/a/b` are selected, only `/a` is returned.
@@ -251,5 +263,31 @@ mod tests {
         buf.toggle_mark(PathBuf::from("/a/b/c/d"));
         let result = buf.deduplicated_paths();
         assert_eq!(result, vec![PathBuf::from("/a")]);
+    }
+
+    #[rstest]
+    fn export_and_from_parts_roundtrip() {
+        let mut buf = SelectionBuffer::new();
+        buf.set(vec![PathBuf::from("/b"), PathBuf::from("/a")], SelectionMode::Copy);
+
+        let (paths, mode) = buf.export();
+        // Paths are sorted by export.
+        assert_eq!(paths, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+        assert_eq!(mode, Some(&SelectionMode::Copy));
+
+        // Reconstruct.
+        let restored = SelectionBuffer::from_parts(paths, mode.cloned());
+        assert_that!(restored.count(), eq(2));
+        assert_that!(restored.contains(Path::new("/a")), eq(true));
+        assert_that!(restored.contains(Path::new("/b")), eq(true));
+        assert_that!(restored.mode(), some(eq(&SelectionMode::Copy)));
+    }
+
+    #[rstest]
+    fn export_empty_buffer() {
+        let buf = SelectionBuffer::new();
+        let (paths, mode) = buf.export();
+        assert_that!(paths.len(), eq(0));
+        assert_that!(mode, none());
     }
 }

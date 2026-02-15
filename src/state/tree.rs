@@ -211,6 +211,31 @@ impl TreeState {
         self.directories_first
     }
 
+    /// Collect paths of all expanded directories in the tree.
+    pub fn expanded_paths(&self) -> Vec<PathBuf> {
+        let mut result = Vec::new();
+        collect_expanded(&self.root, &mut result);
+        result
+    }
+
+    /// Get the path of the node at the current cursor position.
+    pub fn cursor_path(&self) -> Option<PathBuf> {
+        self.current_node_info().map(|info| info.path)
+    }
+
+    /// Move the cursor to the node matching the given path.
+    ///
+    /// Searches visible nodes for a path match. If found, moves the cursor
+    /// there. Returns `true` if the path was found and cursor moved.
+    pub fn move_cursor_to_path(&mut self, path: &Path) -> bool {
+        let visible = self.visible_nodes();
+        if let Some(idx) = visible.iter().position(|vn| vn.node.path == path) {
+            self.cursor = idx;
+            return true;
+        }
+        false
+    }
+
     /// Generate the flattened list of visible nodes by DFS walk.
     ///
     /// Only includes nodes that are in expanded + `Loaded` directories.
@@ -519,6 +544,18 @@ fn collect_visible<'a>(node: &'a TreeNode, depth: usize, result: &mut Vec<Visibl
     {
         for child in children {
             collect_visible(child, depth + 1, result);
+        }
+    }
+}
+
+/// Recursively collect paths of all expanded directories via DFS.
+fn collect_expanded(node: &TreeNode, result: &mut Vec<PathBuf>) {
+    if node.is_dir && node.is_expanded {
+        result.push(node.path.clone());
+    }
+    if let Some(children) = node.children.as_loaded() {
+        for child in children {
+            collect_expanded(child, result);
         }
     }
 }
@@ -1177,5 +1214,65 @@ mod tests {
             "visible_nodes took {}ms (limit: 16ms)",
             elapsed.as_millis()
         );
+    }
+
+    // =========================================================================
+    // Session Persistence helpers
+    // =========================================================================
+
+    #[rstest]
+    fn expanded_paths_collects_expanded_dirs() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let mut subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
+        subdir.is_expanded = true;
+        let state = state_with_children(vec![subdir, file_node("a.txt", root)]);
+
+        let mut paths = state.expanded_paths();
+        paths.sort();
+        // Root is expanded + subdir is expanded.
+        assert_eq!(paths, vec![PathBuf::from("/test/root"), subdir_path]);
+    }
+
+    #[rstest]
+    fn expanded_paths_skips_collapsed_dirs() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
+        // subdir is collapsed (default from dir_node helper).
+        let state = state_with_children(vec![subdir]);
+
+        let paths = state.expanded_paths();
+        // Only root is expanded.
+        assert_eq!(paths, vec![PathBuf::from("/test/root")]);
+    }
+
+    #[rstest]
+    fn cursor_path_returns_current_node_path() {
+        let root = Path::new("/test/root");
+        let mut state =
+            state_with_children(vec![file_node("a.txt", root), file_node("b.txt", root)]);
+        state.move_cursor_to(1);
+        assert_eq!(state.cursor_path(), Some(root.join("b.txt")));
+    }
+
+    #[rstest]
+    fn move_cursor_to_path_finds_node() {
+        let root = Path::new("/test/root");
+        let mut state = state_with_children(vec![
+            file_node("a.txt", root),
+            file_node("b.txt", root),
+            file_node("c.txt", root),
+        ]);
+        assert_that!(state.move_cursor_to_path(&root.join("c.txt")), eq(true));
+        assert_that!(state.cursor(), eq(2));
+    }
+
+    #[rstest]
+    fn move_cursor_to_path_returns_false_for_missing() {
+        let root = Path::new("/test/root");
+        let mut state = state_with_children(vec![file_node("a.txt", root)]);
+        assert_that!(state.move_cursor_to_path(&root.join("nonexistent.txt")), eq(false));
+        assert_that!(state.cursor(), eq(0));
     }
 }

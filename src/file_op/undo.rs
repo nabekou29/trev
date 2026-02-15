@@ -122,6 +122,20 @@ impl UndoHistory {
     pub const fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
     }
+
+    /// Export undo and redo stacks for serialization.
+    pub fn export_stacks(&self) -> (&[OpGroup], &[OpGroup]) {
+        (&self.undo_stack, &self.redo_stack)
+    }
+
+    /// Reconstruct an `UndoHistory` from previously exported stacks.
+    pub const fn from_stacks(
+        undo_stack: Vec<OpGroup>,
+        redo_stack: Vec<OpGroup>,
+        max_size: usize,
+    ) -> Self {
+        Self { undo_stack, redo_stack, max_size }
+    }
 }
 
 /// Validate that a file system operation's preconditions are met.
@@ -384,5 +398,31 @@ mod tests {
         let op = op.unwrap();
         assert_eq!(op.forward, FsOp::CreateFile { path: PathBuf::from("/a") });
         assert_eq!(op.reverse, FsOp::RemoveFile { path: PathBuf::from("/a") });
+    }
+
+    #[rstest]
+    fn export_and_from_stacks_roundtrip() {
+        let mut history = UndoHistory::new(10);
+        history.push(sample_group("first"));
+        history.push(sample_group("second"));
+
+        // Simulate an undo to populate redo stack.
+        let group = history.undo_stack.pop().unwrap();
+        history.redo_stack.push(group);
+
+        let (undo, redo) = history.export_stacks();
+        assert_that!(undo.len(), eq(1));
+        assert_that!(redo.len(), eq(1));
+        assert_eq!(undo[0].description, "first");
+        assert_eq!(redo[0].description, "second");
+
+        // Reconstruct.
+        let restored = UndoHistory::from_stacks(undo.to_vec(), redo.to_vec(), 10);
+        assert_that!(restored.can_undo(), eq(true));
+        assert_that!(restored.can_redo(), eq(true));
+
+        let (undo2, redo2) = restored.export_stacks();
+        assert_eq!(undo2[0].description, "first");
+        assert_eq!(redo2[0].description, "second");
     }
 }
