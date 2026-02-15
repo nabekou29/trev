@@ -34,9 +34,7 @@ impl PreviewCache {
             None => unreachable!(),
         };
         let cap = std::num::NonZeroUsize::new(capacity).unwrap_or(DEFAULT_CAP);
-        Self {
-            cache: LruCache::new(cap),
-        }
+        Self { cache: LruCache::new(cap) }
     }
 
     /// Look up a cached preview content by key.
@@ -63,10 +61,7 @@ mod tests {
     use super::*;
 
     fn make_key(path: &str, provider: &str) -> CacheKey {
-        CacheKey {
-            path: PathBuf::from(path),
-            provider_name: provider.to_string(),
-        }
+        CacheKey { path: PathBuf::from(path), provider_name: provider.to_string() }
     }
 
     #[rstest]
@@ -121,10 +116,7 @@ mod tests {
         let elapsed = start.elapsed();
         let per_op = elapsed / 10_000;
 
-        assert!(
-            per_op.as_micros() < 1000,
-            "Cache hit took {per_op:?} per op, expected < 1ms"
-        );
+        assert!(per_op.as_micros() < 1000, "Cache hit took {per_op:?} per op, expected < 1ms");
     }
 
     #[rstest]
@@ -135,10 +127,7 @@ mod tests {
 
         cache.put(
             key_text.clone(),
-            PreviewContent::PlainText {
-                lines: vec!["<svg>".to_string()],
-                truncated: false,
-            },
+            PreviewContent::PlainText { lines: vec!["<svg>".to_string()], truncated: false },
         );
         cache.put(key_image.clone(), PreviewContent::Empty);
 

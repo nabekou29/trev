@@ -125,9 +125,7 @@ impl PreviewState {
 
     /// Get the name of the currently active provider, if any.
     pub fn active_provider_name(&self) -> Option<&str> {
-        self.available_providers
-            .get(self.active_provider_index)
-            .map(String::as_str)
+        self.available_providers.get(self.active_provider_index).map(String::as_str)
     }
 }
 
@@ -198,10 +196,7 @@ mod tests {
     #[rstest]
     fn cycle_provider_wraps_around() {
         let mut state = PreviewState::new();
-        state.set_available_providers(vec![
-            "Image".to_string(),
-            "Text".to_string(),
-        ]);
+        state.set_available_providers(vec!["Image".to_string(), "Text".to_string()]);
 
         assert_that!(state.active_provider_index, eq(0));
         assert_that!(state.cycle_provider(), eq(true));
@@ -222,10 +217,7 @@ mod tests {
     #[rstest]
     fn active_provider_name_returns_correct_name() {
         let mut state = PreviewState::new();
-        state.set_available_providers(vec![
-            "Image".to_string(),
-            "Text".to_string(),
-        ]);
+        state.set_available_providers(vec!["Image".to_string(), "Text".to_string()]);
 
         assert_that!(state.active_provider_name(), some(eq("Image")));
         state.cycle_provider();

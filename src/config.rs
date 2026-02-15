@@ -26,6 +26,12 @@ pub struct Config {
     pub display: DisplayConfig,
     /// Preview settings.
     pub preview: PreviewConfig,
+    /// File operation settings.
+    pub file_operations: FileOpConfig,
+    /// Session persistence settings.
+    pub session: SessionConfig,
+    /// File system watcher settings.
+    pub watcher: WatcherConfig,
 }
 
 /// Sort configuration.
@@ -99,6 +105,11 @@ pub struct PreviewConfig {
 /// External command configuration for preview.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalCommand {
+    /// Display name for this command provider.
+    ///
+    /// Defaults to the command binary name when omitted.
+    #[serde(default)]
+    pub name: Option<String>,
     /// File extensions this command applies to.
     pub extensions: Vec<String>,
     /// Command name (must be in `$PATH`).
@@ -106,6 +117,74 @@ pub struct ExternalCommand {
     /// Command arguments.
     #[serde(default)]
     pub args: Vec<String>,
+}
+
+impl ExternalCommand {
+    /// Get the display name for this command.
+    ///
+    /// Returns the explicit `name` if set, otherwise the command binary name.
+    pub fn display_name(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.command)
+    }
+}
+
+/// File operation configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FileOpConfig {
+    /// Delete mode for the `d` key.
+    pub delete_mode: DeleteMode,
+    /// Maximum undo stack size.
+    pub undo_stack_size: usize,
+}
+
+/// Delete mode variants.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeleteMode {
+    /// Permanently delete files (undo not possible).
+    #[default]
+    Permanent,
+    /// Move files to custom trash directory (undo possible).
+    CustomTrash,
+}
+
+/// Session persistence configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SessionConfig {
+    /// Whether to restore session by default on startup.
+    pub restore_by_default: bool,
+    /// Days before a session file expires and is auto-deleted.
+    pub expiry_days: u64,
+}
+
+/// File system watcher configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WatcherConfig {
+    /// Whether FS watching is enabled.
+    pub enabled: bool,
+    /// Debounce interval in milliseconds.
+    pub debounce_ms: u64,
+}
+
+impl Default for FileOpConfig {
+    fn default() -> Self {
+        Self { delete_mode: DeleteMode::default(), undo_stack_size: 100 }
+    }
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self { restore_by_default: true, expiry_days: 90 }
+    }
+}
+
+impl Default for WatcherConfig {
+    fn default() -> Self {
+        Self { enabled: true, debounce_ms: 250 }
+    }
 }
 
 impl Default for PreviewConfig {
@@ -132,11 +211,7 @@ impl Default for SortConfig {
 
 impl Default for DisplayConfig {
     fn default() -> Self {
-        Self {
-            show_hidden: false,
-            show_ignored: false,
-            show_preview: true,
-        }
+        Self { show_hidden: false, show_ignored: false, show_preview: true }
     }
 }
 
@@ -161,10 +236,7 @@ impl Config {
         if path.exists() {
             return Self::load_from(&path);
         }
-        Ok(ConfigLoadResult {
-            config: Self::default(),
-            warnings: Vec::new(),
-        })
+        Ok(ConfigLoadResult { config: Self::default(), warnings: Vec::new() })
     }
 
     /// Load configuration from a specific file path.
@@ -217,10 +289,7 @@ impl Config {
     ///
     /// Resolves `$XDG_CONFIG_HOME/trev/` first, falls back to `~/.config/trev/`.
     fn config_dir() -> PathBuf {
-        Self::resolve_config_dir(
-            std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
-            dirs::home_dir(),
-        )
+        Self::resolve_config_dir(std::env::var("XDG_CONFIG_HOME").ok().as_deref(), dirs::home_dir())
     }
 
     /// Resolve config directory from explicit XDG and home directory values.
@@ -228,11 +297,7 @@ impl Config {
     /// Extracted for testability (avoids `unsafe` env var manipulation in tests).
     fn resolve_config_dir(xdg_config_home: Option<&str>, home_dir: Option<PathBuf>) -> PathBuf {
         xdg_config_home.map_or_else(
-            || {
-                home_dir
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join(".config/trev")
-            },
+            || home_dir.unwrap_or_else(|| PathBuf::from(".")).join(".config/trev"),
             |xdg| PathBuf::from(xdg).join("trev"),
         )
     }
@@ -434,10 +499,7 @@ typo_key = "oops"
     #[rstest]
     fn cli_override_sort_order() {
         let mut config = Config::default();
-        let args = Args {
-            sort_order: Some(SortOrder::Size),
-            ..Args::default()
-        };
+        let args = Args { sort_order: Some(SortOrder::Size), ..Args::default() };
         config.apply_cli_overrides(&args);
 
         assert_that!(config.sort.order, eq(SortOrder::Size));
@@ -450,10 +512,7 @@ typo_key = "oops"
         let mut config = Config::default();
         assert_that!(config.display.show_preview, eq(true));
 
-        let args = Args {
-            no_preview: true,
-            ..Args::default()
-        };
+        let args = Args { no_preview: true, ..Args::default() };
         config.apply_cli_overrides(&args);
 
         assert_that!(config.display.show_preview, eq(false));
@@ -475,15 +534,65 @@ typo_key = "oops"
         assert_that!(config.display.show_preview, eq(false));
     }
 
+    // --- ExternalCommand display_name ---
+
+    #[rstest]
+    fn external_command_display_name_uses_explicit_name() {
+        let cmd = ExternalCommand {
+            name: Some("Pretty JSON".to_string()),
+            extensions: vec!["json".to_string()],
+            command: "jq".to_string(),
+            args: vec![".".to_string()],
+        };
+        assert_that!(cmd.display_name(), eq("Pretty JSON"));
+    }
+
+    #[rstest]
+    fn external_command_display_name_defaults_to_command() {
+        let cmd = ExternalCommand {
+            name: None,
+            extensions: vec!["md".to_string()],
+            command: "glow".to_string(),
+            args: vec![],
+        };
+        assert_that!(cmd.display_name(), eq("glow"));
+    }
+
+    #[rstest]
+    fn external_command_name_field_is_optional_in_toml() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[[preview.commands]]
+name = "Pretty JSON"
+extensions = ["json"]
+command = "jq"
+args = ["."]
+
+[[preview.commands]]
+extensions = ["md"]
+command = "glow"
+"#,
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        let commands = &result.config.preview.commands;
+
+        assert_that!(commands.len(), eq(2));
+        assert_that!(commands[0].display_name(), eq("Pretty JSON"));
+        assert_that!(commands[1].display_name(), eq("glow"));
+        assert!(result.warnings.is_empty());
+    }
+
     // --- T019: apply_cli_overrides show-ignored ---
 
     #[rstest]
     fn cli_override_show_ignored() {
         let mut config = Config::default();
-        let args = Args {
-            show_ignored: true,
-            ..Args::default()
-        };
+        let args = Args { show_ignored: true, ..Args::default() };
         config.apply_cli_overrides(&args);
 
         assert_that!(config.display.show_ignored, eq(true));

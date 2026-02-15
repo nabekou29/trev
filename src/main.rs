@@ -13,13 +13,16 @@ mod config;
 mod error;
 mod git;
 
+mod file_op;
 mod input;
 mod ipc;
 mod preview;
+mod session;
 mod state;
 mod terminal;
 mod tree;
 mod ui;
+mod watcher;
 
 use anyhow::Result;
 

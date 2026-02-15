@@ -61,11 +61,7 @@ pub enum PreviewContent {
 impl std::fmt::Debug for PreviewContent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::HighlightedText {
-                language,
-                truncated,
-                lines,
-            } => f
+            Self::HighlightedText { language, truncated, lines } => f
                 .debug_struct("HighlightedText")
                 .field("lines_count", &lines.len())
                 .field("language", language)
@@ -79,18 +75,13 @@ impl std::fmt::Debug for PreviewContent {
             Self::AnsiText { .. } => f.debug_struct("AnsiText").finish_non_exhaustive(),
             Self::Image { .. } => f.debug_struct("Image").finish_non_exhaustive(),
             Self::Binary { size } => f.debug_struct("Binary").field("size", size).finish(),
-            Self::Directory {
-                entry_count,
-                total_size,
-            } => f
+            Self::Directory { entry_count, total_size } => f
                 .debug_struct("Directory")
                 .field("entry_count", entry_count)
                 .field("total_size", total_size)
                 .finish(),
             Self::Loading => write!(f, "Loading"),
-            Self::Error { message } => {
-                f.debug_struct("Error").field("message", message).finish()
-            }
+            Self::Error { message } => f.debug_struct("Error").field("message", message).finish(),
             Self::Empty => write!(f, "Empty"),
         }
     }

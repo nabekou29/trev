@@ -25,7 +25,8 @@ impl FallbackProvider {
 }
 
 impl PreviewProvider for FallbackProvider {
-    fn name(&self) -> &'static str {
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn name(&self) -> &str {
         "Fallback"
     }
 
@@ -57,10 +58,7 @@ impl PreviewProvider for FallbackProvider {
                 }
             }
 
-            return Ok(PreviewContent::Directory {
-                entry_count,
-                total_size,
-            });
+            return Ok(PreviewContent::Directory { entry_count, total_size });
         }
 
         let size = metadata.len();
@@ -75,7 +73,7 @@ impl PreviewProvider for FallbackProvider {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
 mod tests {
     use googletest::prelude::*;
     use rstest::*;
@@ -117,10 +115,7 @@ mod tests {
     #[rstest]
     fn is_disabled_when_others_exist() {
         let provider = FallbackProvider::new();
-        assert_that!(
-            provider.is_enabled(&["Text", "Fallback"]),
-            eq(false)
-        );
+        assert_that!(provider.is_enabled(&["Text", "Fallback"]), eq(false));
     }
 
     // --- load tests ---
@@ -136,10 +131,7 @@ mod tests {
         let result = provider.load(&dir, &make_ctx()).unwrap();
 
         match result {
-            PreviewContent::Directory {
-                entry_count,
-                total_size,
-            } => {
+            PreviewContent::Directory { entry_count, total_size } => {
                 assert_that!(entry_count, eq(2));
                 assert_that!(total_size, eq(11u64)); // "hello" + "world!" = 5 + 6
             }

@@ -27,10 +27,7 @@ pub struct TreeBuilder {
 impl TreeBuilder {
     /// Create a new `TreeBuilder` with display options.
     pub const fn new(show_hidden: bool, show_ignored: bool) -> Self {
-        Self {
-            show_hidden,
-            show_ignored,
-        }
+        Self { show_hidden, show_ignored }
     }
 
     /// Build a tree from the given root path.
@@ -50,11 +47,7 @@ impl TreeBuilder {
             bail!("Root path is not a directory: {}", root_path.display());
         }
 
-        let name = root_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
+        let name = root_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
 
         let children = self.load_children(&root_path)?;
 
@@ -108,14 +101,9 @@ impl TreeBuilder {
             };
 
             let is_dir = metadata.is_dir();
-            let is_symlink = entry
-                .path_is_symlink();
+            let is_symlink = entry.path_is_symlink();
 
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
 
             children.push(TreeNode {
                 name,
@@ -140,8 +128,8 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
-    use googletest::prelude::*;
     use googletest::Result;
+    use googletest::prelude::*;
     use rstest::*;
     use tempfile::TempDir;
 
@@ -195,11 +183,7 @@ mod tests {
         fs::write(dir.path().join("keep.txt"), "").unwrap();
 
         // Initialize a git repo so .gitignore is respected
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
 
         let builder = TreeBuilder::new(false, false);
         let root = builder.build(dir.path()).unwrap();

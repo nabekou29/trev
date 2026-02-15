@@ -31,19 +31,22 @@ use crate::preview::state::PreviewState;
 pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewState) {
     let title = build_title(state);
 
-    let block = Block::default()
-        .borders(Borders::LEFT)
-        .title(title)
-        .title_alignment(Alignment::Left);
+    let block =
+        Block::default().borders(Borders::LEFT).title(title).title_alignment(Alignment::Left);
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     match &mut state.content {
-        PreviewContent::HighlightedText {
-            lines, truncated, ..
-        } => {
-            render_highlighted_text(frame, inner, lines, state.scroll_row, state.scroll_col, *truncated);
+        PreviewContent::HighlightedText { lines, truncated, .. } => {
+            render_highlighted_text(
+                frame,
+                inner,
+                lines,
+                state.scroll_row,
+                state.scroll_col,
+                *truncated,
+            );
         }
         PreviewContent::PlainText { lines, truncated } => {
             render_plain_text(frame, inner, lines, state.scroll_row, state.scroll_col, *truncated);
@@ -59,32 +62,17 @@ pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewStat
             render_centered(frame, inner, "Loading...", Style::default().fg(Color::DarkGray));
         }
         PreviewContent::Error { message } => {
-            render_centered(
-                frame,
-                inner,
-                message,
-                Style::default().fg(Color::Red),
-            );
+            render_centered(frame, inner, message, Style::default().fg(Color::Red));
         }
         PreviewContent::Empty => {
-            render_centered(
-                frame,
-                inner,
-                "(empty)",
-                Style::default().fg(Color::DarkGray),
-            );
+            render_centered(frame, inner, "(empty)", Style::default().fg(Color::DarkGray));
         }
         PreviewContent::Binary { size } => {
             let text = format!("Binary file ({size} bytes)");
             render_centered(frame, inner, &text, Style::default().fg(Color::DarkGray));
         }
-        PreviewContent::Directory {
-            entry_count,
-            total_size,
-        } => {
-            let text = format!(
-                "Directory: {entry_count} entries, {total_size} bytes"
-            );
+        PreviewContent::Directory { entry_count, total_size } => {
+            let text = format!("Directory: {entry_count} entries, {total_size} bytes");
             render_centered(frame, inner, &text, Style::default().fg(Color::DarkGray));
         }
         PreviewContent::Image { protocol } => {
@@ -99,19 +87,12 @@ fn build_title(state: &PreviewState) -> Line<'static> {
     let mut spans = vec![Span::raw(" Preview")];
 
     if let Some(provider_name) = state.active_provider_name() {
-        spans.push(Span::styled(
-            format!(" [{provider_name}]"),
-            Style::default().fg(Color::Cyan),
-        ));
+        spans.push(Span::styled(format!(" [{provider_name}]"), Style::default().fg(Color::Cyan)));
     }
 
     if state.available_providers.len() > 1 {
         spans.push(Span::styled(
-            format!(
-                " ({}/{})",
-                state.active_provider_index + 1,
-                state.available_providers.len()
-            ),
+            format!(" ({}/{})", state.active_provider_index + 1, state.available_providers.len()),
             Style::default().fg(Color::DarkGray),
         ));
     }
@@ -120,9 +101,7 @@ fn build_title(state: &PreviewState) -> Line<'static> {
     if let PreviewContent::HighlightedText { language, .. } = &state.content {
         spans.push(Span::styled(
             format!(" {language}"),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::ITALIC),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC),
         ));
     }
 
@@ -141,10 +120,7 @@ fn render_highlighted_text(
     let height = area.height as usize;
     let end = (scroll_row + height).min(lines.len());
 
-    let mut visible: Vec<Line<'_>> = lines
-        .get(scroll_row..end)
-        .unwrap_or_default()
-        .to_vec();
+    let mut visible: Vec<Line<'_>> = lines.get(scroll_row..end).unwrap_or_default().to_vec();
 
     if truncated && end >= lines.len() {
         visible.push(Line::styled(
@@ -153,10 +129,8 @@ fn render_highlighted_text(
         ));
     }
 
-    let paragraph = Paragraph::new(visible).scroll((
-        0,
-        u16::try_from(scroll_col).unwrap_or(u16::MAX),
-    ));
+    let paragraph =
+        Paragraph::new(visible).scroll((0, u16::try_from(scroll_col).unwrap_or(u16::MAX)));
     frame.render_widget(paragraph, area);
 }
 
@@ -186,16 +160,14 @@ fn render_plain_text(
         ));
     }
 
-    let paragraph = Paragraph::new(visible).scroll((
-        0,
-        u16::try_from(scroll_col).unwrap_or(u16::MAX),
-    ));
+    let paragraph =
+        Paragraph::new(visible).scroll((0, u16::try_from(scroll_col).unwrap_or(u16::MAX)));
     frame.render_widget(paragraph, area);
 }
 
 /// Render centered text in the given area.
 fn render_centered(frame: &mut Frame<'_>, area: Rect, text: &str, style: Style) {
-    let paragraph = Paragraph::new(Line::styled(text.to_string(), style))
-        .alignment(Alignment::Center);
+    let paragraph =
+        Paragraph::new(Line::styled(text.to_string(), style)).alignment(Alignment::Center);
     frame.render_widget(paragraph, area);
 }
