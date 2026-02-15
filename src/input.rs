@@ -54,17 +54,10 @@ impl InputState {
     /// Pre-fills the value with the existing name and places cursor before the extension.
     #[must_use]
     pub fn for_rename(target: PathBuf) -> Self {
-        let name = target
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
+        let name = target.file_name().unwrap_or_default().to_string_lossy().to_string();
 
         // Place cursor before the extension (e.g. "file|.txt").
-        let cursor_pos = name
-            .rfind('.')
-            .filter(|&pos| pos > 0)
-            .unwrap_or(name.len());
+        let cursor_pos = name.rfind('.').filter(|&pos| pos > 0).unwrap_or(name.len());
 
         Self {
             prompt: "Rename: ".to_string(),
@@ -83,10 +76,7 @@ impl InputState {
         match &self.on_confirm {
             InputAction::Create { .. } => "Create".to_string(),
             InputAction::Rename { target } => {
-                let name = target
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy();
+                let name = target.file_name().unwrap_or_default().to_string_lossy();
                 format!("Rename: {name}")
             }
         }
@@ -264,9 +254,7 @@ impl InputState {
 
         // Return the byte position after the last consumed character,
         // or 0 if we consumed everything.
-        chars
-            .peek()
-            .map_or(0, |&(i, ch)| i + ch.len_utf8())
+        chars.peek().map_or(0, |&(i, ch)| i + ch.len_utf8())
     }
 
     /// Find the byte position of the next word boundary.
@@ -288,9 +276,7 @@ impl InputState {
 
         // Return the byte position of the next word start,
         // or end of string if no more words.
-        chars
-            .peek()
-            .map_or(self.value.len(), |&(i, _)| self.cursor_pos + i)
+        chars.peek().map_or(self.value.len(), |&(i, _)| self.cursor_pos + i)
     }
 }
 
@@ -342,9 +328,7 @@ mod tests {
             prompt: String::new(),
             value: value.to_string(),
             cursor_pos,
-            on_confirm: InputAction::Create {
-                parent_dir: PathBuf::from("/tmp"),
-            },
+            on_confirm: InputAction::Create { parent_dir: PathBuf::from("/tmp") },
         }
     }
 

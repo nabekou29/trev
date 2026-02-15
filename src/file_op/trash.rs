@@ -15,24 +15,17 @@ use anyhow::{
 ///
 /// Uses the platform data directory: `{data_dir}/trev/trash/`.
 pub fn trash_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("trev/trash")
+    dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("trev/trash")
 }
 
 /// Generate a timestamped trash path for a file.
 ///
 /// Format: `{trash_dir}/{nanos}_{original_name}`.
 pub fn trash_path(original: &Path) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
+    let nanos =
+        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_nanos();
 
-    let file_name = original
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
+    let file_name = original.file_name().unwrap_or_default().to_string_lossy();
 
     trash_dir().join(format!("{nanos}_{file_name}"))
 }

@@ -61,11 +61,7 @@ fn syntect_to_ratatui_style(style: &SyntectStyle) -> RatatuiStyle {
 /// produce responses on stdin that crossterm misinterprets as key events.
 static AUTO_THEME: LazyLock<EmbeddedThemeName> = LazyLock::new(|| {
     let is_light = terminal_light::luma().is_ok_and(|l| l > 0.6);
-    if is_light {
-        EmbeddedThemeName::Base16OceanLight
-    } else {
-        EmbeddedThemeName::Base16OceanDark
-    }
+    if is_light { EmbeddedThemeName::Base16OceanLight } else { EmbeddedThemeName::Base16OceanDark }
 });
 
 /// Force-initialize the theme cache.
@@ -101,15 +97,11 @@ pub fn highlight_lines(code: &str, extension: &str) -> Vec<Line<'static>> {
     let mut result = Vec::new();
 
     for line in LinesWithEndings::from(code) {
-        let ranges = highlighter
-            .highlight_line(line, ss)
-            .unwrap_or_default();
+        let ranges = highlighter.highlight_line(line, ss).unwrap_or_default();
 
         let spans: Vec<Span<'static>> = ranges
             .into_iter()
-            .map(|(style, text)| {
-                Span::styled(text.to_string(), syntect_to_ratatui_style(&style))
-            })
+            .map(|(style, text)| Span::styled(text.to_string(), syntect_to_ratatui_style(&style)))
             .collect();
 
         result.push(Line::from(spans));
@@ -126,10 +118,7 @@ pub fn detect_language(extension: &str) -> String {
     let ss = &*SYNTAX_SET;
     ss.find_syntax_by_extension(extension)
         .or_else(|| ss.find_syntax_by_token(extension))
-        .map_or_else(
-            || "Plain Text".to_string(),
-            |s| s.name.clone(),
-        )
+        .map_or_else(|| "Plain Text".to_string(), |s| s.name.clone())
 }
 
 #[cfg(test)]

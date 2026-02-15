@@ -5,16 +5,15 @@ mod input;
 mod preview;
 mod tree;
 
-pub use preview::trigger_preview;
-pub use tree::trigger_prefetch;
-
 use file_op::handle_file_op_action;
 use input::{
     handle_confirm_mode_key,
     handle_input_mode_key,
 };
 use preview::handle_preview_action;
+pub use preview::trigger_preview;
 use tree::handle_tree_action;
+pub use tree::trigger_prefetch;
 
 use crate::app::state::{
     AppContext,
@@ -23,11 +22,7 @@ use crate::app::state::{
 use crate::input::AppMode;
 
 /// Handle a key event and update application state.
-pub fn handle_key_event(
-    key: crossterm::event::KeyEvent,
-    state: &mut AppState,
-    ctx: &AppContext,
-) {
+pub fn handle_key_event(key: crossterm::event::KeyEvent, state: &mut AppState, ctx: &AppContext) {
     // Dispatch based on current application mode.
     match state.mode {
         AppMode::Input(_) => {

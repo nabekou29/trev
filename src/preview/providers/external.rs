@@ -32,20 +32,15 @@ pub struct ExternalCmdProvider {
 impl ExternalCmdProvider {
     /// Create a new external command provider.
     pub const fn new(commands: Vec<ExternalCommand>, timeout_secs: u64) -> Self {
-        Self {
-            commands,
-            timeout: Duration::from_secs(timeout_secs),
-        }
+        Self { commands, timeout: Duration::from_secs(timeout_secs) }
     }
 
     /// Find the first matching command for the given file extension.
     fn find_command(&self, ext: &str) -> Option<&ExternalCommand> {
         let ext_lower = ext.to_ascii_lowercase();
-        self.commands.iter().find(|cmd| {
-            cmd.extensions
-                .iter()
-                .any(|e| e.to_ascii_lowercase() == ext_lower)
-        })
+        self.commands
+            .iter()
+            .find(|cmd| cmd.extensions.iter().any(|e| e.to_ascii_lowercase() == ext_lower))
     }
 
     /// Check if a command exists in PATH.
@@ -75,8 +70,7 @@ impl PreviewProvider for ExternalCmdProvider {
         let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
             return false;
         };
-        self.find_command(ext)
-            .is_some_and(|cmd| Self::command_exists(&cmd.command))
+        self.find_command(ext).is_some_and(|cmd| Self::command_exists(&cmd.command))
     }
 
     fn load(&self, path: &Path, ctx: &LoadContext) -> anyhow::Result<PreviewContent> {
@@ -84,10 +78,7 @@ impl PreviewProvider for ExternalCmdProvider {
             return Ok(PreviewContent::Empty);
         }
 
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         let Some(cmd_config) = self.find_command(ext) else {
             return Ok(PreviewContent::Error {
@@ -126,10 +117,7 @@ impl PreviewProvider for ExternalCmdProvider {
         }
 
         // Truncate output if too large.
-        let stdout = output
-            .stdout
-            .get(..MAX_OUTPUT_BYTES)
-            .unwrap_or(&output.stdout);
+        let stdout = output.stdout.get(..MAX_OUTPUT_BYTES).unwrap_or(&output.stdout);
 
         // Convert ANSI output to ratatui Text.
         let text = stdout.into_text().map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -210,55 +198,37 @@ mod tests {
     #[rstest]
     fn can_handle_matching_extension_and_command_exists() {
         let provider = make_echo_provider();
-        assert_that!(
-            provider.can_handle(&PathBuf::from("data.csv"), false),
-            eq(true)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("data.csv"), false), eq(true));
     }
 
     #[rstest]
     fn can_handle_matching_extension_case_insensitive() {
         let provider = make_echo_provider();
-        assert_that!(
-            provider.can_handle(&PathBuf::from("data.CSV"), false),
-            eq(true)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("data.CSV"), false), eq(true));
     }
 
     #[rstest]
     fn can_handle_non_matching_extension() {
         let provider = make_echo_provider();
-        assert_that!(
-            provider.can_handle(&PathBuf::from("data.txt"), false),
-            eq(false)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("data.txt"), false), eq(false));
     }
 
     #[rstest]
     fn can_handle_directory_returns_false() {
         let provider = make_echo_provider();
-        assert_that!(
-            provider.can_handle(&PathBuf::from("data.csv"), true),
-            eq(false)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("data.csv"), true), eq(false));
     }
 
     #[rstest]
     fn can_handle_command_not_found_returns_false() {
         let provider = make_nonexistent_provider();
-        assert_that!(
-            provider.can_handle(&PathBuf::from("file.xyz"), false),
-            eq(false)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("file.xyz"), false), eq(false));
     }
 
     #[rstest]
     fn can_handle_no_extension_returns_false() {
         let provider = make_echo_provider();
-        assert_that!(
-            provider.can_handle(&PathBuf::from("Makefile"), false),
-            eq(false)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("Makefile"), false), eq(false));
     }
 
     // --- load tests ---
@@ -290,9 +260,7 @@ mod tests {
         };
         ctx.cancel_token.cancel();
 
-        let result = provider
-            .load(&PathBuf::from("test.csv"), &ctx)
-            .unwrap();
+        let result = provider.load(&PathBuf::from("test.csv"), &ctx).unwrap();
         assert!(matches!(result, PreviewContent::Empty));
     }
 

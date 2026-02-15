@@ -52,9 +52,7 @@ pub fn handle_preview_action(
             state.preview_state.scroll_left(1);
         }
         PreviewAction::HalfPageDown => {
-            state
-                .preview_state
-                .scroll_down(viewport_height / 2, viewport_height);
+            state.preview_state.scroll_down(viewport_height / 2, viewport_height);
         }
         PreviewAction::HalfPageUp => {
             state.preview_state.scroll_up(viewport_height / 2);
@@ -70,10 +68,7 @@ pub fn handle_preview_action(
 /// Trigger preview for a new file (cursor change).
 ///
 /// Resets provider index, resolves providers, and spawns async load.
-pub fn trigger_preview(
-    state: &mut AppState,
-    ctx: &AppContext,
-) {
+pub fn trigger_preview(state: &mut AppState, ctx: &AppContext) {
     let Some((path, providers)) = resolve_preview_providers(state) else {
         return;
     };
@@ -84,10 +79,7 @@ pub fn trigger_preview(
 /// Reload the current file with the (already-cycled) provider.
 ///
 /// Preserves the provider index set by `cycle_provider()`.
-fn reload_preview(
-    state: &mut AppState,
-    ctx: &AppContext,
-) {
+fn reload_preview(state: &mut AppState, ctx: &AppContext) {
     let Some((path, providers)) = resolve_preview_providers(state) else {
         return;
     };
@@ -116,12 +108,7 @@ fn resolve_preview_providers(state: &mut AppState) -> Option<(PathBuf, Vec<Strin
 }
 
 /// Pick the active provider and spawn the async load task.
-fn spawn_preview_for(
-    state: &AppState,
-    path: &Path,
-    providers: &[String],
-    ctx: &AppContext,
-) {
+fn spawn_preview_for(state: &AppState, path: &Path, providers: &[String], ctx: &AppContext) {
     let active_index = state.preview_state.active_provider_index;
     let Some(provider_name) = providers.get(active_index) else {
         return;
@@ -182,50 +169,32 @@ fn spawn_preview_load(params: PreviewLoadParams) {
         let token = cancel_token.clone();
 
         let result = tokio::task::spawn_blocking(move || {
-            let ctx = LoadContext {
-                max_lines,
-                max_bytes,
-                cancel_token: token,
-            };
+            let ctx = LoadContext { max_lines, max_bytes, cancel_token: token };
 
             // Create the appropriate provider and load.
             let content = match pname.as_str() {
                 "External" => {
                     ExternalCmdProvider::new(commands, command_timeout).load(&load_path, &ctx)
                 }
-                "Image" => {
-                    ImagePreviewProvider::load_with_picker(&load_path, &ctx, &image_picker)
-                }
+                "Image" => ImagePreviewProvider::load_with_picker(&load_path, &ctx, &image_picker),
                 "Text" => TextPreviewProvider::new().load(&load_path, &ctx),
                 "Fallback" => FallbackProvider::new().load(&load_path, &ctx),
-                _ => Ok(PreviewContent::Error {
-                    message: format!("Unknown provider: {pname}"),
-                }),
+                _ => Ok(PreviewContent::Error { message: format!("Unknown provider: {pname}") }),
             };
 
             match content {
                 Ok(c) => c,
-                Err(e) => PreviewContent::Error {
-                    message: e.to_string(),
-                },
+                Err(e) => PreviewContent::Error { message: e.to_string() },
             }
         })
         .await;
 
         let content = match result {
             Ok(content) => content,
-            Err(e) => PreviewContent::Error {
-                message: e.to_string(),
-            },
+            Err(e) => PreviewContent::Error { message: e.to_string() },
         };
 
         // Ignore send error (receiver dropped = app shutting down).
-        let _ = tx
-            .send(PreviewLoadResult {
-                path,
-                provider_name,
-                content,
-            })
-            .await;
+        let _ = tx.send(PreviewLoadResult { path, provider_name, content }).await;
     });
 }

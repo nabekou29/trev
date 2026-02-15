@@ -32,11 +32,8 @@ pub fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let status_text = format!("{info}{position}");
     let status_line = Line::raw(status_text);
 
-    let paragraph = Paragraph::new(status_line).style(
-        Style::default()
-            .bg(Color::DarkGray)
-            .fg(Color::White),
-    );
+    let paragraph =
+        Paragraph::new(status_line).style(Style::default().bg(Color::DarkGray).fg(Color::White));
 
     frame.render_widget(paragraph, area);
 }

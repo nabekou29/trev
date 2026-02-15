@@ -2,17 +2,16 @@
 //!
 //! Handles inline text editing (create/rename) and delete confirmation dialogs.
 
-use crate::app::state::{
-    AppContext,
-    AppState,
-};
-use crate::input::AppMode;
-
 use super::file_op::{
     execute_create,
     execute_delete,
     execute_rename,
 };
+use crate::app::state::{
+    AppContext,
+    AppState,
+};
+use crate::input::AppMode;
 
 /// Handle key events in Confirm mode (delete confirmation dialog).
 pub fn handle_confirm_mode_key(
@@ -68,11 +67,7 @@ pub fn handle_input_mode_key(
 }
 
 /// Execute the confirmed input action (create or rename).
-fn execute_input_confirm(
-    state: &AppState,
-    input: crate::input::InputState,
-    ctx: &AppContext,
-) {
+fn execute_input_confirm(state: &AppState, input: crate::input::InputState, ctx: &AppContext) {
     use crate::input::InputAction;
 
     if input.value.trim().is_empty() {

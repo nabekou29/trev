@@ -27,24 +27,20 @@ pub fn sort_children(
 
         // 2. Sort by key
         let ord = match order {
-            SortOrder::Name => {
-                a.name.to_lowercase().cmp(&b.name.to_lowercase())
-            }
+            SortOrder::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
             SortOrder::Size => a.size.cmp(&b.size),
             SortOrder::Modified => compare_modified(a.modified, b.modified),
             SortOrder::Type => {
                 let a_is_dir = u8::from(!a.is_dir);
                 let b_is_dir = u8::from(!b.is_dir);
-                a_is_dir.cmp(&b_is_dir).then_with(|| {
-                    a.name.to_lowercase().cmp(&b.name.to_lowercase())
-                })
+                a_is_dir
+                    .cmp(&b_is_dir)
+                    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
             }
             SortOrder::Extension => {
                 let a_ext = extension_of(&a.name);
                 let b_ext = extension_of(&b.name);
-                a_ext.cmp(&b_ext).then_with(|| {
-                    a.name.to_lowercase().cmp(&b.name.to_lowercase())
-                })
+                a_ext.cmp(&b_ext).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
             }
         };
 
@@ -86,11 +82,7 @@ fn compare_modified(
 
 /// Extract the lowercase extension from a filename, or empty string.
 fn extension_of(name: &str) -> String {
-    std::path::Path::new(name)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase()
+    std::path::Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase()
 }
 
 #[cfg(test)]
@@ -177,10 +169,7 @@ mod tests {
 
     #[rstest]
     fn test_sort_recursive() -> Result<()> {
-        let inner_children = vec![
-            file_node("b.txt", 0, None),
-            file_node("a.txt", 0, None),
-        ];
+        let inner_children = vec![file_node("b.txt", 0, None), file_node("a.txt", 0, None)];
         let mut parent = TreeNode {
             name: "parent".to_string(),
             path: Path::new("/test/parent").to_path_buf(),
@@ -202,9 +191,7 @@ mod tests {
     #[rstest]
     fn test_sort_modified_none_at_end() -> Result<()> {
         let now = std::time::SystemTime::now();
-        let earlier = now
-            .checked_sub(std::time::Duration::from_hours(1))
-            .unwrap();
+        let earlier = now.checked_sub(std::time::Duration::from_hours(1)).unwrap();
         let mut nodes = vec![
             file_node("no_time.txt", 0, None),
             file_node("newer.txt", 0, Some(now)),

@@ -157,28 +157,19 @@ pub struct WatcherConfig {
 
 impl Default for FileOpConfig {
     fn default() -> Self {
-        Self {
-            delete_mode: DeleteMode::default(),
-            undo_stack_size: 100,
-        }
+        Self { delete_mode: DeleteMode::default(), undo_stack_size: 100 }
     }
 }
 
 impl Default for SessionConfig {
     fn default() -> Self {
-        Self {
-            restore_by_default: true,
-            expiry_days: 90,
-        }
+        Self { restore_by_default: true, expiry_days: 90 }
     }
 }
 
 impl Default for WatcherConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            debounce_ms: 250,
-        }
+        Self { enabled: true, debounce_ms: 250 }
     }
 }
 
@@ -206,11 +197,7 @@ impl Default for SortConfig {
 
 impl Default for DisplayConfig {
     fn default() -> Self {
-        Self {
-            show_hidden: false,
-            show_ignored: false,
-            show_preview: true,
-        }
+        Self { show_hidden: false, show_ignored: false, show_preview: true }
     }
 }
 
@@ -235,10 +222,7 @@ impl Config {
         if path.exists() {
             return Self::load_from(&path);
         }
-        Ok(ConfigLoadResult {
-            config: Self::default(),
-            warnings: Vec::new(),
-        })
+        Ok(ConfigLoadResult { config: Self::default(), warnings: Vec::new() })
     }
 
     /// Load configuration from a specific file path.
@@ -291,10 +275,7 @@ impl Config {
     ///
     /// Resolves `$XDG_CONFIG_HOME/trev/` first, falls back to `~/.config/trev/`.
     fn config_dir() -> PathBuf {
-        Self::resolve_config_dir(
-            std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
-            dirs::home_dir(),
-        )
+        Self::resolve_config_dir(std::env::var("XDG_CONFIG_HOME").ok().as_deref(), dirs::home_dir())
     }
 
     /// Resolve config directory from explicit XDG and home directory values.
@@ -302,11 +283,7 @@ impl Config {
     /// Extracted for testability (avoids `unsafe` env var manipulation in tests).
     fn resolve_config_dir(xdg_config_home: Option<&str>, home_dir: Option<PathBuf>) -> PathBuf {
         xdg_config_home.map_or_else(
-            || {
-                home_dir
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join(".config/trev")
-            },
+            || home_dir.unwrap_or_else(|| PathBuf::from(".")).join(".config/trev"),
             |xdg| PathBuf::from(xdg).join("trev"),
         )
     }
@@ -508,10 +485,7 @@ typo_key = "oops"
     #[rstest]
     fn cli_override_sort_order() {
         let mut config = Config::default();
-        let args = Args {
-            sort_order: Some(SortOrder::Size),
-            ..Args::default()
-        };
+        let args = Args { sort_order: Some(SortOrder::Size), ..Args::default() };
         config.apply_cli_overrides(&args);
 
         assert_that!(config.sort.order, eq(SortOrder::Size));
@@ -524,10 +498,7 @@ typo_key = "oops"
         let mut config = Config::default();
         assert_that!(config.display.show_preview, eq(true));
 
-        let args = Args {
-            no_preview: true,
-            ..Args::default()
-        };
+        let args = Args { no_preview: true, ..Args::default() };
         config.apply_cli_overrides(&args);
 
         assert_that!(config.display.show_preview, eq(false));
@@ -554,10 +525,7 @@ typo_key = "oops"
     #[rstest]
     fn cli_override_show_ignored() {
         let mut config = Config::default();
-        let args = Args {
-            show_ignored: true,
-            ..Args::default()
-        };
+        let args = Args { show_ignored: true, ..Args::default() };
         config.apply_cli_overrides(&args);
 
         assert_that!(config.display.show_ignored, eq(true));

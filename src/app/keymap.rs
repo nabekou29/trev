@@ -47,9 +47,7 @@ impl KeyMap {
 impl Default for KeyMap {
     /// Create the default vim-style key map.
     fn default() -> Self {
-        let mut km = Self {
-            bindings: HashMap::new(),
-        };
+        let mut km = Self { bindings: HashMap::new() };
 
         // Quit.
         km.bind(KeyCode::Char('q'), KeyModifiers::NONE, Action::Quit);
@@ -71,15 +69,35 @@ impl Default for KeyMap {
         km.bind(KeyCode::Char('u'), KeyModifiers::CONTROL, Action::Tree(TreeAction::HalfPageUp));
 
         // Preview scroll (Shift + vim-style).
-        km.bind(KeyCode::Char('J'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::ScrollDown));
+        km.bind(
+            KeyCode::Char('J'),
+            KeyModifiers::SHIFT,
+            Action::Preview(PreviewAction::ScrollDown),
+        );
         km.bind(KeyCode::Char('J'), KeyModifiers::NONE, Action::Preview(PreviewAction::ScrollDown));
         km.bind(KeyCode::Char('K'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::ScrollUp));
         km.bind(KeyCode::Char('K'), KeyModifiers::NONE, Action::Preview(PreviewAction::ScrollUp));
-        km.bind(KeyCode::Char('L'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::ScrollRight));
-        km.bind(KeyCode::Char('L'), KeyModifiers::NONE, Action::Preview(PreviewAction::ScrollRight));
-        km.bind(KeyCode::Char('H'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::ScrollLeft));
+        km.bind(
+            KeyCode::Char('L'),
+            KeyModifiers::SHIFT,
+            Action::Preview(PreviewAction::ScrollRight),
+        );
+        km.bind(
+            KeyCode::Char('L'),
+            KeyModifiers::NONE,
+            Action::Preview(PreviewAction::ScrollRight),
+        );
+        km.bind(
+            KeyCode::Char('H'),
+            KeyModifiers::SHIFT,
+            Action::Preview(PreviewAction::ScrollLeft),
+        );
         km.bind(KeyCode::Char('H'), KeyModifiers::NONE, Action::Preview(PreviewAction::ScrollLeft));
-        km.bind(KeyCode::Char('U'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::HalfPageUp));
+        km.bind(
+            KeyCode::Char('U'),
+            KeyModifiers::SHIFT,
+            Action::Preview(PreviewAction::HalfPageUp),
+        );
         km.bind(KeyCode::Char('U'), KeyModifiers::NONE, Action::Preview(PreviewAction::HalfPageUp));
 
         // Provider cycling.
@@ -112,7 +130,9 @@ pub const fn map_sort_order(order: crate::config::SortOrder) -> crate::state::tr
 }
 
 /// Convert config sort direction to tree state sort direction.
-pub const fn map_sort_direction(direction: crate::config::SortDirection) -> crate::state::tree::SortDirection {
+pub const fn map_sort_direction(
+    direction: crate::config::SortDirection,
+) -> crate::state::tree::SortDirection {
     match direction {
         crate::config::SortDirection::Asc => crate::state::tree::SortDirection::Asc,
         crate::config::SortDirection::Desc => crate::state::tree::SortDirection::Desc,

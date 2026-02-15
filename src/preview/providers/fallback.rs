@@ -57,10 +57,7 @@ impl PreviewProvider for FallbackProvider {
                 }
             }
 
-            return Ok(PreviewContent::Directory {
-                entry_count,
-                total_size,
-            });
+            return Ok(PreviewContent::Directory { entry_count, total_size });
         }
 
         let size = metadata.len();
@@ -117,10 +114,7 @@ mod tests {
     #[rstest]
     fn is_disabled_when_others_exist() {
         let provider = FallbackProvider::new();
-        assert_that!(
-            provider.is_enabled(&["Text", "Fallback"]),
-            eq(false)
-        );
+        assert_that!(provider.is_enabled(&["Text", "Fallback"]), eq(false));
     }
 
     // --- load tests ---
@@ -136,10 +130,7 @@ mod tests {
         let result = provider.load(&dir, &make_ctx()).unwrap();
 
         match result {
-            PreviewContent::Directory {
-                entry_count,
-                total_size,
-            } => {
+            PreviewContent::Directory { entry_count, total_size } => {
                 assert_that!(entry_count, eq(2));
                 assert_that!(total_size, eq(11u64)); // "hello" + "world!" = 5 + 6
             }

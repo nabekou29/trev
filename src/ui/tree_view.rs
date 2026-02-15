@@ -74,10 +74,8 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             } else {
                 let icon = devicons::icon_for_file(&vnode.node.path, &None);
                 let icon_color = parse_hex_color(icon.color);
-                spans.push(Span::styled(
-                    format!("{} ", icon.icon),
-                    Style::default().fg(icon_color),
-                ));
+                spans
+                    .push(Span::styled(format!("{} ", icon.icon), Style::default().fg(icon_color)));
             }
         }
 
@@ -104,21 +102,14 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         spans.push(Span::styled(name.clone(), name_style));
 
         if !dir_suffix.is_empty() {
-            spans.push(Span::styled(
-                dir_suffix,
-                Style::default().fg(Color::DarkGray),
-            ));
+            spans.push(Span::styled(dir_suffix, Style::default().fg(Color::DarkGray)));
         }
 
         let line = Line::from(spans);
 
         if is_selected {
             lines.push(
-                line.style(
-                    Style::default()
-                        .bg(Color::DarkGray)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                line.style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)),
             );
         } else {
             lines.push(line);

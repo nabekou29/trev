@@ -90,10 +90,7 @@ impl PreviewProvider for TextPreviewProvider {
         }
 
         // Detect syntax by file extension.
-        let extension = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         let language = highlight::detect_language(extension);
 
@@ -102,11 +99,7 @@ impl PreviewProvider for TextPreviewProvider {
         } else {
             let code = lines.join("\n");
             let highlighted = highlight::highlight_lines(&code, extension);
-            Ok(PreviewContent::HighlightedText {
-                lines: highlighted,
-                language,
-                truncated,
-            })
+            Ok(PreviewContent::HighlightedText { lines: highlighted, language, truncated })
         }
     }
 }
@@ -186,10 +179,7 @@ mod tests {
     #[rstest]
     fn can_handle_nonexistent_file() {
         let provider = TextPreviewProvider::new();
-        assert_that!(
-            provider.can_handle(Path::new("/nonexistent/file.txt"), false),
-            eq(false)
-        );
+        assert_that!(provider.can_handle(Path::new("/nonexistent/file.txt"), false), eq(false));
     }
 
     // --- load tests ---
@@ -203,11 +193,7 @@ mod tests {
         let result = provider.load(&path, &make_ctx()).unwrap();
 
         match result {
-            PreviewContent::HighlightedText {
-                language,
-                truncated,
-                lines,
-            } => {
+            PreviewContent::HighlightedText { language, truncated, lines } => {
                 assert_that!(language.as_str(), eq("Rust"));
                 assert_that!(truncated, eq(false));
                 assert_that!(lines.len(), ge(1));

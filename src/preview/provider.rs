@@ -83,10 +83,7 @@ impl PreviewRegistry {
         let names: Vec<&str> = candidates.iter().map(|p| p.name()).collect();
 
         // Step 3: filter by is_enabled.
-        candidates
-            .into_iter()
-            .filter(|p| p.is_enabled(&names))
-            .collect()
+        candidates.into_iter().filter(|p| p.is_enabled(&names)).collect()
     }
 }
 
@@ -132,9 +129,7 @@ mod tests {
         }
 
         fn is_enabled(&self, available: &[&str]) -> bool {
-            self.enabled_fn
-                .as_ref()
-                .is_none_or(|f| f(available))
+            self.enabled_fn.as_ref().is_none_or(|f| f(available))
         }
 
         fn load(&self, _path: &Path, _ctx: &LoadContext) -> anyhow::Result<PreviewContent> {
@@ -143,12 +138,7 @@ mod tests {
     }
 
     fn make_provider(name: &'static str, priority: u32, handles: bool) -> Box<dyn PreviewProvider> {
-        Box::new(TestProvider {
-            name,
-            priority,
-            handles,
-            enabled_fn: None,
-        })
+        Box::new(TestProvider { name, priority, handles, enabled_fn: None })
     }
 
     fn make_fallback_provider() -> Box<dyn PreviewProvider> {
@@ -187,10 +177,8 @@ mod tests {
 
     #[rstest]
     fn resolve_excludes_fallback_when_others_exist() {
-        let registry = PreviewRegistry::new(vec![
-            make_provider("Text", 30, true),
-            make_fallback_provider(),
-        ]);
+        let registry =
+            PreviewRegistry::new(vec![make_provider("Text", 30, true), make_fallback_provider()]);
 
         let result = registry.resolve(&PathBuf::from("/test.rs"), false);
         assert_that!(result.len(), eq(1));
@@ -199,10 +187,8 @@ mod tests {
 
     #[rstest]
     fn resolve_includes_fallback_when_sole_provider() {
-        let registry = PreviewRegistry::new(vec![
-            make_provider("Text", 30, false),
-            make_fallback_provider(),
-        ]);
+        let registry =
+            PreviewRegistry::new(vec![make_provider("Text", 30, false), make_fallback_provider()]);
 
         let result = registry.resolve(&PathBuf::from("/test.bin"), false);
         assert_that!(result.len(), eq(1));

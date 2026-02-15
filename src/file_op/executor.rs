@@ -136,8 +136,8 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     for entry in std::fs::read_dir(src)
         .with_context(|| format!("Failed to read directory: {}", src.display()))?
     {
-        let entry =
-            entry.with_context(|| format!("Failed to read directory entry in {}", src.display()))?;
+        let entry = entry
+            .with_context(|| format!("Failed to read directory entry in {}", src.display()))?;
         let entry_path = entry.path();
         let file_name = entry.file_name();
         let dst_path = dst.join(&file_name);
@@ -180,8 +180,9 @@ fn move_path(src: &Path, dst: &Path) -> Result<()> {
 /// Create an empty file, creating parent directories as needed.
 fn create_file(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create parent directories: {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!("Failed to create parent directories: {}", parent.display())
+        })?;
     }
     if path.exists() {
         bail!("File already exists: {}", path.display());
@@ -203,8 +204,7 @@ fn create_dir(path: &Path) -> Result<()> {
 
 /// Remove a file.
 fn remove_file(path: &Path) -> Result<()> {
-    std::fs::remove_file(path)
-        .with_context(|| format!("Failed to remove file: {}", path.display()))
+    std::fs::remove_file(path).with_context(|| format!("Failed to remove file: {}", path.display()))
 }
 
 /// Remove a directory recursively.
@@ -226,16 +226,10 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let file_path = tmp.path().join("test.txt");
 
-        execute(&FsOp::CreateFile {
-            path: file_path.clone(),
-        })
-        .unwrap();
+        execute(&FsOp::CreateFile { path: file_path.clone() }).unwrap();
         assert_that!(file_path.exists(), eq(true));
 
-        execute(&FsOp::RemoveFile {
-            path: file_path.clone(),
-        })
-        .unwrap();
+        execute(&FsOp::RemoveFile { path: file_path.clone() }).unwrap();
         assert_that!(file_path.exists(), eq(false));
     }
 
@@ -244,16 +238,10 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let dir_path = tmp.path().join("subdir");
 
-        execute(&FsOp::CreateDir {
-            path: dir_path.clone(),
-        })
-        .unwrap();
+        execute(&FsOp::CreateDir { path: dir_path.clone() }).unwrap();
         assert_that!(dir_path.is_dir(), eq(true));
 
-        execute(&FsOp::RemoveDir {
-            path: dir_path.clone(),
-        })
-        .unwrap();
+        execute(&FsOp::RemoveDir { path: dir_path.clone() }).unwrap();
         assert_that!(dir_path.exists(), eq(false));
     }
 
@@ -262,10 +250,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let file_path = tmp.path().join("a/b/c.txt");
 
-        execute(&FsOp::CreateFile {
-            path: file_path.clone(),
-        })
-        .unwrap();
+        execute(&FsOp::CreateFile { path: file_path.clone() }).unwrap();
         assert_that!(file_path.exists(), eq(true));
         assert_that!(tmp.path().join("a/b").is_dir(), eq(true));
     }
@@ -277,11 +262,7 @@ mod tests {
         let dst = tmp.path().join("dst.txt");
         std::fs::write(&src, "hello").unwrap();
 
-        execute(&FsOp::Copy {
-            src: src.clone(),
-            dst: dst.clone(),
-        })
-        .unwrap();
+        execute(&FsOp::Copy { src: src.clone(), dst: dst.clone() }).unwrap();
 
         assert_that!(dst.exists(), eq(true));
         assert_that!(src.exists(), eq(true));
@@ -298,18 +279,11 @@ mod tests {
         std::fs::create_dir(src_dir.join("sub")).unwrap();
         std::fs::write(src_dir.join("sub/nested.txt"), "nested").unwrap();
 
-        execute(&FsOp::Copy {
-            src: src_dir,
-            dst: dst_dir.clone(),
-        })
-        .unwrap();
+        execute(&FsOp::Copy { src: src_dir, dst: dst_dir.clone() }).unwrap();
 
         assert_that!(dst_dir.join("file.txt").exists(), eq(true));
         assert_that!(dst_dir.join("sub/nested.txt").exists(), eq(true));
-        assert_eq!(
-            std::fs::read_to_string(dst_dir.join("sub/nested.txt")).unwrap(),
-            "nested"
-        );
+        assert_eq!(std::fs::read_to_string(dst_dir.join("sub/nested.txt")).unwrap(), "nested");
     }
 
     #[rstest]
@@ -319,11 +293,7 @@ mod tests {
         let dst = tmp.path().join("dst.txt");
         std::fs::write(&src, "hello").unwrap();
 
-        execute(&FsOp::Move {
-            src: src.clone(),
-            dst: dst.clone(),
-        })
-        .unwrap();
+        execute(&FsOp::Move { src: src.clone(), dst: dst.clone() }).unwrap();
 
         assert_that!(dst.exists(), eq(true));
         assert_that!(src.exists(), eq(false));

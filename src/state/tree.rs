@@ -152,13 +152,7 @@ impl TreeState {
         sort_direction: SortDirection,
         directories_first: bool,
     ) -> Self {
-        Self {
-            root,
-            cursor: 0,
-            sort_order,
-            sort_direction,
-            directories_first,
-        }
+        Self { root, cursor: 0, sort_order, sort_direction, directories_first }
     }
 
     /// Get a reference to the root node.
@@ -216,9 +210,7 @@ impl TreeState {
                 .children
                 .as_loaded()
                 .filter(|_| node.is_expanded)
-                .map_or(0, |children| {
-                    children.iter().map(count_visible).sum()
-                })
+                .map_or(0, |children| children.iter().map(count_visible).sum())
         }
 
         self.root
@@ -408,10 +400,8 @@ impl TreeState {
 
         // Move to parent directory
         if let Some(parent_path) = path.parent()
-            && let Some(idx) = self
-                .visible_nodes()
-                .iter()
-                .position(|vn| vn.node.path == parent_path)
+            && let Some(idx) =
+                self.visible_nodes().iter().position(|vn| vn.node.path == parent_path)
         {
             self.cursor = idx;
             return true;
@@ -468,7 +458,12 @@ impl TreeState {
         self.sort_order = order;
         self.sort_direction = direction;
         self.directories_first = directories_first;
-        crate::tree::sort::apply_sort_recursive(&mut self.root, order, direction, directories_first);
+        crate::tree::sort::apply_sort_recursive(
+            &mut self.root,
+            order,
+            direction,
+            directories_first,
+        );
     }
 }
 
@@ -560,12 +555,7 @@ mod tests {
 
     /// Helper: create a default `TreeState` from children.
     fn state_with_children(children: Vec<TreeNode>) -> TreeState {
-        TreeState::new(
-            root_with_children(children),
-            SortOrder::Name,
-            SortDirection::Asc,
-            true,
-        )
+        TreeState::new(root_with_children(children), SortOrder::Name, SortDirection::Asc, true)
     }
 
     // --- NodeInfo ---
@@ -601,10 +591,7 @@ mod tests {
     #[rstest]
     fn test_visible_nodes_root_only_expanded() -> Result<()> {
         let root = Path::new("/test/root");
-        let state = state_with_children(vec![
-            file_node("a.txt", root),
-            file_node("b.txt", root),
-        ]);
+        let state = state_with_children(vec![file_node("a.txt", root), file_node("b.txt", root)]);
         let visible = state.visible_nodes();
         verify_that!(visible.len(), eq(2))?;
         verify_that!(visible[0].depth, eq(0))?;
@@ -616,15 +603,10 @@ mod tests {
     fn test_visible_nodes_expanded_subdir_includes_children() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
-        let mut subdir = dir_node("subdir", root, vec![
-            file_node("child.txt", &subdir_path),
-        ]);
+        let mut subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
         subdir.is_expanded = true;
 
-        let state = state_with_children(vec![
-            file_node("a.txt", root),
-            subdir,
-        ]);
+        let state = state_with_children(vec![file_node("a.txt", root), subdir]);
         let visible = state.visible_nodes();
         // a.txt, subdir, child.txt
         verify_that!(visible.len(), eq(3))?;
@@ -641,9 +623,7 @@ mod tests {
     fn test_visible_nodes_collapsed_dir_excludes_children() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
-        let subdir = dir_node("subdir", root, vec![
-            file_node("child.txt", &subdir_path),
-        ]);
+        let subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
         // subdir.is_expanded = false (default from dir_node)
 
         let state = state_with_children(vec![subdir]);
@@ -699,10 +679,11 @@ mod tests {
 
         // set_children loads children and expands
         let subdir_path = root.join("subdir");
-        state.set_children(&subdir_path, vec![
-            file_node("child1.txt", &subdir_path),
-            file_node("child2.txt", &subdir_path),
-        ], true);
+        state.set_children(
+            &subdir_path,
+            vec![file_node("child1.txt", &subdir_path), file_node("child2.txt", &subdir_path)],
+            true,
+        );
 
         let visible = state.visible_nodes();
         // subdir + 2 children
@@ -715,9 +696,7 @@ mod tests {
     fn test_toggle_expand_collapses_expanded_dir() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
-        let mut subdir = dir_node("subdir", root, vec![
-            file_node("child.txt", &subdir_path),
-        ]);
+        let mut subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
         subdir.is_expanded = true;
 
         let mut state = state_with_children(vec![subdir]);
@@ -735,9 +714,7 @@ mod tests {
     fn test_toggle_expand_reexpands_loaded_dir_without_reload() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
-        let subdir = dir_node("subdir", root, vec![
-            file_node("child.txt", &subdir_path),
-        ]);
+        let subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
         // Collapsed but Loaded
 
         let mut state = state_with_children(vec![subdir]);
@@ -796,9 +773,7 @@ mod tests {
         let mut state = state_with_children(vec![subdir]);
 
         let subdir_path = root.join("subdir");
-        state.set_children(&subdir_path, vec![
-            file_node("child.txt", &subdir_path),
-        ], false);
+        state.set_children(&subdir_path, vec![file_node("child.txt", &subdir_path)], false);
 
         // Children loaded but directory stays collapsed
         let visible = state.visible_nodes();
@@ -832,11 +807,7 @@ mod tests {
             children: ChildrenState::NotLoaded,
             is_expanded: false,
         };
-        let mut state = state_with_children(vec![
-            subdir_a,
-            subdir_b,
-            file_node("file.txt", root),
-        ]);
+        let mut state = state_with_children(vec![subdir_a, subdir_b, file_node("file.txt", root)]);
 
         let paths = state.start_prefetch(&PathBuf::from("/test/root"));
         // Only directories with NotLoaded, not files
@@ -876,9 +847,7 @@ mod tests {
     fn test_expand_or_open_already_loaded_returns_already_loaded() {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
-        let subdir = dir_node("subdir", root, vec![
-            file_node("child.txt", &subdir_path),
-        ]);
+        let subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
         // Collapsed but Loaded (prefetched)
         let mut state = state_with_children(vec![subdir]);
         let result = state.expand_or_open();
@@ -894,10 +863,8 @@ mod tests {
     #[rstest]
     fn test_move_cursor_at_top_stays_at_top() -> Result<()> {
         let root = Path::new("/test/root");
-        let mut state = state_with_children(vec![
-            file_node("a.txt", root),
-            file_node("b.txt", root),
-        ]);
+        let mut state =
+            state_with_children(vec![file_node("a.txt", root), file_node("b.txt", root)]);
         state.move_cursor(-1);
         verify_that!(state.cursor(), eq(0))?;
         Ok(())
@@ -906,10 +873,8 @@ mod tests {
     #[rstest]
     fn test_move_cursor_at_bottom_stays_at_bottom() -> Result<()> {
         let root = Path::new("/test/root");
-        let mut state = state_with_children(vec![
-            file_node("a.txt", root),
-            file_node("b.txt", root),
-        ]);
+        let mut state =
+            state_with_children(vec![file_node("a.txt", root), file_node("b.txt", root)]);
         state.move_cursor_to(1); // last
         state.move_cursor(1);
         verify_that!(state.cursor(), eq(1))?;
@@ -919,9 +884,8 @@ mod tests {
     #[rstest]
     fn test_half_page_down() -> Result<()> {
         let root = Path::new("/test/root");
-        let children: Vec<TreeNode> = (0..50)
-            .map(|i| file_node(&format!("file{i:03}.txt"), root))
-            .collect();
+        let children: Vec<TreeNode> =
+            (0..50).map(|i| file_node(&format!("file{i:03}.txt"), root)).collect();
         let mut state = state_with_children(children);
 
         state.half_page_down(20); // move 10
@@ -932,9 +896,8 @@ mod tests {
     #[rstest]
     fn test_jump_to_first_and_last() -> Result<()> {
         let root = Path::new("/test/root");
-        let children: Vec<TreeNode> = (0..10)
-            .map(|i| file_node(&format!("file{i}.txt"), root))
-            .collect();
+        let children: Vec<TreeNode> =
+            (0..10).map(|i| file_node(&format!("file{i}.txt"), root)).collect();
         let mut state = state_with_children(children);
 
         state.jump_to_last();
@@ -949,9 +912,7 @@ mod tests {
     fn test_collapse_on_expanded_dir_collapses() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
-        let mut subdir = dir_node("subdir", root, vec![
-            file_node("child.txt", &subdir_path),
-        ]);
+        let mut subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
         subdir.is_expanded = true;
 
         let mut state = state_with_children(vec![subdir]);
@@ -966,9 +927,7 @@ mod tests {
     fn test_collapse_on_file_moves_to_parent() -> Result<()> {
         let root = Path::new("/test/root");
         let subdir_path = root.join("subdir");
-        let mut subdir = dir_node("subdir", root, vec![
-            file_node("child.txt", &subdir_path),
-        ]);
+        let mut subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
         subdir.is_expanded = true;
 
         let mut state = state_with_children(vec![subdir]);
@@ -986,9 +945,7 @@ mod tests {
     #[rstest]
     fn test_expand_or_open_on_file_returns_open() {
         let root = Path::new("/test/root");
-        let mut state = state_with_children(vec![
-            file_node("test.txt", root),
-        ]);
+        let mut state = state_with_children(vec![file_node("test.txt", root)]);
         let result = state.expand_or_open();
         assert_eq!(result, Some(ExpandResult::OpenFile(root.join("test.txt"))));
     }
@@ -1014,9 +971,7 @@ mod tests {
     #[rstest]
     fn test_current_node_info() -> Result<()> {
         let root = Path::new("/test/root");
-        let state = state_with_children(vec![
-            file_node("test.txt", root),
-        ]);
+        let state = state_with_children(vec![file_node("test.txt", root)]);
         let info = state.current_node_info().unwrap();
         verify_that!(info.name.as_str(), eq("test.txt"))?;
         verify_that!(info.is_dir, eq(false))?;
@@ -1029,8 +984,9 @@ mod tests {
 
     #[rstest]
     fn test_integration_builder_sort_visible_nodes() {
-        use tempfile::TempDir;
         use std::fs;
+
+        use tempfile::TempDir;
 
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("charlie.txt"), "c").unwrap();
@@ -1060,8 +1016,9 @@ mod tests {
 
     #[rstest]
     fn test_integration_builder_set_children_cursor() {
-        use tempfile::TempDir;
         use std::fs;
+
+        use tempfile::TempDir;
 
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("file1.txt"), "f1").unwrap();
@@ -1118,9 +1075,8 @@ mod tests {
         let root_path = Path::new("/perf/root");
 
         // Build a flat tree with 10k entries
-        let children: Vec<TreeNode> = (0..10_000)
-            .map(|i| file_node(&format!("file{i:05}.txt"), root_path))
-            .collect();
+        let children: Vec<TreeNode> =
+            (0..10_000).map(|i| file_node(&format!("file{i:05}.txt"), root_path)).collect();
         let state = state_with_children(children);
 
         let start = std::time::Instant::now();

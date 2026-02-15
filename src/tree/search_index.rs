@@ -31,10 +31,7 @@ pub struct SearchIndex {
 impl SearchIndex {
     /// Create a new, empty search index.
     pub const fn new() -> Self {
-        Self {
-            entries: Vec::new(),
-            is_complete: false,
-        }
+        Self { entries: Vec::new(), is_complete: false }
     }
 
     /// Add an entry to the index (called during scanning).
@@ -62,10 +59,7 @@ impl SearchIndex {
     /// This can be used as a cache for lazy loading: if the search index
     /// already has entries for a directory, we can skip filesystem IO.
     pub fn find_children(&self, parent: &Path) -> Vec<&SearchEntry> {
-        self.entries
-            .iter()
-            .filter(|e| e.path.parent() == Some(parent))
-            .collect()
+        self.entries.iter().filter(|e| e.path.parent() == Some(parent)).collect()
     }
 }
 
@@ -79,11 +73,7 @@ impl Default for SearchIndex {
 ///
 /// Uses `ignore::WalkBuilder` for `.gitignore` awareness.
 /// This function is synchronous and should be called via `tokio::task::spawn_blocking`.
-pub fn build_search_index(
-    root_path: &Path,
-    show_hidden: bool,
-    show_ignored: bool,
-) -> SearchIndex {
+pub fn build_search_index(root_path: &Path, show_hidden: bool, show_ignored: bool) -> SearchIndex {
     let mut index = SearchIndex::new();
 
     let walker = ignore::WalkBuilder::new(root_path)
@@ -111,17 +101,9 @@ pub fn build_search_index(
 
         let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
 
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
 
-        index.add_entry(SearchEntry {
-            path: path.to_path_buf(),
-            name,
-            is_dir,
-        });
+        index.add_entry(SearchEntry { path: path.to_path_buf(), name, is_dir });
     }
 
     index.mark_complete();
@@ -207,11 +189,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         // Initialize git repo
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
 
         fs::write(dir.path().join(".gitignore"), "ignored/\n").unwrap();
         fs::create_dir(dir.path().join("ignored")).unwrap();

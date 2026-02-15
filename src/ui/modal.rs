@@ -45,9 +45,7 @@ pub fn render_confirm_dialog(frame: &mut Frame<'_>, area: Rect, confirm: &Confir
             Span::raw(" "),
             Span::styled(
                 &confirm.message,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
         ]))
@@ -79,14 +77,9 @@ pub fn render_confirm_dialog(frame: &mut Frame<'_>, area: Rect, confirm: &Confir
         .paths
         .iter()
         .map(|p| {
-            let display = p
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_else(|| p.to_str().unwrap_or("?"));
-            ListItem::new(Span::styled(
-                format!("  {display}"),
-                Style::default().fg(Color::Red),
-            ))
+            let display =
+                p.file_name().and_then(|n| n.to_str()).unwrap_or_else(|| p.to_str().unwrap_or("?"));
+            ListItem::new(Span::styled(format!("  {display}"), Style::default().fg(Color::Red)))
         })
         .collect();
 

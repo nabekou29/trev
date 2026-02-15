@@ -4,15 +4,6 @@ mod handler;
 mod keymap;
 mod state;
 
-pub use state::*;
-pub use keymap::KeyMap;
-
-use handler::{
-    handle_key_event,
-    trigger_prefetch,
-    trigger_preview,
-};
-
 use std::sync::{
     Arc,
     Mutex,
@@ -20,8 +11,19 @@ use std::sync::{
 use std::time::Duration;
 
 use anyhow::Result;
-use ratatui_image::picker::Picker;
 use crossterm::event::Event;
+use handler::{
+    handle_key_event,
+    trigger_prefetch,
+    trigger_preview,
+};
+pub use keymap::KeyMap;
+use keymap::{
+    map_sort_direction,
+    map_sort_order,
+};
+use ratatui_image::picker::Picker;
+pub use state::*;
 
 use crate::cli::Args;
 use crate::config::Config;
@@ -39,11 +41,6 @@ use crate::preview::providers::text::TextPreviewProvider;
 use crate::preview::state::PreviewState;
 use crate::state::tree::TreeState;
 use crate::tree::builder::TreeBuilder;
-
-use keymap::{
-    map_sort_direction,
-    map_sort_order,
-};
 
 /// Run the application.
 #[allow(clippy::unused_async, clippy::too_many_lines)]
@@ -78,8 +75,8 @@ pub async fn run(args: &Args) -> Result<()> {
     // Falls back to halfblocks if detection fails.
     // IMPORTANT: must run before init_theme() — init_theme sends an OSC 11 query
     // whose response would pollute stdin and corrupt Picker's font-size detection.
-    let picker = Picker::from_query_stdio()
-        .unwrap_or_else(|_| ImagePreviewProvider::fallback_picker());
+    let picker =
+        Picker::from_query_stdio().unwrap_or_else(|_| ImagePreviewProvider::fallback_picker());
 
     // Detect terminal background for theme selection (must be before raw mode).
     // terminal_light::luma() sends OSC 11 query — safe only in cooked mode.
@@ -120,12 +117,10 @@ pub async fn run(args: &Args) -> Result<()> {
     };
 
     // Set up async children load channel.
-    let (children_tx, mut children_rx) =
-        tokio::sync::mpsc::channel::<ChildrenLoadResult>(64);
+    let (children_tx, mut children_rx) = tokio::sync::mpsc::channel::<ChildrenLoadResult>(64);
 
     // Set up async preview load channel.
-    let (preview_tx, mut preview_rx) =
-        tokio::sync::mpsc::channel::<PreviewLoadResult>(16);
+    let (preview_tx, mut preview_rx) = tokio::sync::mpsc::channel::<PreviewLoadResult>(16);
 
     // Create immutable runtime context.
     let ctx = AppContext {
@@ -174,9 +169,7 @@ pub async fn run(args: &Args) -> Result<()> {
                 Ok(children) => {
                     let loaded_path = result.path.clone();
                     let is_prefetch = result.prefetch;
-                    state
-                        .tree_state
-                        .set_children(&result.path, children, !is_prefetch);
+                    state.tree_state.set_children(&result.path, children, !is_prefetch);
 
                     // Prefetch child directories one level ahead (user-initiated loads only).
                     if !is_prefetch {
@@ -199,11 +192,8 @@ pub async fn run(args: &Args) -> Result<()> {
         // Receive async preview load results.
         while let Ok(result) = preview_rx.try_recv() {
             // Only apply if the path still matches current preview request.
-            let is_current = state
-                .preview_state
-                .current_path
-                .as_deref()
-                .is_some_and(|p| p == result.path);
+            let is_current =
+                state.preview_state.current_path.as_deref().is_some_and(|p| p == result.path);
             if is_current {
                 state.preview_state.set_content(result.content);
             }
@@ -219,10 +209,7 @@ pub async fn run(args: &Args) -> Result<()> {
         }
 
         // Update scroll position.
-        state.scroll.clamp_to_cursor(
-            state.tree_state.cursor(),
-            state.viewport_height as usize,
-        );
+        state.scroll.clamp_to_cursor(state.tree_state.cursor(), state.viewport_height as usize);
 
         if state.should_quit {
             break;
@@ -234,4 +221,3 @@ pub async fn run(args: &Args) -> Result<()> {
 
     Ok(())
 }
-

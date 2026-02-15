@@ -146,13 +146,7 @@ fn spawn_load_children(
         };
 
         // Ignore send error (receiver dropped = app is shutting down).
-        let _ = tx
-            .send(ChildrenLoadResult {
-                path,
-                children,
-                prefetch,
-            })
-            .await;
+        let _ = tx.send(ChildrenLoadResult { path, children, prefetch }).await;
     });
 }
 
@@ -160,12 +154,14 @@ fn spawn_load_children(
 ///
 /// Keeps existing children visible during reload to avoid a visual flash
 /// where the directory briefly appears collapsed.
-pub fn refresh_directory(
-    state: &AppState,
-    dir: &Path,
-    ctx: &AppContext,
-) {
+pub fn refresh_directory(state: &AppState, dir: &Path, ctx: &AppContext) {
     // Spawn reload without invalidating: old children remain visible until
     // set_children() replaces them with the fresh listing.
-    spawn_load_children(&ctx.children_tx, dir.to_path_buf(), state.show_hidden, state.show_ignored, false);
+    spawn_load_children(
+        &ctx.children_tx,
+        dir.to_path_buf(),
+        state.show_hidden,
+        state.show_ignored,
+        false,
+    );
 }

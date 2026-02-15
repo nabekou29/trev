@@ -43,9 +43,7 @@ pub fn render_inline_input(frame: &mut Frame<'_>, area: Rect, input: &InputState
         .border_style(Style::default().fg(Color::Cyan))
         .title(Span::styled(
             format!(" {title} "),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ));
 
     // Build the input line with cursor.
@@ -57,9 +55,7 @@ pub fn render_inline_input(frame: &mut Frame<'_>, area: Rect, input: &InputState
     spans.push(Span::raw(before.to_string()));
 
     // Render cursor as inverted character (or space if at end).
-    let cursor_style = Style::default()
-        .bg(Color::White)
-        .fg(Color::Black);
+    let cursor_style = Style::default().bg(Color::White).fg(Color::Black);
 
     let mut after_chars = after.chars();
     if let Some(cursor_char) = after_chars.next() {

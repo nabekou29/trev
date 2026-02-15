@@ -8,11 +8,11 @@ use std::sync::{
 
 use ratatui_image::picker::Picker;
 
+use super::keymap::KeyMap;
 use crate::config::{
     FileOpConfig,
     PreviewConfig,
 };
-use super::keymap::KeyMap;
 use crate::file_op::mark::MarkSet;
 use crate::input::AppMode;
 use crate::preview::cache::PreviewCache;

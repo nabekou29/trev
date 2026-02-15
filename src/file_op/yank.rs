@@ -31,10 +31,7 @@ pub struct YankBuffer {
 impl YankBuffer {
     /// Create a new empty yank buffer.
     pub const fn new() -> Self {
-        Self {
-            paths: Vec::new(),
-            mode: None,
-        }
+        Self { paths: Vec::new(), mode: None }
     }
 
     /// Set the buffer with the given paths and mode.
@@ -96,10 +93,7 @@ mod tests {
     #[rstest]
     fn set_populates_buffer() {
         let mut buf = YankBuffer::new();
-        buf.set(
-            vec![PathBuf::from("/a/b"), PathBuf::from("/c/d")],
-            YankMode::Copy,
-        );
+        buf.set(vec![PathBuf::from("/a/b"), PathBuf::from("/c/d")], YankMode::Copy);
         assert_that!(buf.is_empty(), eq(false));
         assert_that!(buf.count(), eq(2));
         assert_that!(buf.paths()[0].to_str().unwrap(), eq("/a/b"));

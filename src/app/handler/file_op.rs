@@ -7,13 +7,12 @@ use std::path::{
     PathBuf,
 };
 
+use super::tree::refresh_directory;
 use crate::app::state::{
     AppContext,
     AppState,
 };
 use crate::input::AppMode;
-
-use super::tree::refresh_directory;
 
 /// Handle a file operation action.
 pub fn handle_file_op_action(
@@ -101,11 +100,7 @@ pub fn handle_file_op_action(
 }
 
 /// Execute the confirmed delete operation.
-pub fn execute_delete(
-    confirm: crate::input::ConfirmState,
-    state: &mut AppState,
-    ctx: &AppContext,
-) {
+pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState, ctx: &AppContext) {
     use std::collections::HashSet;
 
     use crate::file_op::executor::{
@@ -141,10 +136,7 @@ pub fn execute_delete(
             }
             for path in paths {
                 let trash_dst = crate::file_op::trash::trash_path(&path);
-                let op = FsOp::Move {
-                    src: path.clone(),
-                    dst: trash_dst,
-                };
+                let op = FsOp::Move { src: path.clone(), dst: trash_dst };
                 if let Err(e) = execute(&op) {
                     tracing::error!(%e, ?path, "custom trash delete failed");
                     continue;
@@ -175,12 +167,7 @@ pub fn execute_delete(
 }
 
 /// Execute file/directory creation.
-pub fn execute_create(
-    parent_dir: &Path,
-    name: &str,
-    state: &AppState,
-    ctx: &AppContext,
-) {
+pub fn execute_create(parent_dir: &Path, name: &str, state: &AppState, ctx: &AppContext) {
     use crate::file_op::executor::{
         FsOp,
         execute,
@@ -215,12 +202,7 @@ pub fn execute_create(
 }
 
 /// Execute file/directory rename.
-pub fn execute_rename(
-    target: &Path,
-    new_name: &str,
-    state: &AppState,
-    ctx: &AppContext,
-) {
+pub fn execute_rename(target: &Path, new_name: &str, state: &AppState, ctx: &AppContext) {
     use crate::file_op::executor::{
         FsOp,
         execute,
@@ -229,10 +211,7 @@ pub fn execute_rename(
     let parent = target.parent().unwrap_or_else(|| Path::new(""));
     let new_path = parent.join(new_name);
 
-    let op = FsOp::Move {
-        src: target.to_path_buf(),
-        dst: new_path,
-    };
+    let op = FsOp::Move { src: target.to_path_buf(), dst: new_path };
 
     if let Err(e) = execute(&op) {
         tracing::error!(%e, "failed to rename");
@@ -244,10 +223,7 @@ pub fn execute_rename(
 }
 
 /// Execute paste operation: copy or move yanked files to the cursor directory.
-fn execute_paste(
-    state: &mut AppState,
-    ctx: &AppContext,
-) {
+fn execute_paste(state: &mut AppState, ctx: &AppContext) {
     use std::collections::HashSet;
 
     use crate::file_op::conflict::resolve_conflict;
@@ -270,9 +246,7 @@ fn execute_paste(
     let dst_dir = if info.is_dir {
         info.path
     } else {
-        info.path
-            .parent()
-            .map_or_else(|| info.path.clone(), Path::to_path_buf)
+        info.path.parent().map_or_else(|| info.path.clone(), Path::to_path_buf)
     };
 
     let mode = state.yank_buffer.mode().cloned();
@@ -297,15 +271,9 @@ fn execute_paste(
         let final_dst = resolve_conflict(&desired_dst);
 
         let op = if is_cut {
-            FsOp::Move {
-                src: src.clone(),
-                dst: final_dst,
-            }
+            FsOp::Move { src: src.clone(), dst: final_dst }
         } else {
-            FsOp::Copy {
-                src: src.clone(),
-                dst: final_dst,
-            }
+            FsOp::Copy { src: src.clone(), dst: final_dst }
         };
 
         if let Err(e) = execute(&op) {

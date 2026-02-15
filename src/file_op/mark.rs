@@ -18,9 +18,7 @@ impl MarkSet {
     /// Create a new empty mark set.
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            marked: HashSet::new(),
-        }
+        Self { marked: HashSet::new() }
     }
 
     /// Toggle the mark state of a path.
