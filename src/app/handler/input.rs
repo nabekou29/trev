@@ -85,7 +85,7 @@ fn status_message_for(input: &crate::input::InputState) -> Option<String> {
 }
 
 /// Execute the confirmed input action (create or rename).
-fn execute_input_confirm(state: &AppState, input: crate::input::InputState, ctx: &AppContext) {
+fn execute_input_confirm(state: &mut AppState, input: crate::input::InputState, ctx: &AppContext) {
     use crate::input::InputAction;
 
     if input.value.trim().is_empty() {

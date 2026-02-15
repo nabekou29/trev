@@ -1,89 +1,166 @@
-# Implementation Plan: File Operations + FS Change Detection + Undo/Redo + Session Persistence
+# Implementation Plan: Undo/Redo (Phase 8)
 
-**Branch**: `012-file-operations` | **Date**: 2026-02-15 | **Spec**: [spec.md](spec.md)
-**Input**: Feature specification from `/specs/012-file-operations/spec.md`
+**Branch**: `012-file-operations` | **Date**: 2026-02-16 | **Spec**: [spec.md](spec.md)
+**Input**: Feature specification — User Story 4 (FR-021 〜 FR-028)
 
 ## Summary
 
-trev にファイル操作（コピー、移動、削除、作成、リネーム）、マーク機能、undo/redo、FS 変更検出、セッション永続化を追加する。vim ライクな yank/paste モデルを採用し、vifm 方式の操作ペアテーブルによる undo/redo を永続化する。UI はインライン入力フィールドと確認ダイアログのモーダルシステムで構成する。
+ファイル操作（paste, create, rename, custom trash delete）に undo/redo を追加する。
+操作は OpGroup 単位でグループ化し、`u` で undo、`Ctrl+r` で redo。
+Permanent delete と System Trash は undo 不可。
 
 ## Technical Context
 
 **Language/Version**: Rust 2024 edition, nightly-2026-01-24
-**Primary Dependencies**: ratatui 0.30, crossterm 0.29, tokio (full), notify 8, notify-debouncer-mini 0.5, trash 5, chrono 0.4, sha2 0.10
-**Storage**: JSON ファイル（セッション永続化、undo 履歴）、ローカルファイルシステム
-**Testing**: cargo test, rstest 0.26, googletest 0.14, tempfile 3
-**Target Platform**: Linux, macOS, Windows (クロスプラットフォーム TUI)
-**Project Type**: Single CLI application
-**Performance Goals**: ファイル操作 <1s (100ファイル以下), undo/redo <1s, FS 変更反映 <500ms, セッション復元 <2s
-**Constraints**: No unsafe, strict clippy (all/pedantic/nursery/cargo at deny), ブロッキング UI (操作中は入力不可)
-**Scale/Scope**: 単一ユーザー、ローカルファイルシステム、undo スタック最大100エントリ
+**Primary Dependencies**: serde + serde_json (OpGroup 永続化用), 既存の FsOp / executor
+**Storage**: N/A (メモリ内スタック。セッション永続化は Phase 10 で対応)
+**Testing**: cargo test (googletest + rstest + tempfile)
+**Target Platform**: macOS / Linux
+**Project Type**: Single Rust binary (TUI)
+**Performance Goals**: undo/redo 操作が 1 秒以内に完了 (SC-002)
+**Constraints**: undo スタックサイズ設定可能 (default 100)
+**Scale/Scope**: 操作履歴 100 エントリ以内
 
 ## Constitution Check
 
-*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
-
 | Principle | Status | Notes |
-|-----------|--------|-------|
-| I. 安全な Rust | PASS | unsafe 不使用。全エラーは `anyhow::Result` で処理。`thiserror` でカスタムエラー型 |
-| II. テスト駆動開発 | PASS | 全コンポーネントを `tempfile` + `rstest` で TDD。操作ペアの正逆検証がテスト設計の軸 |
-| III. パフォーマンス設計 | PASS | ファイル操作はブロッキング（spec 決定）。IO バウンド処理は `spawn_blocking` で分離 |
-| IV. シンプルさ & YAGNI | PASS | 非同期プログレスは不要（ブロッキング）。トランザクションなし（spec 決定）。最小限の状態管理 |
-| V. インクリメンタルデリバリー | PASS | 5フェーズのボトムアップ構築: UI基盤 → ファイル操作 → undo → FS監視 → セッション |
+|---|---|---|
+| I. Safe Rust | ✅ | unwrap/expect 禁止、Result 返却 |
+| II. TDD | ✅ | UndoHistory, OpGroup のユニットテスト先行 |
+| III. Performance | ✅ | スタック操作は O(1)、FS 検証は操作数に比例 |
+| IV. YAGNI | ✅ | 存在チェックのみで検証、ハッシュ検証は不要 |
+| V. Incremental | ✅ | データ型 → ロジック → ハンドラ統合 → UI の順 |
+
+## Data Model
+
+### OpGroup — 操作グループ
+
+```rust
+/// A single undoable file system operation with its reverse.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UndoOp {
+    /// Forward operation (what was done).
+    pub forward: FsOp,
+    /// Reverse operation (how to undo it).
+    pub reverse: FsOp,
+}
+
+/// A group of operations performed as a single user action.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpGroup {
+    /// Human-readable description for status messages.
+    pub description: String,
+    /// Individual operations in execution order.
+    pub ops: Vec<UndoOp>,
+}
+```
+
+### UndoHistory — 操作履歴スタック
+
+```rust
+/// Bounded undo/redo history.
+#[derive(Debug)]
+pub struct UndoHistory {
+    /// Completed operations (undo target). Last = most recent.
+    undo_stack: Vec<OpGroup>,
+    /// Undone operations (redo target). Last = most recent undo.
+    redo_stack: Vec<OpGroup>,
+    /// Maximum undo stack size.
+    max_size: usize,
+}
+```
+
+### 操作ごとの undo マッピング
+
+| 操作 | Forward FsOp | Reverse FsOp | Undo 可否 |
+|---|---|---|---|
+| Paste (Copy) | `Copy {src, dst}` | `RemoveFile/Dir {dst}` | ✅ |
+| Paste (Move) | `Move {src, dst}` | `Move {dst, src}` | ✅ |
+| Create file | `CreateFile {path}` | `RemoveFile {path}` | ✅ |
+| Create dir | `CreateDir {path}` | `RemoveDir {path}` | ✅ |
+| Rename | `Move {old, new}` | `Move {new, old}` | ✅ |
+| Delete (CustomTrash) | `Move {orig, trash}` | `Move {trash, orig}` | ✅ |
+| Delete (Permanent) | — | — | ❌ |
+| System Trash (D) | — | — | ❌ |
+
+### FS 状態検証 (undo/redo 前)
+
+各 reverse/forward op の事前条件を検証:
+- `Move {src, dst}`: src が存在、dst が存在しない
+- `Copy {src, dst}`: src が存在、dst が存在しない
+- `RemoveFile {path}`: path が存在
+- `RemoveDir {path}`: path が存在
+- `CreateFile {path}`: path が存在しない
+- `CreateDir {path}`: path が存在しない
+
+1 つでも失敗 → エラーメッセージ表示、操作中止。
+
+### スタック溢れ時の Trash クリーンアップ
+
+undo スタックが max_size を超えた場合:
+1. 最古の OpGroup を pop
+2. reverse op に trash パスへの参照があれば `clean_trash_file()` で削除
 
 ## Project Structure
 
-### Documentation (this feature)
-
 ```text
-specs/012-file-operations/
-├── plan.md              # This file
-├── spec.md              # Feature specification
-├── research.md          # Phase 0 research findings
-├── data-model.md        # Entity definitions
-├── quickstart.md        # Setup guide
-├── checklists/
-│   └── requirements.md  # Quality checklist
-└── tasks.md             # (Phase 2 output — /speckit.tasks)
+src/file_op/
+├── undo.rs         # UndoOp, OpGroup, UndoHistory (実装対象)
+├── executor.rs     # FsOp, execute() (既存)
+├── trash.rs        # trash_path(), clean_trash_file() (既存)
+├── selection.rs    # SelectionBuffer (既存)
+└── conflict.rs     # resolve_conflict() (既存)
+
+src/app/
+├── state.rs        # AppState に undo_history フィールド追加
+├── handler/
+│   └── file_op.rs  # OpGroup 生成 + undo/redo ハンドラ
+└── keymap.rs       # Ctrl+r バインド追加
 ```
 
-### Source Code (repository root)
+## Implementation Steps
 
-```text
-src/
-├── file_op.rs             # [NEW] Module re-exports
-├── file_op/
-│   ├── executor.rs        # [NEW] FsOp/IrreversibleOp execution
-│   ├── undo.rs            # [NEW] UndoHistory, OpGroup management
-│   ├── yank.rs            # [NEW] YankBuffer, YankMode
-│   ├── mark.rs            # [NEW] MarkSet (HashSet<PathBuf>)
-│   ├── conflict.rs        # [NEW] Auto-rename (file_1.txt pattern)
-│   └── trash.rs           # [NEW] Custom trash directory management
-├── session.rs             # [NEW] SessionState save/restore
-├── watcher.rs             # [NEW] notify watcher integration
-├── input.rs               # [MODIFY] InputState, text editing
-├── action.rs              # [MODIFY] Add FileOpAction variants
-├── app.rs                 # [MODIFY] AppMode state machine, integration
-├── config.rs              # [MODIFY] Add FileOpConfig, SessionConfig, WatcherConfig
-├── cli.rs                 # [MODIFY] Add --restore/--no-restore
-├── state/
-│   └── tree.rs            # [MODIFY] ChildrenState::Stale, mark integration
-├── ui/
-│   ├── modal.rs           # [MODIFY] Confirmation dialog widget
-│   ├── inline_input.rs    # [NEW] Inline input widget for tree view
-│   ├── tree_view.rs       # [MODIFY] Mark display, inline input rendering
-│   └── status_bar.rs      # [MODIFY] Yank/mark/result indicators
-└── ui.rs                  # [MODIFY] Modal overlay rendering
+### Step 1: `src/file_op/undo.rs` — データ型 + UndoHistory
+
+- `UndoOp`, `OpGroup` 構造体
+- `UndoHistory`: `new(max_size)`, `push(group)`, `undo()`, `redo()`, `can_undo()`, `can_redo()`
+- `push` 時: redo スタッククリア、max_size 超過時に最古を evict + trash cleanup
+- `validate_preconditions(ops)` — FS 存在チェック
+- テスト: push/undo/redo サイクル、スタック溢れ、検証失敗
+
+### Step 2: `src/app/state.rs` — AppState にフィールド追加
+
+- `pub undo_history: UndoHistory`
+
+### Step 3: `src/app.rs` — 初期化
+
+- `undo_history: UndoHistory::new(config.file_op.undo_stack_size)`
+
+### Step 4: `src/app/handler/file_op.rs` — OpGroup 生成
+
+各操作で OpGroup を構築して `undo_history.push()`:
+- `execute_paste()` → Copy/Move ops のグループ
+- `execute_create()` → CreateFile/CreateDir の単一 op
+- `execute_rename()` → Move の単一 op
+- `execute_delete()` (CustomTrash のみ) → Move ops のグループ
+- Permanent delete / System trash → push しない、"This operation cannot be undone" 表示
+
+### Step 5: `src/app/handler/file_op.rs` — Undo/Redo ハンドラ
+
+- `FileOpAction::Undo` → `undo_history.undo()` → 逆操作を実行 → ステータスメッセージ
+- `FileOpAction::Redo` → `undo_history.redo()` → 順操作を再実行 → ステータスメッセージ
+- 検証失敗時: "Cannot undo/redo: file state has changed" 表示
+
+### Step 6: `src/app/keymap.rs` — Ctrl+r バインド
+
+- `Ctrl+r` → `FileOpAction::Redo` (u → Undo は既存)
+
+### Step 7: テスト + lint + format
+
+## Verification
+
+```bash
+mise run test
+mise run lint
+mise run format
 ```
-
-**Structure Decision**: 既存の `src/` フラットモジュール構造を維持。`file_op/` サブモジュールで操作ロジックをグループ化。UI、FS 監視、セッションは独立モジュールとして追加。
-
-## Complexity Tracking
-
-> No Constitution violations. All design decisions align with core principles.
-
-| Decision | Justification |
-|----------|--------------|
-| 5つの新規サブモジュール (file_op/) | 責務分離: executor/undo/yank/mark/conflict/trash は独立してテスト可能 |
-| AppMode 状態マシン | 既存の "常に Normal" から3状態に拡張。モーダル入力の正しい処理に必須 |
-| セッション永続化 | spec P3 要件。UndoHistory の永続化と統合することでシンプルに実現 |

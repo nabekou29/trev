@@ -15,7 +15,6 @@ pub enum Action {
 
 /// Actions for file operations (copy, move, delete, create, rename, undo/redo, mark).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[expect(dead_code, reason = "Variants used incrementally as file ops are implemented")]
 pub enum FileOpAction {
     /// Yank (copy) selected files to yank buffer.
     Yank,

@@ -113,12 +113,13 @@ impl Default for KeyMap {
         km.bind(KeyCode::Char('d'), KeyModifiers::NONE, Action::FileOp(FileOpAction::Delete));
         km.bind(KeyCode::Char('D'), KeyModifiers::SHIFT, Action::FileOp(FileOpAction::SystemTrash));
         km.bind(KeyCode::Char('D'), KeyModifiers::NONE, Action::FileOp(FileOpAction::SystemTrash));
+        km.bind(KeyCode::Char('u'), KeyModifiers::NONE, Action::FileOp(FileOpAction::Undo));
+        km.bind(KeyCode::Char('r'), KeyModifiers::CONTROL, Action::FileOp(FileOpAction::Redo));
         km.bind(KeyCode::Esc, KeyModifiers::NONE, Action::FileOp(FileOpAction::ClearSelections));
 
         km
     }
 }
-
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]

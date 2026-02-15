@@ -21,6 +21,7 @@ pub use state::*;
 use crate::cli::Args;
 use crate::config::Config;
 use crate::file_op::selection::SelectionBuffer;
+use crate::file_op::undo::UndoHistory;
 use crate::input::AppMode;
 use crate::preview::cache::PreviewCache;
 use crate::preview::provider::{
@@ -95,6 +96,7 @@ pub async fn run(args: &Args) -> Result<()> {
         preview_registry,
         mode: AppMode::default(),
         selection: SelectionBuffer::new(),
+        undo_history: UndoHistory::new(config.file_operations.undo_stack_size),
         should_quit: false,
         show_icons: !args.no_icons,
         show_preview,

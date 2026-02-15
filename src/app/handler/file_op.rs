@@ -1,7 +1,8 @@
 //! File operation action handlers.
 //!
-//! Handles mark, create, rename, yank, cut, paste, delete, and trash operations.
+//! Handles mark, create, rename, yank, cut, paste, delete, trash, undo, and redo operations.
 
+use std::collections::HashSet;
 use std::path::{
     Path,
     PathBuf,
@@ -12,7 +13,17 @@ use crate::app::state::{
     AppContext,
     AppState,
 };
+use crate::file_op::executor::{
+    FsOp,
+    execute,
+};
 use crate::file_op::selection::SelectionMode;
+use crate::file_op::undo::{
+    OpGroup,
+    UndoOp,
+    build_undo_op,
+    reverse_for_copy,
+};
 use crate::input::AppMode;
 
 /// Handle a file operation action.
@@ -100,22 +111,21 @@ pub fn handle_file_op_action(
                 });
             }
         }
-        // Undo/Redo: will be implemented in US4.
-        FileOpAction::Undo | FileOpAction::Redo => {}
+        FileOpAction::Undo => {
+            execute_undo(state, ctx);
+        }
+        FileOpAction::Redo => {
+            execute_redo(state, ctx);
+        }
     }
 }
 
 /// Execute the confirmed delete operation.
 pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState, ctx: &AppContext) {
-    use std::collections::HashSet;
-
-    use crate::file_op::executor::{
-        FsOp,
-        execute,
-    };
     use crate::input::ConfirmAction;
 
     let mut affected_parents: HashSet<PathBuf> = HashSet::new();
+    let mut undo_ops: Vec<UndoOp> = Vec::new();
     let crate::input::ConfirmState { paths, on_confirm, .. } = confirm;
     let delete_count = paths.len();
     let is_system_trash = matches!(on_confirm, ConfirmAction::SystemTrash);
@@ -135,6 +145,7 @@ pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState,
                 if let Some(parent) = path.parent() {
                     affected_parents.insert(parent.to_path_buf());
                 }
+                // Permanent delete cannot be undone — do not add to undo_ops.
             }
         }
         ConfirmAction::CustomTrash => {
@@ -152,6 +163,10 @@ pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState,
                 if let Some(parent) = path.parent() {
                     affected_parents.insert(parent.to_path_buf());
                 }
+                // Custom trash can be undone: reverse is moving back from trash.
+                if let Some(undo_op) = build_undo_op(op) {
+                    undo_ops.push(undo_op);
+                }
             }
         }
         ConfirmAction::SystemTrash => {
@@ -163,11 +178,19 @@ pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState,
                 if let Some(parent) = path.parent() {
                     affected_parents.insert(parent.to_path_buf());
                 }
+                // System trash cannot be undone via our undo system.
             }
         }
     }
 
     state.selection.clear();
+
+    // Push undo group (only for custom trash deletes).
+    if !undo_ops.is_empty() {
+        state
+            .undo_history
+            .push(OpGroup { description: format!("Delete {delete_count} item(s)"), ops: undo_ops });
+    }
 
     for parent in &affected_parents {
         refresh_directory(state, parent, ctx);
@@ -182,12 +205,7 @@ pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState,
 }
 
 /// Execute file/directory creation.
-pub fn execute_create(parent_dir: &Path, name: &str, state: &AppState, ctx: &AppContext) {
-    use crate::file_op::executor::{
-        FsOp,
-        execute,
-    };
-
+pub fn execute_create(parent_dir: &Path, name: &str, state: &mut AppState, ctx: &AppContext) {
     let new_path = parent_dir.join(name);
 
     // Trailing "/" means create a directory.
@@ -212,17 +230,19 @@ pub fn execute_create(parent_dir: &Path, name: &str, state: &AppState, ctx: &App
         return;
     }
 
+    // Push to undo history.
+    if let Some(undo_op) = build_undo_op(op) {
+        state
+            .undo_history
+            .push(OpGroup { description: format!("Create {name}"), ops: vec![undo_op] });
+    }
+
     // Refresh the parent directory in the tree.
     refresh_directory(state, parent_dir, ctx);
 }
 
 /// Execute file/directory rename.
-pub fn execute_rename(target: &Path, new_name: &str, state: &AppState, ctx: &AppContext) {
-    use crate::file_op::executor::{
-        FsOp,
-        execute,
-    };
-
+pub fn execute_rename(target: &Path, new_name: &str, state: &mut AppState, ctx: &AppContext) {
     let parent = target.parent().unwrap_or_else(|| Path::new(""));
     let new_path = parent.join(new_name);
 
@@ -233,20 +253,20 @@ pub fn execute_rename(target: &Path, new_name: &str, state: &AppState, ctx: &App
         return;
     }
 
+    // Push to undo history.
+    if let Some(undo_op) = build_undo_op(op) {
+        state
+            .undo_history
+            .push(OpGroup { description: format!("Rename to {new_name}"), ops: vec![undo_op] });
+    }
+
     // Refresh the parent directory in the tree.
     refresh_directory(state, parent, ctx);
 }
 
 /// Execute paste operation: copy or move selected files to the cursor directory.
 fn execute_paste(state: &mut AppState, ctx: &AppContext) {
-    use std::collections::HashSet;
-
-    use crate::file_op::conflict::resolve_conflict;
-    use crate::file_op::executor::{
-        FsOp,
-        execute,
-        is_ancestor,
-    };
+    use crate::file_op::executor::is_ancestor;
 
     let mode = state.selection.mode().cloned();
     let is_cut = matches!(mode, Some(SelectionMode::Cut));
@@ -269,6 +289,7 @@ fn execute_paste(state: &mut AppState, ctx: &AppContext) {
 
     // Track source parent directories that need refresh (for cut operations).
     let mut src_parents: HashSet<PathBuf> = HashSet::new();
+    let mut undo_ops: Vec<UndoOp> = Vec::new();
 
     let sources = state.selection.deduplicated_paths();
     for src in sources {
@@ -284,18 +305,26 @@ fn execute_paste(state: &mut AppState, ctx: &AppContext) {
         };
 
         let desired_dst = dst_dir.join(file_name);
-        let final_dst = resolve_conflict(&desired_dst);
+        let final_dst = crate::file_op::conflict::resolve_conflict(&desired_dst);
 
         let op = if is_cut {
-            FsOp::Move { src: src.clone(), dst: final_dst }
+            FsOp::Move { src: src.clone(), dst: final_dst.clone() }
         } else {
-            FsOp::Copy { src: src.clone(), dst: final_dst }
+            FsOp::Copy { src: src.clone(), dst: final_dst.clone() }
         };
 
         if let Err(e) = execute(&op) {
             tracing::error!(%e, ?src, "paste operation failed");
             continue;
         }
+
+        // Build undo op for this successful operation.
+        let reverse = if is_cut {
+            FsOp::Move { src: final_dst, dst: src.clone() }
+        } else {
+            reverse_for_copy(&final_dst)
+        };
+        undo_ops.push(UndoOp { forward: op, reverse });
 
         // Track source parent for cut operations.
         if is_cut && let Some(parent) = src.parent() {
@@ -305,6 +334,15 @@ fn execute_paste(state: &mut AppState, ctx: &AppContext) {
 
     let paste_count = state.selection.count();
     state.selection.clear();
+
+    // Push undo group.
+    if !undo_ops.is_empty() {
+        let action_desc = if is_cut { "Move" } else { "Copy" };
+        state.undo_history.push(OpGroup {
+            description: format!("{action_desc} {paste_count} file(s)"),
+            ops: undo_ops,
+        });
+    }
 
     // Refresh destination directory.
     refresh_directory(state, &dst_dir, ctx);
@@ -318,4 +356,106 @@ fn execute_paste(state: &mut AppState, ctx: &AppContext) {
 
     let action = if is_cut { "Moved" } else { "Pasted" };
     state.set_status(format!("{action} {paste_count} file(s)"));
+}
+
+/// Execute undo: reverse the most recent operation group.
+fn execute_undo(state: &mut AppState, ctx: &AppContext) {
+    // Extract undo data before executing (releases borrow on undo_history).
+    let (desc, reverse_ops) = {
+        match state.undo_history.undo() {
+            Ok(Some(group)) => {
+                let desc = group.description.clone();
+                let ops: Vec<FsOp> = group.ops.iter().rev().map(|op| op.reverse.clone()).collect();
+                (desc, ops)
+            }
+            Ok(None) => {
+                state.set_status("Nothing to undo");
+                return;
+            }
+            Err(e) => {
+                state.set_status(format!("Cannot undo: {e}"));
+                return;
+            }
+        }
+    };
+
+    for op in &reverse_ops {
+        if let Err(e) = execute(op) {
+            tracing::error!(%e, "undo operation failed");
+            state.set_status(format!("Undo failed: {e}"));
+            return;
+        }
+    }
+
+    // Refresh affected directories.
+    let parents = collect_affected_parents(&reverse_ops);
+    for parent in &parents {
+        refresh_directory(state, parent, ctx);
+    }
+
+    state.set_status(format!("Undid: {desc}"));
+}
+
+/// Execute redo: re-apply the most recently undone operation group.
+fn execute_redo(state: &mut AppState, ctx: &AppContext) {
+    // Extract redo data before executing (releases borrow on undo_history).
+    let (desc, forward_ops) = {
+        match state.undo_history.redo() {
+            Ok(Some(group)) => {
+                let desc = group.description.clone();
+                let ops: Vec<FsOp> = group.ops.iter().map(|op| op.forward.clone()).collect();
+                (desc, ops)
+            }
+            Ok(None) => {
+                state.set_status("Nothing to redo");
+                return;
+            }
+            Err(e) => {
+                state.set_status(format!("Cannot redo: {e}"));
+                return;
+            }
+        }
+    };
+
+    for op in &forward_ops {
+        if let Err(e) = execute(op) {
+            tracing::error!(%e, "redo operation failed");
+            state.set_status(format!("Redo failed: {e}"));
+            return;
+        }
+    }
+
+    // Refresh affected directories.
+    let parents = collect_affected_parents(&forward_ops);
+    for parent in &parents {
+        refresh_directory(state, parent, ctx);
+    }
+
+    state.set_status(format!("Redid: {desc}"));
+}
+
+/// Collect unique parent directories affected by a set of operations.
+fn collect_affected_parents(ops: &[FsOp]) -> HashSet<PathBuf> {
+    let mut parents = HashSet::new();
+    for op in ops {
+        match op {
+            FsOp::Copy { src, dst } | FsOp::Move { src, dst } => {
+                if let Some(p) = src.parent() {
+                    parents.insert(p.to_path_buf());
+                }
+                if let Some(p) = dst.parent() {
+                    parents.insert(p.to_path_buf());
+                }
+            }
+            FsOp::CreateFile { path }
+            | FsOp::CreateDir { path }
+            | FsOp::RemoveFile { path }
+            | FsOp::RemoveDir { path } => {
+                if let Some(p) = path.parent() {
+                    parents.insert(p.to_path_buf());
+                }
+            }
+        }
+    }
+    parents
 }

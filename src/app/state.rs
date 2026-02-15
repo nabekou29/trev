@@ -12,6 +12,7 @@ use crate::config::{
     PreviewConfig,
 };
 use crate::file_op::selection::SelectionBuffer;
+use crate::file_op::undo::UndoHistory;
 use crate::input::AppMode;
 use crate::preview::cache::PreviewCache;
 use crate::preview::content::PreviewContent;
@@ -39,6 +40,8 @@ pub struct AppState {
     pub mode: AppMode,
     /// Unified selection buffer for mark, copy, and cut operations.
     pub selection: SelectionBuffer,
+    /// Undo/redo history for file operations.
+    pub undo_history: UndoHistory,
     /// Whether the application should quit.
     pub should_quit: bool,
     /// Whether to show file icons (Nerd Fonts).
