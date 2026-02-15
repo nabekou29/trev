@@ -23,15 +23,15 @@ clap = { version = "4", features = ["derive"] }
 
 # Syntax highlighting
 syntect = { version = "5", default-features = false, features = ["parsing", "regex-onig"] }
-two-face = "0.4"
+two-face = "0.5"
 
 # Preview
 content_inspector = "0.2"
-lru = "0.12"
+lru = "0.16"
 terminal-light = "1"
 ratatui-image = { version = "10", default-features = false, features = ["image-defaults", "crossterm"] }
 image = "0.25"
-resvg = "0.46"
+resvg = "0.47"
 ansi-to-tui = "8"
 
 # Fuzzy search
@@ -60,7 +60,7 @@ devicons = "0.6"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
+toml = "1"
 
 # Config
 dirs = "6"

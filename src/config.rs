@@ -247,7 +247,8 @@ impl Config {
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
         let mut unknown_keys = Vec::new();
-        let deserializer = toml::Deserializer::new(&content);
+        let deserializer = toml::Deserializer::parse(&content)
+            .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
         let config: Self = serde_ignored::deserialize(deserializer, |key| {
             unknown_keys.push(key.to_string());
         })
