@@ -1,43 +1,32 @@
-# trev Development Guidelines
+# trev
 
-Auto-generated from all feature plans. Last updated: 2026-02-11
+Fast TUI file viewer with tree view, syntax-highlighted preview, and Neovim integration.
 
-## Active Technologies
-- Rust 2024 edition, nightly-2026-01-24 toolchain + ratatui 0.30, crossterm 0.29, tokio (full), devicons 0.6 (011-tui-ratatui)
-- N/A (ファイルシステム読み取りのみ) (011-tui-ratatui)
-- Rust 2024 edition, nightly-2026-01-24 + ratatui 0.30, syntect 5, two-face 0.4, ratatui-image 5, ansi-to-tui 7, content_inspector 0.4, lru 0.12, terminal-light 1 (005-preview)
-- Rust 2024 edition, nightly-2026-01-24 + oml (既存), serde (既存), serde_ignored (新規), dirs (新規, `directories` を置換) (001-user-config)
-- TOML ファイル (`$XDG_CONFIG_HOME/trev/config.toml` or `~/.config/trev/config.toml`) (001-user-config)
-- Rust 2024 edition, nightly-2026-01-24 + ratatui 0.30, crossterm 0.29, tokio (full), notify 8, notify-debouncer-mini 0.5, trash 5, chrono 0.4, sha2 0.10 (012-file-operations)
-- JSON ファイル（セッション永続化、undo 履歴）、ローカルファイルシステム (012-file-operations)
-- Rust 2024 edition, nightly-2026-01-24 + serde + serde_json (OpGroup 永続化用), 既存の FsOp / executor (012-file-operations)
-- N/A (メモリ内スタック。セッション永続化は Phase 10 で対応) (012-file-operations)
-- Rust 2024 edition, nightly-2026-01-24 + notify 8, notify-debouncer-mini 0.5, tokio (既存) (012-file-operations)
-- Rust 2024 edition, nightly-2026-01-24 + serde + serde_json (既存), sha2 (既存), dirs (既存) (012-file-operations)
-- JSON ファイル (`{data_dir}/trev/sessions/{hash}.json`) (012-file-operations)
+## Tech Stack
 
-- Rust 2024 edition, nightly-2026-01-24 + ignore 0.4 (WalkBuilder), tokio (background tasks), serde + serde_json (シリアライズ) (002-core-tree)
+- Rust 2024 edition, nightly-2026-01-24
+- TUI: ratatui 0.30, crossterm 0.29
+- Async: tokio (full)
+- Config: TOML (`~/.config/trev/config.toml`)
+- Session: JSON (`{data_dir}/trev/sessions/`)
 
-## Project Structure
+## Architecture
 
-```text
-src/
-tests/
 ```
-
-## Commands
-
-cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLOGIES] cargo clippy
-
-## Code Style
-
-Rust 2024 edition, nightly-2026-01-24: Follow standard conventions
-
-## Recent Changes
-- 012-file-operations: Added Rust 2024 edition, nightly-2026-01-24 + serde + serde_json (既存), sha2 (既存), dirs (既存)
-- 012-file-operations: Added Rust 2024 edition, nightly-2026-01-24 + notify 8, notify-debouncer-mini 0.5, tokio (既存)
-- 012-file-operations: Added Rust 2024 edition, nightly-2026-01-24 + serde + serde_json (OpGroup 永続化用), 既存の FsOp / executor
-
+src/
+├── app.rs          # Event loop, state machine
+├── app/            # handler/, keymap, state
+├── config.rs       # TOML config loading
+├── session.rs      # Session persistence (save/restore)
+├── state/tree.rs   # TreeState (cursor, expand, sort)
+├── tree/           # builder, sort, search_index
+├── preview/        # provider registry, content, cache, highlight
+├── file_op/        # executor, selection, undo, trash, conflict
+├── ui/             # tree_view, preview_view, status_bar, modal
+├── input.rs        # AppMode, key events
+├── action.rs       # Action enum
+└── watcher.rs      # FS change detection (notify)
+```
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

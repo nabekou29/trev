@@ -41,5 +41,4 @@ mod tests {
 
 - Place tests at file bottom
 - Use `super::*` for parent module access
-- Use `crate::test_utils::create_translation` for test data
 - Name tests descriptively: `truncate_value_short_text`, not `test1`
