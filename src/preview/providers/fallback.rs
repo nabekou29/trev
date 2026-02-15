@@ -25,7 +25,8 @@ impl FallbackProvider {
 }
 
 impl PreviewProvider for FallbackProvider {
-    fn name(&self) -> &'static str {
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn name(&self) -> &str {
         "Fallback"
     }
 

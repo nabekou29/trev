@@ -1,12 +1,6 @@
 //! Application state, context, and result types.
 
 use std::path::PathBuf;
-use std::sync::{
-    Arc,
-    Mutex,
-};
-
-use ratatui_image::picker::Picker;
 
 use super::keymap::KeyMap;
 use crate::config::{
@@ -57,8 +51,6 @@ pub struct AppState {
     pub viewport_height: u16,
     /// Scroll state for the tree view.
     pub scroll: ScrollState,
-    /// Shared image picker (terminal graphics protocol).
-    pub image_picker: Arc<Mutex<Picker>>,
 }
 
 /// Scroll position management for the tree view.

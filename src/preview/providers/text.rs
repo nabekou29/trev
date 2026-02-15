@@ -29,7 +29,8 @@ impl TextPreviewProvider {
 }
 
 impl PreviewProvider for TextPreviewProvider {
-    fn name(&self) -> &'static str {
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn name(&self) -> &str {
         "Text"
     }
 

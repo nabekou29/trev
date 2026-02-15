@@ -105,6 +105,11 @@ pub struct PreviewConfig {
 /// External command configuration for preview.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalCommand {
+    /// Display name for this command provider.
+    ///
+    /// Defaults to the command binary name when omitted.
+    #[serde(default)]
+    pub name: Option<String>,
     /// File extensions this command applies to.
     pub extensions: Vec<String>,
     /// Command name (must be in `$PATH`).
@@ -112,6 +117,15 @@ pub struct ExternalCommand {
     /// Command arguments.
     #[serde(default)]
     pub args: Vec<String>,
+}
+
+impl ExternalCommand {
+    /// Get the display name for this command.
+    ///
+    /// Returns the explicit `name` if set, otherwise the command binary name.
+    pub fn display_name(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.command)
+    }
 }
 
 /// File operation configuration.
@@ -518,6 +532,59 @@ typo_key = "oops"
         // Nothing should change.
         assert_that!(config.sort.order, eq(SortOrder::Mtime));
         assert_that!(config.display.show_preview, eq(false));
+    }
+
+    // --- ExternalCommand display_name ---
+
+    #[rstest]
+    fn external_command_display_name_uses_explicit_name() {
+        let cmd = ExternalCommand {
+            name: Some("Pretty JSON".to_string()),
+            extensions: vec!["json".to_string()],
+            command: "jq".to_string(),
+            args: vec![".".to_string()],
+        };
+        assert_that!(cmd.display_name(), eq("Pretty JSON"));
+    }
+
+    #[rstest]
+    fn external_command_display_name_defaults_to_command() {
+        let cmd = ExternalCommand {
+            name: None,
+            extensions: vec!["md".to_string()],
+            command: "glow".to_string(),
+            args: vec![],
+        };
+        assert_that!(cmd.display_name(), eq("glow"));
+    }
+
+    #[rstest]
+    fn external_command_name_field_is_optional_in_toml() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[[preview.commands]]
+name = "Pretty JSON"
+extensions = ["json"]
+command = "jq"
+args = ["."]
+
+[[preview.commands]]
+extensions = ["md"]
+command = "glow"
+"#,
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        let commands = &result.config.preview.commands;
+
+        assert_that!(commands.len(), eq(2));
+        assert_that!(commands[0].display_name(), eq("Pretty JSON"));
+        assert_that!(commands[1].display_name(), eq("glow"));
+        assert!(result.warnings.is_empty());
     }
 
     // --- T019: apply_cli_overrides show-ignored ---

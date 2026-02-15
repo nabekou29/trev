@@ -16,31 +16,26 @@ use crate::preview::provider::{
 /// Maximum output size from external commands (1 MB).
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 
-/// Provider that runs external commands and renders their ANSI output.
+/// Provider that runs a single external command and renders its ANSI output.
 ///
 /// Each configured command specifies file extensions it applies to.
 /// The command is run with the file path as an argument, and the
 /// ANSI-colored stdout is converted to ratatui `Text`.
 #[derive(Debug)]
 pub struct ExternalCmdProvider {
-    /// External command configurations.
-    commands: Vec<ExternalCommand>,
-    /// Timeout for commands.
+    /// Display name of this provider.
+    name: String,
+    /// External command configuration.
+    command: ExternalCommand,
+    /// Timeout for the command.
     timeout: Duration,
 }
 
 impl ExternalCmdProvider {
-    /// Create a new external command provider.
-    pub const fn new(commands: Vec<ExternalCommand>, timeout_secs: u64) -> Self {
-        Self { commands, timeout: Duration::from_secs(timeout_secs) }
-    }
-
-    /// Find the first matching command for the given file extension.
-    fn find_command(&self, ext: &str) -> Option<&ExternalCommand> {
-        let ext_lower = ext.to_ascii_lowercase();
-        self.commands
-            .iter()
-            .find(|cmd| cmd.extensions.iter().any(|e| e.to_ascii_lowercase() == ext_lower))
+    /// Create a new external command provider for a single command.
+    pub fn new(command: ExternalCommand, timeout_secs: u64) -> Self {
+        let name = command.display_name().to_string();
+        Self { name, command, timeout: Duration::from_secs(timeout_secs) }
     }
 
     /// Check if a command exists in PATH.
@@ -55,8 +50,8 @@ impl ExternalCmdProvider {
 }
 
 impl PreviewProvider for ExternalCmdProvider {
-    fn name(&self) -> &'static str {
-        "External"
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn priority(&self) -> u32 {
@@ -70,7 +65,9 @@ impl PreviewProvider for ExternalCmdProvider {
         let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
             return false;
         };
-        self.find_command(ext).is_some_and(|cmd| Self::command_exists(&cmd.command))
+        let ext_lower = ext.to_ascii_lowercase();
+        self.command.extensions.iter().any(|e| e.to_ascii_lowercase() == ext_lower)
+            && Self::command_exists(&self.command.command)
     }
 
     fn load(&self, path: &Path, ctx: &LoadContext) -> anyhow::Result<PreviewContent> {
@@ -78,17 +75,9 @@ impl PreviewProvider for ExternalCmdProvider {
             return Ok(PreviewContent::Empty);
         }
 
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-
-        let Some(cmd_config) = self.find_command(ext) else {
-            return Ok(PreviewContent::Error {
-                message: "No matching external command".to_string(),
-            });
-        };
-
         // Build the command with file path as final argument.
-        let mut cmd = Command::new(&cmd_config.command);
-        for arg in &cmd_config.args {
+        let mut cmd = Command::new(&self.command.command);
+        for arg in &self.command.args {
             cmd.arg(arg);
         }
         cmd.arg(path);
@@ -109,7 +98,7 @@ impl PreviewProvider for ExternalCmdProvider {
             return Ok(PreviewContent::Error {
                 message: format!(
                     "{} exited with {}: {}",
-                    cmd_config.command,
+                    self.command.command,
                     output.status,
                     stderr.trim()
                 ),
@@ -173,24 +162,48 @@ mod tests {
 
     fn make_echo_provider() -> ExternalCmdProvider {
         ExternalCmdProvider::new(
-            vec![ExternalCommand {
+            ExternalCommand {
+                name: None,
                 extensions: vec!["csv".to_string(), "tsv".to_string()],
                 command: "cat".to_string(),
                 args: vec![],
-            }],
+            },
             3,
         )
     }
 
     fn make_nonexistent_provider() -> ExternalCmdProvider {
         ExternalCmdProvider::new(
-            vec![ExternalCommand {
+            ExternalCommand {
+                name: None,
                 extensions: vec!["xyz".to_string()],
                 command: "nonexistent_command_12345".to_string(),
                 args: vec![],
-            }],
+            },
             3,
         )
+    }
+
+    // --- name tests ---
+
+    #[rstest]
+    fn name_uses_explicit_name() {
+        let provider = ExternalCmdProvider::new(
+            ExternalCommand {
+                name: Some("Pretty JSON".to_string()),
+                extensions: vec!["json".to_string()],
+                command: "jq".to_string(),
+                args: vec![".".to_string()],
+            },
+            3,
+        );
+        assert_that!(provider.name(), eq("Pretty JSON"));
+    }
+
+    #[rstest]
+    fn name_defaults_to_command_name() {
+        let provider = make_echo_provider();
+        assert_that!(provider.name(), eq("cat"));
     }
 
     // --- can_handle tests ---

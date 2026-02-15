@@ -4,10 +4,7 @@ mod handler;
 mod keymap;
 mod state;
 
-use std::sync::{
-    Arc,
-    Mutex,
-};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -81,19 +78,16 @@ pub async fn run(args: &Args) -> Result<()> {
     // Detect terminal background for theme selection (must be before raw mode).
     // terminal_light::luma() sends OSC 11 query — safe only in cooked mode.
     crate::preview::highlight::init_theme();
-    let image_picker = Arc::new(Mutex::new(picker.clone()));
-    let mut providers: Vec<Box<dyn PreviewProvider>> = vec![
-        Box::new(ImagePreviewProvider::new(picker)),
-        Box::new(TextPreviewProvider::new()),
-        Box::new(FallbackProvider::new()),
+    let mut providers: Vec<Arc<dyn PreviewProvider>> = vec![
+        Arc::new(ImagePreviewProvider::new(picker)),
+        Arc::new(TextPreviewProvider::new()),
+        Arc::new(FallbackProvider::new()),
     ];
-    if !config.preview.commands.is_empty() {
-        providers.push(Box::new(ExternalCmdProvider::new(
-            config.preview.commands.clone(),
-            config.preview.command_timeout,
-        )));
+    for cmd in &config.preview.commands {
+        providers
+            .push(Arc::new(ExternalCmdProvider::new(cmd.clone(), config.preview.command_timeout)));
     }
-    let preview_registry = PreviewRegistry::new(providers);
+    let preview_registry = PreviewRegistry::new(providers)?;
 
     let show_preview = config.display.show_preview;
 
@@ -113,7 +107,6 @@ pub async fn run(args: &Args) -> Result<()> {
         show_ignored,
         viewport_height: 0,
         scroll: ScrollState::new(),
-        image_picker,
     };
 
     // Set up async children load channel.

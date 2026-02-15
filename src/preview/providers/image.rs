@@ -1,10 +1,7 @@
 //! Image preview provider — ratatui-image.
 
 use std::path::Path;
-use std::sync::{
-    Arc,
-    Mutex,
-};
+use std::sync::Mutex;
 
 use ratatui_image::picker::Picker;
 
@@ -40,36 +37,6 @@ impl ImagePreviewProvider {
     pub fn fallback_picker() -> Picker {
         Picker::halfblocks()
     }
-
-    /// Load an image using a shared picker (for spawned tasks).
-    ///
-    /// This avoids recreating a picker with fallback protocol
-    /// when the correct protocol was already detected at startup.
-    pub fn load_with_picker(
-        path: &Path,
-        ctx: &LoadContext,
-        picker: &Arc<Mutex<Picker>>,
-    ) -> anyhow::Result<PreviewContent> {
-        if ctx.cancel_token.is_cancelled() {
-            return Ok(PreviewContent::Empty);
-        }
-
-        let dyn_image = load_image(path)?;
-
-        if ctx.cancel_token.is_cancelled() {
-            return Ok(PreviewContent::Empty);
-        }
-
-        let Ok(picker) = picker.lock() else {
-            return Ok(PreviewContent::Error {
-                message: "Failed to acquire image picker lock".to_string(),
-            });
-        };
-
-        let protocol = picker.new_resize_protocol(dyn_image);
-
-        Ok(PreviewContent::Image { protocol: Box::new(protocol) })
-    }
 }
 
 impl std::fmt::Debug for ImagePreviewProvider {
@@ -79,7 +46,8 @@ impl std::fmt::Debug for ImagePreviewProvider {
 }
 
 impl PreviewProvider for ImagePreviewProvider {
-    fn name(&self) -> &'static str {
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn name(&self) -> &str {
         "Image"
     }
 

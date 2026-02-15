@@ -2,16 +2,8 @@
 //!
 //! Handles preview scroll, provider cycling, and async preview loading.
 
-use std::path::{
-    Path,
-    PathBuf,
-};
-use std::sync::{
-    Arc,
-    Mutex,
-};
-
-use ratatui_image::picker::Picker;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::app::state::{
     AppContext,
@@ -23,10 +15,6 @@ use crate::preview::provider::{
     LoadContext,
     PreviewProvider,
 };
-use crate::preview::providers::external::ExternalCmdProvider;
-use crate::preview::providers::fallback::FallbackProvider;
-use crate::preview::providers::image::ImagePreviewProvider;
-use crate::preview::providers::text::TextPreviewProvider;
 
 /// Handle a preview action.
 pub fn handle_preview_action(
@@ -89,8 +77,10 @@ fn reload_preview(state: &mut AppState, ctx: &AppContext) {
 
 /// Resolve available providers for the current node.
 ///
-/// Returns the path and provider name list, or `None` if no providers match.
-fn resolve_preview_providers(state: &mut AppState) -> Option<(PathBuf, Vec<String>)> {
+/// Returns the path and resolved provider list, or `None` if no providers match.
+fn resolve_preview_providers(
+    state: &mut AppState,
+) -> Option<(PathBuf, Vec<Arc<dyn PreviewProvider>>)> {
     let node_info = state.tree_state.current_node_info()?;
     let path = node_info.path.clone();
     let is_dir = node_info.is_dir;
@@ -102,29 +92,33 @@ fn resolve_preview_providers(state: &mut AppState) -> Option<(PathBuf, Vec<Strin
     }
 
     let provider_names: Vec<String> = providers.iter().map(|p| p.name().to_string()).collect();
-    state.preview_state.set_available_providers(provider_names.clone());
+    state.preview_state.set_available_providers(provider_names);
 
-    Some((path, provider_names))
+    Some((path, providers))
 }
 
 /// Pick the active provider and spawn the async load task.
-fn spawn_preview_for(state: &AppState, path: &Path, providers: &[String], ctx: &AppContext) {
+fn spawn_preview_for(
+    state: &AppState,
+    path: &std::path::Path,
+    providers: &[Arc<dyn PreviewProvider>],
+    ctx: &AppContext,
+) {
     let active_index = state.preview_state.active_provider_index;
-    let Some(provider_name) = providers.get(active_index) else {
+    let Some(provider) = providers.get(active_index) else {
         return;
     };
-    let provider_name = provider_name.clone();
+    let provider = Arc::clone(provider);
+    let provider_name = provider.name().to_string();
 
     spawn_preview_load(PreviewLoadParams {
         tx: ctx.preview_tx.clone(),
         path: path.to_path_buf(),
+        provider,
         provider_name,
         max_lines: ctx.preview_config.max_lines,
         max_bytes: ctx.preview_config.max_bytes,
         cancel_token: state.preview_state.cancel_token.clone(),
-        commands: ctx.preview_config.commands.clone(),
-        command_timeout: ctx.preview_config.command_timeout,
-        image_picker: Arc::clone(&state.image_picker),
     });
 }
 
@@ -134,7 +128,9 @@ struct PreviewLoadParams {
     tx: tokio::sync::mpsc::Sender<PreviewLoadResult>,
     /// Path of the file to preview.
     path: PathBuf,
-    /// Name of the provider to use.
+    /// Provider to use for loading.
+    provider: Arc<dyn PreviewProvider>,
+    /// Provider name (for result tracking).
     provider_name: String,
     /// Maximum lines to load.
     max_lines: usize,
@@ -142,47 +138,19 @@ struct PreviewLoadParams {
     max_bytes: u64,
     /// Cancellation token for aborting the load.
     cancel_token: tokio_util::sync::CancellationToken,
-    /// External commands for the external provider.
-    commands: Vec<crate::config::ExternalCommand>,
-    /// Command timeout in seconds.
-    command_timeout: u64,
-    /// Shared image picker.
-    image_picker: Arc<Mutex<Picker>>,
 }
 
 /// Spawn a blocking task to load preview content.
 fn spawn_preview_load(params: PreviewLoadParams) {
-    let PreviewLoadParams {
-        tx,
-        path,
-        provider_name,
-        max_lines,
-        max_bytes,
-        cancel_token,
-        commands,
-        command_timeout,
-        image_picker,
-    } = params;
+    let PreviewLoadParams { tx, path, provider, provider_name, max_lines, max_bytes, cancel_token } =
+        params;
     tokio::spawn(async move {
         let load_path = path.clone();
-        let pname = provider_name.clone();
         let token = cancel_token.clone();
 
         let result = tokio::task::spawn_blocking(move || {
             let ctx = LoadContext { max_lines, max_bytes, cancel_token: token };
-
-            // Create the appropriate provider and load.
-            let content = match pname.as_str() {
-                "External" => {
-                    ExternalCmdProvider::new(commands, command_timeout).load(&load_path, &ctx)
-                }
-                "Image" => ImagePreviewProvider::load_with_picker(&load_path, &ctx, &image_picker),
-                "Text" => TextPreviewProvider::new().load(&load_path, &ctx),
-                "Fallback" => FallbackProvider::new().load(&load_path, &ctx),
-                _ => Ok(PreviewContent::Error { message: format!("Unknown provider: {pname}") }),
-            };
-
-            match content {
+            match provider.load(&load_path, &ctx) {
                 Ok(c) => c,
                 Err(e) => PreviewContent::Error { message: e.to_string() },
             }
