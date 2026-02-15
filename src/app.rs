@@ -261,7 +261,7 @@ pub async fn run(args: &Args) -> Result<()> {
         if crossterm::event::poll(Duration::from_millis(50))?
             && let Event::Key(key) = crossterm::event::read()?
         {
-            handle_key_event(key, &mut state, &children_tx, &preview_tx, &config.preview, show_hidden, show_ignored);
+            handle_key_event(key, &mut state, &children_tx, &preview_tx, &config.preview, &config.file_operations, show_hidden, show_ignored);
         }
 
         // Receive async children load results.
@@ -338,6 +338,7 @@ fn handle_key_event(
     children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
     preview_tx: &tokio::sync::mpsc::Sender<PreviewLoadResult>,
     preview_config: &crate::config::PreviewConfig,
+    file_op_config: &crate::config::FileOpConfig,
     show_hidden: bool,
     show_ignored: bool,
 ) {
@@ -347,7 +348,7 @@ fn handle_key_event(
             handle_input_mode_key(key, state, children_tx, show_hidden, show_ignored);
         }
         AppMode::Confirm(_) => {
-            // Confirm mode handling will be implemented in US3.
+            handle_confirm_mode_key(key, state, children_tx, show_hidden, show_ignored);
         }
         AppMode::Normal => {
             let Some(action) = map_key_event(key) else {
@@ -364,7 +365,7 @@ fn handle_key_event(
                     handle_preview_action(preview_action, state, preview_tx, preview_config);
                 }
                 crate::action::Action::FileOp(ref file_op_action) => {
-                    handle_file_op_action(file_op_action, state, children_tx, show_hidden, show_ignored);
+                    handle_file_op_action(file_op_action, state, children_tx, file_op_config, show_hidden, show_ignored);
                 }
             }
         }
@@ -419,9 +420,6 @@ const fn map_key_event(key: crossterm::event::KeyEvent) -> Option<crate::action:
         (KeyCode::Char('H'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
             Some(Action::Preview(PreviewAction::ScrollLeft))
         }
-        (KeyCode::Char('D'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
-            Some(Action::Preview(PreviewAction::HalfPageDown))
-        }
         (KeyCode::Char('U'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
             Some(Action::Preview(PreviewAction::HalfPageUp))
         }
@@ -447,6 +445,12 @@ const fn map_key_event(key: crossterm::event::KeyEvent) -> Option<crate::action:
         }
         (KeyCode::Char('p'), KeyModifiers::NONE) => {
             Some(Action::FileOp(crate::action::FileOpAction::Paste))
+        }
+        (KeyCode::Char('d'), KeyModifiers::NONE) => {
+            Some(Action::FileOp(crate::action::FileOpAction::Delete))
+        }
+        (KeyCode::Char('D'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+            Some(Action::FileOp(crate::action::FileOpAction::SystemTrash))
         }
         _ => None,
     }
@@ -554,11 +558,16 @@ fn handle_file_op_action(
     action: &crate::action::FileOpAction,
     state: &mut AppState,
     children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    file_op_config: &crate::config::FileOpConfig,
     show_hidden: bool,
     show_ignored: bool,
 ) {
     use crate::action::FileOpAction;
-    use crate::input::InputState;
+    use crate::input::{
+        ConfirmAction,
+        ConfirmState,
+        InputState,
+    };
 
     match *action {
         FileOpAction::ToggleMark => {
@@ -601,14 +610,140 @@ fn handle_file_op_action(
         FileOpAction::Paste => {
             execute_paste(state, children_tx, show_hidden, show_ignored);
         }
-        // Delete/SystemTrash: will clear marks after confirmation (US3 integration).
-        FileOpAction::Delete
-        | FileOpAction::SystemTrash
-        | FileOpAction::Undo
-        | FileOpAction::Redo => {}
+        FileOpAction::Delete => {
+            if let Some(info) = state.tree_state.current_node_info() {
+                let targets = state.mark_set.targets_or_cursor(&info.path);
+                let confirm_action = match file_op_config.delete_mode {
+                    crate::config::DeleteMode::Permanent => ConfirmAction::PermanentDelete,
+                    crate::config::DeleteMode::CustomTrash => ConfirmAction::CustomTrash,
+                };
+                let count = targets.len();
+                state.mode = AppMode::Confirm(ConfirmState {
+                    message: format!("Delete {count} item(s)?"),
+                    paths: targets,
+                    on_confirm: confirm_action,
+                });
+            }
+        }
+        FileOpAction::SystemTrash => {
+            if let Some(info) = state.tree_state.current_node_info() {
+                let targets = state.mark_set.targets_or_cursor(&info.path);
+                let count = targets.len();
+                state.mode = AppMode::Confirm(ConfirmState {
+                    message: format!("Move {count} item(s) to system trash?"),
+                    paths: targets,
+                    on_confirm: ConfirmAction::SystemTrash,
+                });
+            }
+        }
+        // Undo/Redo: will be implemented in US4.
+        FileOpAction::Undo | FileOpAction::Redo => {}
     }
     // Suppress unused variable warnings for parameters used in later phases.
     let _ = (children_tx, show_hidden, show_ignored);
+}
+
+/// Handle key events in Input mode (inline text editing).
+/// Handle key events in Confirm mode (delete confirmation dialog).
+fn handle_confirm_mode_key(
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+    children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    show_hidden: bool,
+    show_ignored: bool,
+) {
+    use crossterm::event::KeyCode;
+
+    match key.code {
+        // Confirm: execute the delete operation.
+        KeyCode::Char('y') | KeyCode::Enter => {
+            let AppMode::Confirm(confirm) = std::mem::take(&mut state.mode) else {
+                return;
+            };
+            execute_delete(confirm, state, children_tx, show_hidden, show_ignored);
+        }
+        // Cancel: return to Normal mode.
+        KeyCode::Char('n') | KeyCode::Esc => {
+            state.mode = AppMode::Normal;
+        }
+        _ => {}
+    }
+}
+
+/// Execute the confirmed delete operation.
+fn execute_delete(
+    confirm: crate::input::ConfirmState,
+    state: &mut AppState,
+    children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    show_hidden: bool,
+    show_ignored: bool,
+) {
+    use std::collections::HashSet;
+
+    use crate::file_op::executor::{
+        FsOp,
+        execute,
+    };
+    use crate::input::ConfirmAction;
+
+    let mut affected_parents: HashSet<PathBuf> = HashSet::new();
+    let crate::input::ConfirmState { paths, on_confirm, .. } = confirm;
+
+    match on_confirm {
+        ConfirmAction::PermanentDelete => {
+            for path in paths {
+                let op = if path.is_dir() {
+                    FsOp::RemoveDir { path: path.clone() }
+                } else {
+                    FsOp::RemoveFile { path: path.clone() }
+                };
+                if let Err(e) = execute(&op) {
+                    tracing::error!(%e, ?path, "permanent delete failed");
+                    continue;
+                }
+                if let Some(parent) = path.parent() {
+                    affected_parents.insert(parent.to_path_buf());
+                }
+            }
+        }
+        ConfirmAction::CustomTrash => {
+            if let Err(e) = crate::file_op::trash::ensure_trash_dir() {
+                tracing::error!(%e, "failed to create trash directory");
+                return;
+            }
+            for path in paths {
+                let trash_dst = crate::file_op::trash::trash_path(&path);
+                let op = FsOp::Move {
+                    src: path.clone(),
+                    dst: trash_dst,
+                };
+                if let Err(e) = execute(&op) {
+                    tracing::error!(%e, ?path, "custom trash delete failed");
+                    continue;
+                }
+                if let Some(parent) = path.parent() {
+                    affected_parents.insert(parent.to_path_buf());
+                }
+            }
+        }
+        ConfirmAction::SystemTrash => {
+            for path in paths {
+                if let Err(e) = trash::delete(&path) {
+                    tracing::error!(%e, ?path, "system trash delete failed");
+                    continue;
+                }
+                if let Some(parent) = path.parent() {
+                    affected_parents.insert(parent.to_path_buf());
+                }
+            }
+        }
+    }
+
+    state.mark_set.clear();
+
+    for parent in &affected_parents {
+        refresh_directory(state, parent, children_tx, show_hidden, show_ignored);
+    }
 }
 
 /// Handle key events in Input mode (inline text editing).

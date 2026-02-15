@@ -295,7 +295,6 @@ impl InputState {
 
 /// Action to perform when confirmation dialog is accepted.
 #[derive(Debug, Clone)]
-#[expect(dead_code, reason = "Used in US3 (delete) integration")]
 pub enum ConfirmAction {
     /// Permanently delete files.
     PermanentDelete,
@@ -307,7 +306,6 @@ pub enum ConfirmAction {
 
 /// State for the confirmation dialog.
 #[derive(Debug, Clone)]
-#[expect(dead_code, reason = "Used in US3 (delete) integration")]
 pub struct ConfirmState {
     /// Dialog message.
     pub message: String,
@@ -326,7 +324,6 @@ pub enum AppMode {
     /// Inline text input mode (create/rename).
     Input(InputState),
     /// Confirmation dialog mode (delete).
-    #[expect(dead_code, reason = "Used in US3 (delete) integration")]
     Confirm(ConfirmState),
 }
 

@@ -74,6 +74,7 @@ pub enum PreviewAction {
     /// Scroll preview content left.
     ScrollLeft,
     /// Scroll preview half a page down.
+    #[expect(dead_code, reason = "Keybinding will be re-mapped in future")]
     HalfPageDown,
     /// Scroll preview half a page up.
     HalfPageUp,
