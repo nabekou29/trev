@@ -27,6 +27,7 @@ pub enum InputAction {
 #[derive(Debug, Clone)]
 pub struct InputState {
     /// Display prompt (e.g. "Create: " or "Rename: ").
+    #[allow(dead_code, reason = "Displayed in UI input widget (pending)")]
     pub prompt: String,
     /// Current input text value.
     pub value: String,

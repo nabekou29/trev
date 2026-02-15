@@ -55,6 +55,7 @@ pub enum FsOp {
 }
 
 /// An irreversible file system operation (cannot be undone).
+#[expect(dead_code, reason = "Undo/Redo integration pending (US4)")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IrreversibleOp {
     /// Send to OS system trash.
@@ -298,7 +299,7 @@ mod tests {
         std::fs::write(src_dir.join("sub/nested.txt"), "nested").unwrap();
 
         execute(&FsOp::Copy {
-            src: src_dir.clone(),
+            src: src_dir,
             dst: dst_dir.clone(),
         })
         .unwrap();

@@ -65,11 +65,13 @@ impl YankBuffer {
     }
 
     /// Number of yanked paths.
+    #[allow(dead_code, reason = "Used by future status bar display")]
     pub const fn count(&self) -> usize {
         self.paths.len()
     }
 
     /// Check if a specific path is in the yank buffer.
+    #[allow(dead_code, reason = "Used by future UI mark highlighting")]
     pub fn contains(&self, path: &Path) -> bool {
         self.paths.iter().any(|p| p == path)
     }

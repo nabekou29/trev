@@ -123,8 +123,10 @@ fn read_head(path: &Path, limit: usize) -> std::io::Result<Vec<u8>> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
 mod tests {
+    use std::fmt::Write;
+
     use googletest::prelude::*;
     use rstest::*;
     use tempfile::TempDir;
@@ -245,7 +247,10 @@ mod tests {
     #[rstest]
     fn load_respects_max_lines_limit(temp_dir: TempDir) {
         let path = temp_dir.path().join("big.txt");
-        let content: String = (0..100).map(|i| format!("line {i}\n")).collect();
+        let content: String = (0..100).fold(String::new(), |mut s, i| {
+            let _ = writeln!(s, "line {i}");
+            s
+        });
         fs::write(&path, &content).unwrap();
 
         let ctx = LoadContext {
@@ -270,9 +275,10 @@ mod tests {
     fn load_respects_max_bytes_limit(temp_dir: TempDir) {
         let path = temp_dir.path().join("big.txt");
         // Each line is ~50 bytes, 100 lines = ~5000 bytes
-        let content: String = (0..100)
-            .map(|i| format!("line {i:045}\n"))
-            .collect();
+        let content: String = (0..100).fold(String::new(), |mut s, i| {
+            let _ = writeln!(s, "line {i:045}");
+            s
+        });
         fs::write(&path, &content).unwrap();
 
         let ctx = LoadContext {

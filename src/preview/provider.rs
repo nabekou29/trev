@@ -114,12 +114,13 @@ mod tests {
         name: &'static str,
         priority: u32,
         handles: bool,
+        #[allow(clippy::type_complexity)]
         enabled_fn: Option<Box<dyn Fn(&[&str]) -> bool + Send + Sync>>,
     }
 
     impl PreviewProvider for TestProvider {
         fn name(&self) -> &'static str {
-            &self.name
+            self.name
         }
 
         fn priority(&self) -> u32 {
@@ -133,7 +134,7 @@ mod tests {
         fn is_enabled(&self, available: &[&str]) -> bool {
             self.enabled_fn
                 .as_ref()
-                .map_or(true, |f| f(available))
+                .is_none_or(|f| f(available))
         }
 
         fn load(&self, _path: &Path, _ctx: &LoadContext) -> anyhow::Result<PreviewContent> {

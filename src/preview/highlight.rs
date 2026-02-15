@@ -135,6 +135,8 @@ pub fn detect_language(extension: &str) -> String {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
+    use std::fmt::Write;
+
     use googletest::prelude::*;
     use rstest::*;
 
@@ -178,7 +180,7 @@ mod tests {
         // Generate a 1000-line Rust source.
         let mut code = String::new();
         for i in 0..1000 {
-            code.push_str(&format!("fn func_{i}() {{ let x = {i}; }}\n"));
+            let _ = writeln!(code, "fn func_{i}() {{ let x = {i}; }}");
         }
 
         let start = std::time::Instant::now();

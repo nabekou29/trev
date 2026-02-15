@@ -48,6 +48,7 @@ pub fn ensure_trash_dir() -> Result<()> {
 }
 
 /// Remove a specific file from the custom trash directory.
+#[allow(dead_code, reason = "Used by future trash cleanup feature")]
 pub fn clean_trash_file(path: &Path) -> Result<()> {
     if path.exists() {
         if path.is_dir() {

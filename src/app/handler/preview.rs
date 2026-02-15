@@ -1,0 +1,231 @@
+//! Preview action handlers.
+//!
+//! Handles preview scroll, provider cycling, and async preview loading.
+
+use std::path::{
+    Path,
+    PathBuf,
+};
+use std::sync::{
+    Arc,
+    Mutex,
+};
+
+use ratatui_image::picker::Picker;
+
+use crate::app::state::{
+    AppContext,
+    AppState,
+    PreviewLoadResult,
+};
+use crate::preview::content::PreviewContent;
+use crate::preview::provider::{
+    LoadContext,
+    PreviewProvider,
+};
+use crate::preview::providers::external::ExternalCmdProvider;
+use crate::preview::providers::fallback::FallbackProvider;
+use crate::preview::providers::image::ImagePreviewProvider;
+use crate::preview::providers::text::TextPreviewProvider;
+
+/// Handle a preview action.
+pub fn handle_preview_action(
+    action: &crate::action::PreviewAction,
+    state: &mut AppState,
+    ctx: &AppContext,
+) {
+    use crate::action::PreviewAction;
+
+    let viewport_height = state.viewport_height as usize;
+
+    match *action {
+        PreviewAction::ScrollDown => {
+            state.preview_state.scroll_down(1, viewport_height);
+        }
+        PreviewAction::ScrollUp => {
+            state.preview_state.scroll_up(1);
+        }
+        PreviewAction::ScrollRight => {
+            state.preview_state.scroll_right(1);
+        }
+        PreviewAction::ScrollLeft => {
+            state.preview_state.scroll_left(1);
+        }
+        PreviewAction::HalfPageDown => {
+            state
+                .preview_state
+                .scroll_down(viewport_height / 2, viewport_height);
+        }
+        PreviewAction::HalfPageUp => {
+            state.preview_state.scroll_up(viewport_height / 2);
+        }
+        PreviewAction::CycleProvider => {
+            if state.preview_state.cycle_provider() {
+                reload_preview(state, ctx);
+            }
+        }
+    }
+}
+
+/// Trigger preview for a new file (cursor change).
+///
+/// Resets provider index, resolves providers, and spawns async load.
+pub fn trigger_preview(
+    state: &mut AppState,
+    ctx: &AppContext,
+) {
+    let Some((path, providers)) = resolve_preview_providers(state) else {
+        return;
+    };
+    state.preview_state.request_preview(path.clone());
+    spawn_preview_for(state, &path, &providers, ctx);
+}
+
+/// Reload the current file with the (already-cycled) provider.
+///
+/// Preserves the provider index set by `cycle_provider()`.
+fn reload_preview(
+    state: &mut AppState,
+    ctx: &AppContext,
+) {
+    let Some((path, providers)) = resolve_preview_providers(state) else {
+        return;
+    };
+    state.preview_state.reload_preview(path.clone());
+    spawn_preview_for(state, &path, &providers, ctx);
+}
+
+/// Resolve available providers for the current node.
+///
+/// Returns the path and provider name list, or `None` if no providers match.
+fn resolve_preview_providers(state: &mut AppState) -> Option<(PathBuf, Vec<String>)> {
+    let node_info = state.tree_state.current_node_info()?;
+    let path = node_info.path.clone();
+    let is_dir = node_info.is_dir;
+
+    let providers = state.preview_registry.resolve(&path, is_dir);
+    if providers.is_empty() {
+        state.preview_state.set_content(PreviewContent::Empty);
+        return None;
+    }
+
+    let provider_names: Vec<String> = providers.iter().map(|p| p.name().to_string()).collect();
+    state.preview_state.set_available_providers(provider_names.clone());
+
+    Some((path, provider_names))
+}
+
+/// Pick the active provider and spawn the async load task.
+fn spawn_preview_for(
+    state: &AppState,
+    path: &Path,
+    providers: &[String],
+    ctx: &AppContext,
+) {
+    let active_index = state.preview_state.active_provider_index;
+    let Some(provider_name) = providers.get(active_index) else {
+        return;
+    };
+    let provider_name = provider_name.clone();
+
+    spawn_preview_load(PreviewLoadParams {
+        tx: ctx.preview_tx.clone(),
+        path: path.to_path_buf(),
+        provider_name,
+        max_lines: ctx.preview_config.max_lines,
+        max_bytes: ctx.preview_config.max_bytes,
+        cancel_token: state.preview_state.cancel_token.clone(),
+        commands: ctx.preview_config.commands.clone(),
+        command_timeout: ctx.preview_config.command_timeout,
+        image_picker: Arc::clone(&state.image_picker),
+    });
+}
+
+/// Parameters for spawning a preview load task.
+struct PreviewLoadParams {
+    /// Sender for preview load results.
+    tx: tokio::sync::mpsc::Sender<PreviewLoadResult>,
+    /// Path of the file to preview.
+    path: PathBuf,
+    /// Name of the provider to use.
+    provider_name: String,
+    /// Maximum lines to load.
+    max_lines: usize,
+    /// Maximum bytes to load.
+    max_bytes: u64,
+    /// Cancellation token for aborting the load.
+    cancel_token: tokio_util::sync::CancellationToken,
+    /// External commands for the external provider.
+    commands: Vec<crate::config::ExternalCommand>,
+    /// Command timeout in seconds.
+    command_timeout: u64,
+    /// Shared image picker.
+    image_picker: Arc<Mutex<Picker>>,
+}
+
+/// Spawn a blocking task to load preview content.
+fn spawn_preview_load(params: PreviewLoadParams) {
+    let PreviewLoadParams {
+        tx,
+        path,
+        provider_name,
+        max_lines,
+        max_bytes,
+        cancel_token,
+        commands,
+        command_timeout,
+        image_picker,
+    } = params;
+    tokio::spawn(async move {
+        let load_path = path.clone();
+        let pname = provider_name.clone();
+        let token = cancel_token.clone();
+
+        let result = tokio::task::spawn_blocking(move || {
+            let ctx = LoadContext {
+                max_lines,
+                max_bytes,
+                cancel_token: token,
+            };
+
+            // Create the appropriate provider and load.
+            let content = match pname.as_str() {
+                "External" => {
+                    ExternalCmdProvider::new(commands, command_timeout).load(&load_path, &ctx)
+                }
+                "Image" => {
+                    ImagePreviewProvider::load_with_picker(&load_path, &ctx, &image_picker)
+                }
+                "Text" => TextPreviewProvider::new().load(&load_path, &ctx),
+                "Fallback" => FallbackProvider::new().load(&load_path, &ctx),
+                _ => Ok(PreviewContent::Error {
+                    message: format!("Unknown provider: {pname}"),
+                }),
+            };
+
+            match content {
+                Ok(c) => c,
+                Err(e) => PreviewContent::Error {
+                    message: e.to_string(),
+                },
+            }
+        })
+        .await;
+
+        let content = match result {
+            Ok(content) => content,
+            Err(e) => PreviewContent::Error {
+                message: e.to_string(),
+            },
+        };
+
+        // Ignore send error (receiver dropped = app shutting down).
+        let _ = tx
+            .send(PreviewLoadResult {
+                path,
+                provider_name,
+                content,
+            })
+            .await;
+    });
+}
