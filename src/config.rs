@@ -26,6 +26,12 @@ pub struct Config {
     pub display: DisplayConfig,
     /// Preview settings.
     pub preview: PreviewConfig,
+    /// File operation settings.
+    pub file_operations: FileOpConfig,
+    /// Session persistence settings.
+    pub session: SessionConfig,
+    /// File system watcher settings.
+    pub watcher: WatcherConfig,
 }
 
 /// Sort configuration.
@@ -106,6 +112,74 @@ pub struct ExternalCommand {
     /// Command arguments.
     #[serde(default)]
     pub args: Vec<String>,
+}
+
+/// File operation configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FileOpConfig {
+    /// Delete mode for the `d` key.
+    pub delete_mode: DeleteMode,
+    /// Maximum undo stack size.
+    pub undo_stack_size: usize,
+}
+
+/// Delete mode variants.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeleteMode {
+    /// Permanently delete files (undo not possible).
+    #[default]
+    Permanent,
+    /// Move files to custom trash directory (undo possible).
+    CustomTrash,
+}
+
+/// Session persistence configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SessionConfig {
+    /// Whether to restore session by default on startup.
+    pub restore_by_default: bool,
+    /// Days before a session file expires and is auto-deleted.
+    pub expiry_days: u64,
+}
+
+/// File system watcher configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WatcherConfig {
+    /// Whether FS watching is enabled.
+    pub enabled: bool,
+    /// Debounce interval in milliseconds.
+    pub debounce_ms: u64,
+}
+
+impl Default for FileOpConfig {
+    fn default() -> Self {
+        Self {
+            delete_mode: DeleteMode::default(),
+            undo_stack_size: 100,
+        }
+    }
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            restore_by_default: true,
+            expiry_days: 90,
+        }
+    }
+}
+
+impl Default for WatcherConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            debounce_ms: 250,
+        }
+    }
 }
 
 impl Default for PreviewConfig {

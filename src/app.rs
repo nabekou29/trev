@@ -15,11 +15,14 @@ use ratatui_image::picker::Picker;
 use crossterm::event::{
     Event,
     KeyCode,
+    KeyEventKind,
     KeyModifiers,
 };
 
 use crate::cli::Args;
 use crate::config::Config;
+use crate::file_op::mark::MarkSet;
+use crate::input::AppMode;
 use crate::preview::cache::PreviewCache;
 use crate::preview::content::PreviewContent;
 use crate::preview::provider::{
@@ -50,6 +53,10 @@ pub struct AppState {
     pub preview_cache: PreviewCache,
     /// Preview provider registry.
     pub preview_registry: PreviewRegistry,
+    /// Current application mode (Normal, Input, Confirm).
+    pub mode: AppMode,
+    /// Set of marked file paths for batch operations.
+    pub mark_set: MarkSet,
     /// Whether the application should quit.
     pub should_quit: bool,
     /// Whether to show file icons (Nerd Fonts).
@@ -199,6 +206,8 @@ pub async fn run(args: &Args) -> Result<()> {
         preview_state: PreviewState::new(),
         preview_cache: PreviewCache::new(config.preview.cache_size),
         preview_registry,
+        mode: AppMode::default(),
+        mark_set: MarkSet::new(),
         should_quit: false,
         show_icons: !args.no_icons,
         show_preview,
@@ -241,8 +250,10 @@ pub async fn run(args: &Args) -> Result<()> {
         })?;
 
         // Poll for events (50ms timeout for responsive async result handling).
+        // Only process Press events — Release/Repeat from kitty keyboard protocol are ignored.
         if crossterm::event::poll(Duration::from_millis(50))?
             && let Event::Key(key) = crossterm::event::read()?
+            && key.kind == KeyEventKind::Press
         {
             handle_key_event(key, &mut state, &children_tx, &preview_tx, &config.preview, show_hidden, show_ignored);
         }
@@ -324,19 +335,32 @@ fn handle_key_event(
     show_hidden: bool,
     show_ignored: bool,
 ) {
-    let Some(action) = map_key_event(key) else {
-        return;
-    };
-
-    match action {
-        crate::action::Action::Quit => {
-            state.should_quit = true;
+    // Dispatch based on current application mode.
+    match state.mode {
+        AppMode::Input(_) => {
+            handle_input_mode_key(key, state, children_tx, show_hidden, show_ignored);
         }
-        crate::action::Action::Tree(ref tree_action) => {
-            handle_tree_action(tree_action, state, children_tx, show_hidden, show_ignored);
+        AppMode::Confirm(_) => {
+            // Confirm mode handling will be implemented in US3.
         }
-        crate::action::Action::Preview(ref preview_action) => {
-            handle_preview_action(preview_action, state, preview_tx, preview_config);
+        AppMode::Normal => {
+            let Some(action) = map_key_event(key) else {
+                return;
+            };
+            match action {
+                crate::action::Action::Quit => {
+                    state.should_quit = true;
+                }
+                crate::action::Action::Tree(ref tree_action) => {
+                    handle_tree_action(tree_action, state, children_tx, show_hidden, show_ignored);
+                }
+                crate::action::Action::Preview(ref preview_action) => {
+                    handle_preview_action(preview_action, state, preview_tx, preview_config);
+                }
+                crate::action::Action::FileOp(ref file_op_action) => {
+                    handle_file_op_action(file_op_action, state, children_tx, show_hidden, show_ignored);
+                }
+            }
         }
     }
 }
@@ -398,6 +422,16 @@ const fn map_key_event(key: crossterm::event::KeyEvent) -> Option<crate::action:
         // Provider cycling (Tab).
         (KeyCode::Tab, KeyModifiers::NONE) => {
             Some(Action::Preview(PreviewAction::CycleProvider))
+        }
+        // File operations.
+        (KeyCode::Char(' '), KeyModifiers::NONE) => {
+            Some(Action::FileOp(crate::action::FileOpAction::ToggleMark))
+        }
+        (KeyCode::Char('a'), KeyModifiers::NONE) => {
+            Some(Action::FileOp(crate::action::FileOpAction::CreateFile))
+        }
+        (KeyCode::Char('r'), KeyModifiers::NONE) => {
+            Some(Action::FileOp(crate::action::FileOpAction::Rename))
         }
         _ => None,
     }
@@ -498,6 +532,196 @@ fn handle_preview_action(
             }
         }
     }
+}
+
+/// Handle a file operation action.
+fn handle_file_op_action(
+    action: &crate::action::FileOpAction,
+    state: &mut AppState,
+    children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    show_hidden: bool,
+    show_ignored: bool,
+) {
+    use crate::action::FileOpAction;
+    use crate::input::InputState;
+
+    match *action {
+        FileOpAction::ToggleMark => {
+            if let Some(info) = state.tree_state.current_node_info() {
+                state.mark_set.toggle(info.path);
+                // Move cursor down after toggling mark.
+                state.tree_state.move_cursor(1);
+            }
+        }
+        FileOpAction::CreateFile => {
+            if let Some(info) = state.tree_state.current_node_info() {
+                // If cursor is on a directory, create inside it. Otherwise, use parent.
+                let parent_dir = if info.is_dir {
+                    info.path
+                } else {
+                    info.path.parent().map_or_else(|| info.path.clone(), Path::to_path_buf)
+                };
+                state.mode = AppMode::Input(InputState::for_create(parent_dir));
+            }
+        }
+        FileOpAction::Rename => {
+            if let Some(info) = state.tree_state.current_node_info() {
+                state.mode = AppMode::Input(InputState::for_rename(info.path));
+            }
+        }
+        // Yank/Cut: will clear marks after collecting targets (US1 integration).
+        // Delete/SystemTrash: will clear marks after confirmation (US3 integration).
+        FileOpAction::Yank
+        | FileOpAction::Cut
+        | FileOpAction::Paste
+        | FileOpAction::Delete
+        | FileOpAction::SystemTrash
+        | FileOpAction::Undo
+        | FileOpAction::Redo => {}
+    }
+    // Suppress unused variable warnings for parameters used in later phases.
+    let _ = (children_tx, show_hidden, show_ignored);
+}
+
+/// Handle key events in Input mode (inline text editing).
+fn handle_input_mode_key(
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+    children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    show_hidden: bool,
+    show_ignored: bool,
+) {
+    // Take ownership of the input state temporarily.
+    let AppMode::Input(ref mut input_state) = state.mode else {
+        return;
+    };
+
+    match input_state.handle_key_event(key) {
+        Some(true) => {
+            // Confirmed — execute the operation.
+            let AppMode::Input(input) = std::mem::take(&mut state.mode) else {
+                return;
+            };
+            execute_input_confirm(state, input, children_tx, show_hidden, show_ignored);
+        }
+        Some(false) => {
+            // Cancelled — return to Normal mode.
+            state.mode = AppMode::Normal;
+        }
+        None => {
+            // Regular editing key — state already mutated.
+        }
+    }
+}
+
+/// Execute the confirmed input action (create or rename).
+fn execute_input_confirm(
+    state: &mut AppState,
+    input: crate::input::InputState,
+    children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    show_hidden: bool,
+    show_ignored: bool,
+) {
+    use crate::input::InputAction;
+
+    if input.value.trim().is_empty() {
+        return;
+    }
+
+    match input.on_confirm {
+        InputAction::Create { parent_dir } => {
+            execute_create(&parent_dir, &input.value, state, children_tx, show_hidden, show_ignored);
+        }
+        InputAction::Rename { target } => {
+            execute_rename(&target, &input.value, state, children_tx, show_hidden, show_ignored);
+        }
+    }
+}
+
+/// Execute file/directory creation.
+fn execute_create(
+    parent_dir: &Path,
+    name: &str,
+    state: &mut AppState,
+    children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    show_hidden: bool,
+    show_ignored: bool,
+) {
+    use crate::file_op::executor::{
+        FsOp,
+        execute,
+    };
+
+    let new_path = parent_dir.join(name);
+
+    // Trailing "/" means create a directory.
+    let op = if name.ends_with('/') {
+        FsOp::CreateDir { path: new_path }
+    } else {
+        // Ensure parent directories exist for nested paths (e.g. "foo/bar/baz.txt").
+        if let Some(parent) = new_path.parent()
+            && !parent.exists()
+        {
+            let mkdir_op = FsOp::CreateDir { path: parent.to_path_buf() };
+            if let Err(e) = execute(&mkdir_op) {
+                tracing::error!(%e, "failed to create parent directories");
+                return;
+            }
+        }
+        FsOp::CreateFile { path: new_path }
+    };
+
+    if let Err(e) = execute(&op) {
+        tracing::error!(%e, "failed to create file/directory");
+        return;
+    }
+
+    // Refresh the parent directory in the tree.
+    refresh_directory(state, parent_dir, children_tx, show_hidden, show_ignored);
+}
+
+/// Execute file/directory rename.
+fn execute_rename(
+    target: &Path,
+    new_name: &str,
+    state: &mut AppState,
+    children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    show_hidden: bool,
+    show_ignored: bool,
+) {
+    use crate::file_op::executor::{
+        FsOp,
+        execute,
+    };
+
+    let parent = target.parent().unwrap_or_else(|| Path::new(""));
+    let new_path = parent.join(new_name);
+
+    let op = FsOp::Move {
+        src: target.to_path_buf(),
+        dst: new_path,
+    };
+
+    if let Err(e) = execute(&op) {
+        tracing::error!(%e, "failed to rename");
+        return;
+    }
+
+    // Refresh the parent directory in the tree.
+    refresh_directory(state, parent, children_tx, show_hidden, show_ignored);
+}
+
+/// Refresh a directory in the tree by triggering a re-read of its children.
+fn refresh_directory(
+    state: &mut AppState,
+    dir: &Path,
+    children_tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
+    show_hidden: bool,
+    show_ignored: bool,
+) {
+    // Mark directory as needing reload, then spawn load.
+    state.tree_state.invalidate_children(dir);
+    spawn_load_children(children_tx.clone(), dir.to_path_buf(), show_hidden, show_ignored, false);
 }
 
 /// Handle an expand result: spawn loads or prefetch as appropriate.
@@ -838,6 +1062,13 @@ mod tests {
         use crate::action::{Action, TreeAction};
         let key = crossterm::event::KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
         assert_eq!(map_key_event(key), Some(Action::Tree(TreeAction::HalfPageUp)));
+    }
+
+    #[rstest]
+    fn map_key_space_to_toggle_mark() {
+        use crate::action::{Action, FileOpAction};
+        let key = crossterm::event::KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE);
+        assert_eq!(map_key_event(key), Some(Action::FileOp(FileOpAction::ToggleMark)));
     }
 
     #[rstest]

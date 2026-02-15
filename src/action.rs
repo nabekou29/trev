@@ -7,8 +7,36 @@ pub enum Action {
     Tree(TreeAction),
     /// Preview-related actions.
     Preview(PreviewAction),
+    /// File operation actions.
+    FileOp(FileOpAction),
     /// Quit the application.
     Quit,
+}
+
+/// Actions for file operations (copy, move, delete, create, rename, undo/redo, mark).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(dead_code, reason = "Variants used incrementally as file ops are implemented")]
+pub enum FileOpAction {
+    /// Yank (copy) selected files to yank buffer.
+    Yank,
+    /// Cut selected files to yank buffer.
+    Cut,
+    /// Paste yank buffer contents to current directory.
+    Paste,
+    /// Create a new file or directory (opens inline input).
+    CreateFile,
+    /// Rename the file at cursor (opens inline input).
+    Rename,
+    /// Delete selected files (mode depends on config).
+    Delete,
+    /// Send selected files to system trash.
+    SystemTrash,
+    /// Undo the last operation.
+    Undo,
+    /// Redo the last undone operation.
+    Redo,
+    /// Toggle mark on cursor file.
+    ToggleMark,
 }
 
 /// Actions that modify the tree state.

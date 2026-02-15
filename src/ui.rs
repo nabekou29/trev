@@ -1,5 +1,6 @@
 //! UI layout and rendering.
 
+pub mod inline_input;
 pub mod modal;
 pub mod preview_view;
 pub mod status_bar;

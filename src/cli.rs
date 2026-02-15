@@ -65,6 +65,14 @@ pub struct Args {
     #[arg(long, default_value = "edit")]
     pub action: OpenAction,
 
+    /// Restore previous session state on startup.
+    #[arg(long, conflicts_with = "no_restore")]
+    pub restore: bool,
+
+    /// Do not restore previous session state on startup.
+    #[arg(long, conflicts_with = "restore")]
+    pub no_restore: bool,
+
     /// Reveal a specific path on startup.
     #[arg(long)]
     pub reveal: Option<PathBuf>,
@@ -153,6 +161,8 @@ impl Default for Args {
             sort_direction: None,
             no_directories_first: false,
             no_icons: false,
+            restore: false,
+            no_restore: false,
             daemon: false,
             emit: false,
             emit_format: EmitFormat::default(),

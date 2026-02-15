@@ -257,6 +257,15 @@ impl TreeState {
         }
     }
 
+    /// Invalidate children for a directory, setting it back to Loading state.
+    ///
+    /// Used to trigger a re-read of a directory after file operations (create, rename, delete).
+    pub fn invalidate_children(&mut self, path: &Path) {
+        if let Some(node) = self.find_node_mut(path) {
+            node.children = ChildrenState::Loading;
+        }
+    }
+
     /// Prepare prefetching for child directories at the given path.
     ///
     /// For each child directory with `NotLoaded` children, transitions them

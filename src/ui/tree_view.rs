@@ -14,6 +14,7 @@ use ratatui::text::{
 use ratatui::widgets::Paragraph;
 
 use crate::app::AppState;
+use crate::input::AppMode;
 use crate::state::tree::ChildrenState;
 
 /// Render the tree view into the given area.
@@ -42,8 +43,18 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             "  "
         };
 
+        // Mark indicator (shown before other content).
+        let is_marked = state.mark_set.is_marked(&vnode.node.path);
+
         // Build spans for the line.
         let mut spans = Vec::new();
+
+        if is_marked {
+            spans.push(Span::styled("● ", Style::default().fg(Color::Yellow)));
+        } else {
+            spans.push(Span::raw("  "));
+        }
+
         spans.push(Span::raw(indent));
         spans.push(Span::raw(indicator));
 
@@ -116,6 +127,44 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, area);
+
+    // Render inline input overlay when in Input mode.
+    if let AppMode::Input(ref input) = state.mode {
+        render_input_overlay(frame, area, cursor, offset, height, input);
+    }
+}
+
+/// Render the inline input overlay below the cursor row.
+///
+/// The box is positioned below the cursor so the target entry stays visible.
+/// Height is 3 lines: top border + input + bottom border.
+fn render_input_overlay(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    cursor: usize,
+    offset: usize,
+    height: usize,
+    input: &crate::input::InputState,
+) {
+    let cursor_row = cursor.saturating_sub(offset);
+    // Place input box below the cursor row.
+    let input_start = cursor_row + 1;
+    let box_height: u16 = 3;
+
+    if input_start < height {
+        let start_u16 = u16::try_from(input_start).unwrap_or(u16::MAX);
+        let available = area.height.saturating_sub(start_u16);
+
+        if available >= box_height {
+            let input_area = Rect {
+                x: area.x,
+                y: area.y.saturating_add(start_u16),
+                width: area.width,
+                height: box_height,
+            };
+            crate::ui::inline_input::render_inline_input(frame, input_area, input);
+        }
+    }
 }
 
 /// Parse a hex color string (e.g., "#D32F2F") into a ratatui `Color`.
