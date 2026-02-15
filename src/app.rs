@@ -4,13 +4,17 @@ mod handler;
 mod keymap;
 mod state;
 
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::Event;
 use handler::{
     handle_key_event,
+    refresh_directory,
     trigger_prefetch,
     trigger_preview,
 };
@@ -35,6 +39,7 @@ use crate::preview::providers::text::TextPreviewProvider;
 use crate::preview::state::PreviewState;
 use crate::state::tree::TreeState;
 use crate::tree::builder::TreeBuilder;
+use crate::watcher::FsWatcher;
 
 /// Run the application.
 #[allow(clippy::unused_async, clippy::too_many_lines)]
@@ -88,6 +93,28 @@ pub async fn run(args: &Args) -> Result<()> {
 
     let show_preview = config.display.show_preview;
 
+    // Create watcher channel and instance.
+    let (watcher_tx, mut watcher_rx) =
+        tokio::sync::mpsc::unbounded_channel::<Vec<notify_debouncer_mini::DebouncedEvent>>();
+    let (fs_watcher, suppressed) = if config.watcher.enabled {
+        match FsWatcher::new(&config.watcher, watcher_tx) {
+            Ok(mut w) => {
+                let suppressed = w.suppressed();
+                if let Err(e) = w.watch(&root_path) {
+                    tracing::warn!(%e, "failed to watch root directory");
+                }
+                (Some(w), suppressed)
+            }
+            Err(e) => {
+                tracing::warn!(%e, "failed to create file system watcher");
+                (None, Arc::new(AtomicBool::new(false)))
+            }
+        }
+    } else {
+        drop(watcher_tx);
+        (None, Arc::new(AtomicBool::new(false)))
+    };
+
     // Create app state.
     let mut state = AppState {
         tree_state,
@@ -97,6 +124,7 @@ pub async fn run(args: &Args) -> Result<()> {
         mode: AppMode::default(),
         selection: SelectionBuffer::new(),
         undo_history: UndoHistory::new(config.file_operations.undo_stack_size),
+        watcher: fs_watcher,
         should_quit: false,
         show_icons: !args.no_icons,
         show_preview,
@@ -121,6 +149,7 @@ pub async fn run(args: &Args) -> Result<()> {
         preview_config: config.preview.clone(),
         file_op_config: config.file_operations.clone(),
         keymap: KeyMap::default(),
+        suppressed,
     };
 
     // Prefetch root's child directories for instant first expansion.
@@ -184,6 +213,9 @@ pub async fn run(args: &Args) -> Result<()> {
             }
         }
 
+        // Receive watcher events (file system changes in watched directories).
+        process_watcher_events(&mut watcher_rx, &mut state, &ctx);
+
         // Receive async preview load results.
         while let Ok(result) = preview_rx.try_recv() {
             // Only apply if the path still matches current preview request.
@@ -215,4 +247,31 @@ pub async fn run(args: &Args) -> Result<()> {
     crate::terminal::restore();
 
     Ok(())
+}
+
+/// Process pending file system watcher events and refresh affected directories.
+fn process_watcher_events(
+    watcher_rx: &mut tokio::sync::mpsc::UnboundedReceiver<
+        Vec<notify_debouncer_mini::DebouncedEvent>,
+    >,
+    state: &mut AppState,
+    ctx: &AppContext,
+) {
+    while let Ok(events) = watcher_rx.try_recv() {
+        let mut affected_dirs: HashSet<PathBuf> = HashSet::new();
+        for event in &events {
+            if let Some(parent) = event.path.parent() {
+                affected_dirs.insert(parent.to_path_buf());
+            }
+        }
+        let mut dirs_to_refresh: Vec<PathBuf> = Vec::new();
+        for dir in &affected_dirs {
+            if state.tree_state.handle_fs_change(dir) {
+                dirs_to_refresh.push(dir.clone());
+            }
+        }
+        for dir in &dirs_to_refresh {
+            refresh_directory(state, dir, ctx);
+        }
+    }
 }

@@ -1,6 +1,8 @@
 //! Application state, context, and result types.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{
     Duration,
     Instant,
@@ -22,6 +24,7 @@ use crate::state::tree::{
     TreeNode,
     TreeState,
 };
+use crate::watcher::FsWatcher;
 
 /// Application-wide state wrapping tree state and UI settings.
 #[derive(Debug)]
@@ -42,6 +45,8 @@ pub struct AppState {
     pub selection: SelectionBuffer,
     /// Undo/redo history for file operations.
     pub undo_history: UndoHistory,
+    /// File system watcher (None if disabled).
+    pub watcher: Option<FsWatcher>,
     /// Whether the application should quit.
     pub should_quit: bool,
     /// Whether to show file icons (Nerd Fonts).
@@ -152,6 +157,8 @@ pub struct AppContext {
     pub file_op_config: FileOpConfig,
     /// Key-to-action mapping.
     pub keymap: KeyMap,
+    /// Shared suppression flag for file system watcher.
+    pub suppressed: Arc<AtomicBool>,
 }
 
 /// Result of an async directory children load operation.

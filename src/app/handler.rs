@@ -13,7 +13,10 @@ use input::{
 use preview::handle_preview_action;
 pub use preview::trigger_preview;
 use tree::handle_tree_action;
-pub use tree::trigger_prefetch;
+pub use tree::{
+    refresh_directory,
+    trigger_prefetch,
+};
 
 use crate::app::state::{
     AppContext,

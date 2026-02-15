@@ -270,13 +270,25 @@ impl TreeState {
         }
     }
 
-    /// Invalidate children for a directory, setting it back to Loading state.
+    /// Handle a filesystem change event for a directory.
     ///
-    /// Used to trigger a re-read of a directory after file operations (create, rename, delete).
-    #[expect(dead_code, reason = "Will be used by FS watcher for explicit invalidation")]
-    pub fn invalidate_children(&mut self, path: &Path) {
-        if let Some(node) = self.find_node_mut(path) {
-            node.children = ChildrenState::Loading;
+    /// Returns `true` if the directory is expanded and loaded (caller should refresh).
+    /// For collapsed + loaded directories, marks children as `NotLoaded` so they
+    /// reload on next expand.
+    pub fn handle_fs_change(&mut self, path: &Path) -> bool {
+        let Some(node) = self.find_node_mut(path) else {
+            return false;
+        };
+        let is_expanded = node.is_expanded;
+        let is_loaded = matches!(node.children, ChildrenState::Loaded(_));
+
+        if is_expanded && is_loaded {
+            true
+        } else if !is_expanded && is_loaded {
+            node.children = ChildrenState::NotLoaded;
+            false
+        } else {
+            false
         }
     }
 
@@ -1084,6 +1096,62 @@ mod tests {
         let changed = state.collapse();
         assert!(changed);
         assert_eq!(state.visible_node_count(), 2);
+    }
+
+    // =========================================================================
+    // FS Change Detection: handle_fs_change
+    // =========================================================================
+
+    #[rstest]
+    fn handle_fs_change_expanded_loaded_returns_true() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let mut subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
+        subdir.is_expanded = true;
+
+        let mut state = state_with_children(vec![subdir]);
+        // Expanded + Loaded → returns true (caller should refresh)
+        assert_that!(state.handle_fs_change(&subdir_path), eq(true));
+    }
+
+    #[rstest]
+    fn handle_fs_change_collapsed_loaded_invalidates() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
+        // Collapsed but Loaded (prefetched)
+
+        let mut state = state_with_children(vec![subdir]);
+        // Collapsed + Loaded → returns false, sets to NotLoaded
+        assert_that!(state.handle_fs_change(&subdir_path), eq(false));
+
+        // Verify children are now NotLoaded
+        let visible = state.visible_nodes();
+        assert!(matches!(visible[0].node.children, ChildrenState::NotLoaded));
+    }
+
+    #[rstest]
+    fn handle_fs_change_not_loaded_is_noop() {
+        let root = Path::new("/test/root");
+        let subdir = TreeNode {
+            name: "subdir".to_string(),
+            path: root.join("subdir"),
+            is_dir: true,
+            is_symlink: false,
+            size: 0,
+            modified: None,
+            children: ChildrenState::NotLoaded,
+            is_expanded: false,
+        };
+        let mut state = state_with_children(vec![subdir]);
+        assert_that!(state.handle_fs_change(&root.join("subdir")), eq(false));
+    }
+
+    #[rstest]
+    fn handle_fs_change_unknown_path_returns_false() {
+        let root = Path::new("/test/root");
+        let mut state = state_with_children(vec![file_node("a.txt", root)]);
+        assert_that!(state.handle_fs_change(&root.join("nonexistent")), eq(false));
     }
 
     // =========================================================================

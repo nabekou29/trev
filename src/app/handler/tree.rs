@@ -12,7 +12,10 @@ use crate::app::state::{
     AppState,
     ChildrenLoadResult,
 };
-use crate::state::tree::TreeState;
+use crate::state::tree::{
+    ExpandResult,
+    TreeState,
+};
 use crate::tree::builder::TreeBuilder;
 
 /// Handle a tree action.
@@ -34,6 +37,8 @@ pub fn handle_tree_action(
             let show_hidden = state.show_hidden;
             let show_ignored = state.show_ignored;
             if let Some(result) = state.tree_state.expand_or_open() {
+                // Watch newly expanded directory.
+                watch_if_expand(&result, &mut state.watcher);
                 handle_expand_result(
                     &result,
                     &mut state.tree_state,
@@ -44,12 +49,38 @@ pub fn handle_tree_action(
             }
         }
         TreeAction::Collapse => {
+            // Check if current node is an expanded directory (will be collapsed).
+            let visible = state.tree_state.visible_nodes();
+            let cursor = state.tree_state.cursor();
+            let collapse_path = visible
+                .get(cursor)
+                .filter(|vn| vn.node.is_dir && vn.node.is_expanded)
+                .map(|vn| vn.node.path.clone());
+            drop(visible);
+
             state.tree_state.collapse();
+
+            // Unwatch the collapsed directory.
+            if let Some(path) = collapse_path {
+                unwatch_dir(&path, &mut state.watcher);
+            }
         }
         TreeAction::ToggleExpand => {
             let show_hidden = state.show_hidden;
             let show_ignored = state.show_ignored;
-            if let Some(result) = state.tree_state.toggle_expand(state.tree_state.cursor()) {
+            let cursor = state.tree_state.cursor();
+
+            // Capture collapse path before toggle (toggle may collapse expanded dir).
+            let visible = state.tree_state.visible_nodes();
+            let collapse_path = visible
+                .get(cursor)
+                .filter(|vn| vn.node.is_dir && vn.node.is_expanded)
+                .map(|vn| vn.node.path.clone());
+            drop(visible);
+
+            if let Some(result) = state.tree_state.toggle_expand(cursor) {
+                // Expanded — watch.
+                watch_if_expand(&result, &mut state.watcher);
                 handle_expand_result(
                     &result,
                     &mut state.tree_state,
@@ -57,6 +88,9 @@ pub fn handle_tree_action(
                     show_hidden,
                     show_ignored,
                 );
+            } else if let Some(path) = collapse_path {
+                // Collapsed — unwatch.
+                unwatch_dir(&path, &mut state.watcher);
             }
         }
         TreeAction::JumpFirst => {
@@ -74,20 +108,41 @@ pub fn handle_tree_action(
     }
 }
 
+/// Watch a directory if the expand result indicates expansion.
+fn watch_if_expand(result: &ExpandResult, watcher: &mut Option<crate::watcher::FsWatcher>) {
+    match result {
+        ExpandResult::NeedsLoad(path) | ExpandResult::AlreadyLoaded(path) => {
+            if let Some(w) = watcher
+                && let Err(e) = w.watch(path)
+            {
+                tracing::warn!(%e, ?path, "failed to watch directory");
+            }
+        }
+        ExpandResult::OpenFile(_) => {}
+    }
+}
+
+/// Unwatch a directory.
+fn unwatch_dir(path: &Path, watcher: &mut Option<crate::watcher::FsWatcher>) {
+    if let Some(w) = watcher
+        && let Err(e) = w.unwatch(path)
+    {
+        tracing::warn!(%e, ?path, "failed to unwatch directory");
+    }
+}
+
 /// Handle an expand result: spawn loads or prefetch as appropriate.
 ///
 /// Accepts `show_hidden`/`show_ignored` as separate parameters because this
 /// function operates on a partial borrow of `TreeState` (not full `AppState`).
 /// Callers should extract these values from `state` before the partial borrow.
 fn handle_expand_result(
-    result: &crate::state::tree::ExpandResult,
+    result: &ExpandResult,
     tree_state: &mut TreeState,
     ctx: &AppContext,
     show_hidden: bool,
     show_ignored: bool,
 ) {
-    use crate::state::tree::ExpandResult;
-
     match *result {
         ExpandResult::NeedsLoad(ref path) => {
             spawn_load_children(&ctx.children_tx, path.clone(), show_hidden, show_ignored, false);
