@@ -99,11 +99,23 @@ fn find_socket(
             let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else {
                 return false;
             };
-            p.extension().is_some_and(|ext| ext == "sock")
-                && workspace.is_none_or(|ws| stem.starts_with(&format!("{ws}-")))
-                && pid_str
-                    .as_deref()
-                    .is_none_or(|pid| stem.ends_with(&format!("-{pid}")))
+            if p.extension().is_none_or(|ext| ext != "sock") {
+                return false;
+            }
+            // Filter by PID (from socket filename).
+            if !pid_str
+                .as_deref()
+                .is_none_or(|pid| stem.ends_with(&format!("-{pid}")))
+            {
+                return false;
+            }
+            // Filter by workspace (from metadata file).
+            if let Some(ws) = workspace {
+                let workspace_path = trev::ipc::paths::read_meta(p)
+                    .map(|path| path.to_string_lossy().into_owned());
+                return workspace_path.is_some_and(|path| path.contains(ws));
+            }
+            true
         })
         .collect();
 

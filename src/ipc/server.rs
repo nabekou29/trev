@@ -109,6 +109,7 @@ impl IpcServer {
 impl Drop for IpcServer {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.socket_path);
+        super::paths::remove_meta(&self.socket_path);
     }
 }
 

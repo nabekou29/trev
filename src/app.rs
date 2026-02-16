@@ -433,8 +433,13 @@ fn start_ipc_if_daemon(
     let (ipc_tx, ipc_rx) = tokio::sync::mpsc::unbounded_channel::<IpcCommand>();
     let server = if daemon {
         let socket_path = crate::ipc::paths::socket_path(root_path);
-        match crate::ipc::server::IpcServer::start_on_path(socket_path, ipc_tx) {
-            Ok(s) => Some(s),
+        match crate::ipc::server::IpcServer::start_on_path(socket_path.clone(), ipc_tx) {
+            Ok(s) => {
+                if let Err(e) = crate::ipc::paths::write_meta(&socket_path, root_path) {
+                    tracing::warn!(%e, "failed to write IPC metadata");
+                }
+                Some(s)
+            }
             Err(e) => {
                 tracing::warn!(%e, "failed to start IPC server");
                 None
