@@ -132,6 +132,8 @@ pub enum Command {
         #[arg(long)]
         workspace: Option<String>,
     },
+    /// Print JSON Schema for the configuration file to stdout.
+    Schema,
 }
 
 /// Control actions for a running daemon.

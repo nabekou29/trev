@@ -1,6 +1,6 @@
 //! Configuration file management.
 //!
-//! Loads settings from `$XDG_CONFIG_HOME/trev/config.toml` (or `~/.config/trev/config.toml`),
+//! Loads settings from `$XDG_CONFIG_HOME/trev/config.yml` (or `~/.config/trev/config.yml`),
 //! warns about unknown keys, and supports CLI argument overrides.
 
 use std::path::{
@@ -9,6 +9,7 @@ use std::path::{
 };
 
 use anyhow::Context as _;
+use schemars::JsonSchema;
 use serde::{
     Deserialize,
     Serialize,
@@ -17,7 +18,7 @@ use serde::{
 use crate::cli::Args;
 
 /// Application configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct Config {
     /// Sort settings.
@@ -32,10 +33,139 @@ pub struct Config {
     pub session: SessionConfig,
     /// File system watcher settings.
     pub watcher: WatcherConfig,
+    /// Keybinding customization.
+    pub keybindings: KeybindingConfig,
 }
 
+/// Keybinding configuration with context-based sections.
+///
+/// Each section groups bindings by context: `universal` (always active),
+/// `file` (cursor on file), `directory` (cursor on directory), and
+/// `daemon.*` (daemon mode variants).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct KeybindingConfig {
+    /// Disable all default keybindings.
+    pub disable_default: bool,
+    /// Bindings active regardless of context.
+    pub universal: ContextBindings,
+    /// Bindings active when cursor is on a file.
+    pub file: ContextBindings,
+    /// Bindings active when cursor is on a directory.
+    pub directory: ContextBindings,
+    /// Bindings active in daemon mode.
+    pub daemon: DaemonBindings,
+}
+
+/// Keybindings for a specific context.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct ContextBindings {
+    /// Disable default keybindings for this context.
+    pub disable_default: bool,
+    /// Keybinding entries.
+    #[serde(default)]
+    pub bindings: Vec<KeyBindingEntry>,
+}
+
+/// Daemon-mode keybindings, subdivided by node context.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct DaemonBindings {
+    /// Bindings active in daemon mode regardless of node type.
+    pub universal: ContextBindings,
+    /// Bindings active in daemon mode when cursor is on a file.
+    pub file: ContextBindings,
+    /// Bindings active in daemon mode when cursor is on a directory.
+    pub directory: ContextBindings,
+}
+
+/// A single keybinding entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyBindingEntry {
+    /// Key notation (e.g. `"j"`, `"ctrl+a"`, `"G"`).
+    pub key: String,
+    /// Built-in action name (e.g. `"tree.move_down"`, `"quit"`).
+    #[serde(default)]
+    pub action: Option<String>,
+    /// Shell command to execute (template string).
+    #[serde(default)]
+    pub run: Option<String>,
+    /// IPC notification method name.
+    #[serde(default)]
+    pub notify: Option<String>,
+}
+
+impl JsonSchema for KeyBindingEntry {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "KeyBindingEntry".into()
+    }
+
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        concat!(module_path!(), "::KeyBindingEntry").into()
+    }
+
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "object",
+            "description": "A keybinding entry. Exactly one of 'action', 'run', or 'notify' must be set.",
+            "required": ["key"],
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "Key notation (e.g. \"j\", \"ctrl+a\", \"G\")"
+                },
+                "action": {
+                    "anyOf": [
+                        {
+                            "type": "string",
+                            "enum": [
+                                "quit", "noop",
+                                "tree.move_down", "tree.move_up",
+                                "tree.expand", "tree.collapse", "tree.toggle_expand",
+                                "tree.jump_first", "tree.jump_last",
+                                "tree.half_page_down", "tree.half_page_up",
+                                "tree.expand_all", "tree.collapse_all",
+                                "tree.toggle_hidden", "tree.toggle_ignored",
+                                "preview.scroll_down", "preview.scroll_up",
+                                "preview.scroll_right", "preview.scroll_left",
+                                "preview.half_page_down", "preview.half_page_up",
+                                "preview.cycle_provider", "preview.toggle_preview",
+                                "file_op.yank", "file_op.cut", "file_op.paste",
+                                "file_op.create_file", "file_op.rename",
+                                "file_op.delete", "file_op.system_trash",
+                                "file_op.undo", "file_op.redo",
+                                "file_op.toggle_mark", "file_op.clear_selections",
+                                "file_op.copy_menu"
+                            ]
+                        },
+                        { "type": "null" }
+                    ],
+                    "description": "Built-in action name"
+                },
+                "run": {
+                    "anyOf": [
+                        { "type": "string" },
+                        { "type": "null" }
+                    ],
+                    "description": "Shell command template. Variables: {path}, {dir}, {name}, {root}"
+                },
+                "notify": {
+                    "anyOf": [
+                        { "type": "string" },
+                        { "type": "null" }
+                    ],
+                    "description": "IPC notification method name"
+                }
+            },
+            "additionalProperties": false
+        })
+    }
+}
+
+
 /// Sort configuration.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct SortConfig {
     /// Sort order field.
@@ -47,7 +177,7 @@ pub struct SortConfig {
 }
 
 /// Display configuration.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct DisplayConfig {
     /// Show hidden files.
@@ -59,7 +189,7 @@ pub struct DisplayConfig {
 }
 
 /// Sort order variants.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum SortOrder {
     /// Sort by name.
@@ -76,7 +206,7 @@ pub enum SortOrder {
 }
 
 /// Sort direction.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum SortDirection {
     /// Ascending order.
@@ -87,7 +217,7 @@ pub enum SortDirection {
 }
 
 /// Preview configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct PreviewConfig {
     /// Maximum number of lines to preview (default: 1000).
@@ -103,7 +233,7 @@ pub struct PreviewConfig {
 }
 
 /// External command configuration for preview.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ExternalCommand {
     /// Display name for this command provider.
     ///
@@ -129,7 +259,7 @@ impl ExternalCommand {
 }
 
 /// File operation configuration.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct FileOpConfig {
     /// Delete mode for the `d` key.
@@ -139,7 +269,7 @@ pub struct FileOpConfig {
 }
 
 /// Delete mode variants.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DeleteMode {
     /// Permanently delete files (undo not possible).
@@ -150,7 +280,7 @@ pub enum DeleteMode {
 }
 
 /// Session persistence configuration.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct SessionConfig {
     /// Whether to restore session by default on startup.
@@ -160,7 +290,7 @@ pub struct SessionConfig {
 }
 
 /// File system watcher configuration.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct WatcherConfig {
     /// Whether FS watching is enabled.
@@ -247,8 +377,7 @@ impl Config {
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
         let mut unknown_keys = Vec::new();
-        let deserializer = toml::Deserializer::parse(&content)
-            .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
+        let deserializer = serde_yaml_ng::Deserializer::from_str(&content);
         let config: Self = serde_ignored::deserialize(deserializer, |key| {
             unknown_keys.push(key.to_string());
         })
@@ -305,12 +434,22 @@ impl Config {
 
     /// Get the default configuration file path.
     fn config_path() -> PathBuf {
-        Self::config_dir().join("config.toml")
+        Self::config_dir().join("config.yml")
+    }
+
+    /// Generate JSON Schema for the configuration file.
+    pub fn generate_schema() -> schemars::Schema {
+        schemars::schema_for!(Self)
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::expect_used)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::expect_used,
+    clippy::literal_string_with_formatting_args
+)]
 mod tests {
     use googletest::prelude::*;
     use rstest::*;
@@ -347,7 +486,7 @@ mod tests {
     #[rstest]
     fn load_missing_file_returns_default() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("nonexistent.toml");
+        let path = tmp.path().join("nonexistent.yml");
 
         // load_from should error, but load() skips missing files.
         // Test via load_from with nonexistent path.
@@ -360,7 +499,7 @@ mod tests {
     #[rstest]
     fn empty_config_applies_defaults() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("config.toml");
+        let path = tmp.path().join("config.yml");
         std::fs::write(&path, "").unwrap();
 
         let result = Config::load_from(&path).unwrap();
@@ -371,35 +510,34 @@ mod tests {
         assert!(result.warnings.is_empty());
     }
 
-    // --- T006: valid TOML deserializes correctly ---
+    // --- T006: valid YAML deserializes correctly ---
 
     #[rstest]
-    fn valid_toml_deserializes_all_fields() {
+    fn valid_yaml_deserializes_all_fields() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("config.toml");
+        let path = tmp.path().join("config.yml");
         std::fs::write(
             &path,
             r#"
-[sort]
-order = "size"
-direction = "desc"
-directories_first = false
+sort:
+  order: size
+  direction: desc
+  directories_first: false
 
-[display]
-show_hidden = true
-show_ignored = true
-show_preview = false
+display:
+  show_hidden: true
+  show_ignored: true
+  show_preview: false
 
-[preview]
-max_lines = 500
-max_bytes = 5242880
-cache_size = 20
-command_timeout = 5
-
-[[preview.commands]]
-extensions = ["json"]
-command = "jq"
-args = ["."]
+preview:
+  max_lines: 500
+  max_bytes: 5242880
+  cache_size: 20
+  command_timeout: 5
+  commands:
+    - extensions: [json]
+      command: jq
+      args: ["."]
 "#,
         )
         .unwrap();
@@ -427,18 +565,18 @@ args = ["."]
     #[rstest]
     fn unknown_keys_produce_warnings() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("config.toml");
+        let path = tmp.path().join("config.yml");
         std::fs::write(
             &path,
-            r#"
-[sort]
-order = "name"
-unknown_sort_key = true
+            r"
+sort:
+  order: name
+  unknown_sort_key: true
 
-[display]
-show_hidden = false
-typo_key = "oops"
-"#,
+display:
+  show_hidden: false
+  typo_key: oops
+",
         )
         .unwrap();
 
@@ -459,8 +597,8 @@ typo_key = "oops"
     #[rstest]
     fn syntax_error_includes_file_path() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("config.toml");
-        std::fs::write(&path, "[sort\nbroken = true").unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "sort:\n  order: [invalid").unwrap();
 
         let err = Config::load_from(&path).unwrap_err();
         let msg = format!("{err:#}");
@@ -480,8 +618,8 @@ typo_key = "oops"
         use std::os::unix::fs::PermissionsExt;
 
         let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("config.toml");
-        std::fs::write(&path, "[sort]\norder = \"name\"").unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "sort:\n  order: name").unwrap();
 
         // Remove read permission.
         let perms = std::fs::Permissions::from_mode(0o000);
@@ -519,10 +657,10 @@ typo_key = "oops"
         assert_that!(config.display.show_preview, eq(false));
     }
 
-    // --- T018: unset CLI args preserve TOML values ---
+    // --- T018: unset CLI args preserve config values ---
 
     #[rstest]
-    fn unset_cli_args_preserve_toml() {
+    fn unset_cli_args_preserve_config() {
         let mut config = Config::default();
         config.sort.order = SortOrder::Mtime;
         config.display.show_preview = false;
@@ -560,21 +698,20 @@ typo_key = "oops"
     }
 
     #[rstest]
-    fn external_command_name_field_is_optional_in_toml() {
+    fn external_command_name_field_is_optional_in_yaml() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("config.toml");
+        let path = tmp.path().join("config.yml");
         std::fs::write(
             &path,
             r#"
-[[preview.commands]]
-name = "Pretty JSON"
-extensions = ["json"]
-command = "jq"
-args = ["."]
-
-[[preview.commands]]
-extensions = ["md"]
-command = "glow"
+preview:
+  commands:
+    - name: Pretty JSON
+      extensions: [json]
+      command: jq
+      args: ["."]
+    - extensions: [md]
+      command: glow
 "#,
         )
         .unwrap();
@@ -597,5 +734,185 @@ command = "glow"
         config.apply_cli_overrides(&args);
 
         assert_that!(config.display.show_ignored, eq(true));
+    }
+
+    // --- Keybinding config defaults ---
+
+    #[rstest]
+    fn keybinding_config_defaults() {
+        let config = KeybindingConfig::default();
+        assert!(!config.disable_default);
+        assert!(config.universal.bindings.is_empty());
+        assert!(config.file.bindings.is_empty());
+        assert!(config.directory.bindings.is_empty());
+        assert!(config.daemon.universal.bindings.is_empty());
+        assert!(config.daemon.file.bindings.is_empty());
+        assert!(config.daemon.directory.bindings.is_empty());
+    }
+
+    #[rstest]
+    fn keybinding_config_from_yaml() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(
+            &path,
+            r#"
+keybindings:
+  disable_default: true
+  universal:
+    bindings:
+      - key: j
+        action: tree.move_down
+      - key: o
+        run: "open {path}"
+  file:
+    bindings:
+      - key: enter
+        notify: open_file
+  directory:
+    bindings:
+      - key: enter
+        action: tree.toggle_expand
+  daemon:
+    universal:
+      bindings:
+        - key: ctrl+q
+          notify: quit_request
+"#,
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        let kb = &result.config.keybindings;
+
+        assert!(kb.disable_default);
+
+        // Universal bindings.
+        assert_that!(kb.universal.bindings.len(), eq(2));
+        assert_that!(kb.universal.bindings[0].key.as_str(), eq("j"));
+        assert_that!(kb.universal.bindings[0].action.as_deref(), some(eq("tree.move_down")));
+        assert!(kb.universal.bindings[0].run.is_none());
+        assert!(kb.universal.bindings[0].notify.is_none());
+
+        assert_that!(kb.universal.bindings[1].key.as_str(), eq("o"));
+        assert_that!(kb.universal.bindings[1].run.as_deref(), some(eq("open {path}")));
+
+        // File binding.
+        assert_that!(kb.file.bindings.len(), eq(1));
+        assert_that!(kb.file.bindings[0].key.as_str(), eq("enter"));
+        assert_that!(kb.file.bindings[0].notify.as_deref(), some(eq("open_file")));
+
+        // Directory binding.
+        assert_that!(kb.directory.bindings.len(), eq(1));
+        assert_that!(kb.directory.bindings[0].key.as_str(), eq("enter"));
+        assert_that!(kb.directory.bindings[0].action.as_deref(), some(eq("tree.toggle_expand")));
+
+        // Daemon universal binding.
+        assert_that!(kb.daemon.universal.bindings.len(), eq(1));
+        assert_that!(kb.daemon.universal.bindings[0].key.as_str(), eq("ctrl+q"));
+        assert_that!(kb.daemon.universal.bindings[0].notify.as_deref(), some(eq("quit_request")));
+
+        assert!(result.warnings.is_empty());
+    }
+
+    #[rstest]
+    fn keybinding_section_disable_default() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(
+            &path,
+            r"
+keybindings:
+  file:
+    disable_default: true
+    bindings:
+      - key: enter
+        notify: open_file
+  daemon:
+    file:
+      disable_default: true
+",
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        let kb = &result.config.keybindings;
+
+        assert!(!kb.disable_default);
+        assert!(!kb.universal.disable_default);
+        assert!(kb.file.disable_default);
+        assert!(!kb.directory.disable_default);
+        assert!(!kb.daemon.universal.disable_default);
+        assert!(kb.daemon.file.disable_default);
+        assert!(!kb.daemon.directory.disable_default);
+    }
+
+    #[rstest]
+    fn empty_keybindings_uses_defaults() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "").unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        assert!(!result.config.keybindings.disable_default);
+        assert!(result.config.keybindings.universal.bindings.is_empty());
+    }
+
+    // --- JSON Schema generation ---
+
+    #[rstest]
+    fn schema_generates_valid_json() {
+        let schema = Config::generate_schema();
+        let json = serde_json::to_string_pretty(&schema).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_object());
+        assert!(parsed.get("$schema").is_some());
+    }
+
+    #[rstest]
+    fn schema_contains_all_top_level_sections() {
+        let schema = Config::generate_schema();
+        let json = serde_json::to_value(&schema).unwrap();
+        let props = json["properties"].as_object().unwrap();
+
+        for key in ["sort", "display", "preview", "file_operations", "session", "watcher", "keybindings"] {
+            assert!(props.contains_key(key), "missing top-level property: {key}");
+        }
+    }
+
+    #[rstest]
+    fn schema_sort_order_has_enum_values() {
+        let schema = Config::generate_schema();
+        let json = serde_json::to_value(&schema).unwrap();
+        let sort_order = &json["$defs"]["SortOrder"];
+        let json_str = sort_order.to_string();
+
+        for val in ["name", "size", "mtime", "type", "extension"] {
+            assert!(json_str.contains(val), "SortOrder missing variant: {val}");
+        }
+    }
+
+    #[rstest]
+    fn schema_action_field_has_enum_values() {
+        let schema = Config::generate_schema();
+        let json = serde_json::to_value(&schema).unwrap();
+        let entry = &json["$defs"]["KeyBindingEntry"];
+        let json_str = entry.to_string();
+
+        for action in ["quit", "tree.move_down", "preview.scroll_down", "file_op.yank"] {
+            assert!(json_str.contains(action), "action enum missing: {action}");
+        }
+    }
+
+    #[rstest]
+    fn schema_keybindings_has_nested_sections() {
+        let schema = Config::generate_schema();
+        let json = serde_json::to_value(&schema).unwrap();
+        let json_str = json.to_string();
+
+        // Top-level keybindings should have nested sections.
+        for section in ["disable_default", "universal", "file", "directory", "daemon"] {
+            assert!(json_str.contains(section), "keybindings missing section: {section}");
+        }
     }
 }

@@ -49,6 +49,9 @@ async fn main() -> Result<()> {
         Some(trev::cli::Command::SocketPath { workspace }) => {
             return handle_socket_path(workspace.as_deref());
         }
+        Some(trev::cli::Command::Schema) => {
+            return handle_schema();
+        }
         None => {}
     }
 
@@ -121,6 +124,15 @@ fn handle_socket_path(workspace: Option<&str>) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Print JSON Schema for the configuration file to stdout.
+#[allow(clippy::print_stdout)]
+fn handle_schema() -> Result<()> {
+    let schema = trev::config::Config::generate_schema();
+    let json = serde_json::to_string_pretty(&schema)?;
+    println!("{json}");
     Ok(())
 }
 
