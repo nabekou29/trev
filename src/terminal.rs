@@ -22,7 +22,7 @@ pub fn restore() {
 /// Install a custom panic hook that restores the terminal before panicking.
 ///
 /// This ensures the terminal is always restored even if the application panics.
-#[expect(dead_code, reason = "Will be called from main() once error handling is finalized")]
+#[allow(dead_code)]
 pub fn install_panic_hook() {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {

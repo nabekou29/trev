@@ -145,7 +145,7 @@ pub enum CtlAction {
 
 impl Args {
     /// Parse CLI arguments.
-    pub(crate) fn parse_args() -> Self {
+    pub fn parse_args() -> Self {
         Self::parse()
     }
 }

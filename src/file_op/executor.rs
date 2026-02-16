@@ -55,7 +55,7 @@ pub enum FsOp {
 }
 
 /// An irreversible file system operation (cannot be undone).
-#[expect(dead_code, reason = "Undo/Redo integration pending (US4)")]
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IrreversibleOp {
     /// Send to OS system trash.

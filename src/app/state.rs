@@ -35,7 +35,7 @@ pub struct AppState {
     /// Preview display state.
     pub preview_state: PreviewState,
     /// Preview content cache (LRU).
-    #[expect(dead_code, reason = "Cache integration pending")]
+    #[allow(dead_code)]
     pub preview_cache: PreviewCache,
     /// Preview provider registry.
     pub preview_registry: PreviewRegistry,
@@ -184,11 +184,12 @@ pub struct ChildrenLoadResult {
 }
 
 /// Result of an async preview load operation.
+#[derive(Debug)]
 pub struct PreviewLoadResult {
     /// Path of the file that was previewed.
     pub path: PathBuf,
     /// Provider name that produced this content.
-    #[expect(dead_code, reason = "Used for cache key integration")]
+    #[allow(dead_code)]
     pub provider_name: String,
     /// Loaded preview content.
     pub content: PreviewContent,

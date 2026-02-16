@@ -73,7 +73,7 @@ pub fn init_theme() {
 }
 
 /// Get a reference to the global syntax set.
-#[expect(dead_code, reason = "Public API for future use by external providers")]
+#[allow(dead_code)]
 pub fn syntax_set() -> &'static SyntaxSet {
     &SYNTAX_SET
 }
