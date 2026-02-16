@@ -480,20 +480,15 @@ fn process_watcher_events(
     ctx: &AppContext,
 ) {
     while let Ok(events) = watcher_rx.try_recv() {
-        let mut affected_dirs: HashSet<PathBuf> = HashSet::new();
-        for event in &events {
-            if let Some(parent) = event.path.parent() {
-                affected_dirs.insert(parent.to_path_buf());
-            }
-        }
-        let mut dirs_to_refresh: Vec<PathBuf> = Vec::new();
+        let affected_dirs: HashSet<PathBuf> = events
+            .iter()
+            .filter_map(|event| event.path.parent().map(Path::to_path_buf))
+            .collect();
+
         for dir in &affected_dirs {
             if state.tree_state.handle_fs_change(dir) {
-                dirs_to_refresh.push(dir.clone());
+                refresh_directory(state, dir, ctx);
             }
-        }
-        for dir in &dirs_to_refresh {
-            refresh_directory(state, dir, ctx);
         }
     }
 }

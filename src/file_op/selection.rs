@@ -47,7 +47,7 @@ impl SelectionBuffer {
     /// preserving existing paths. Then toggles the given path.
     pub fn toggle_mark(&mut self, path: PathBuf) {
         // Switch to Mark mode if needed (paths preserved).
-        if self.mode.as_ref() != Some(&SelectionMode::Mark) {
+        if self.mode != Some(SelectionMode::Mark) {
             self.mode = Some(SelectionMode::Mark);
         }
 
@@ -136,7 +136,7 @@ impl SelectionBuffer {
     /// Otherwise returns just the cursor path.
     #[must_use]
     pub fn mark_targets_or_cursor(&self, cursor_path: &Path) -> Vec<PathBuf> {
-        if self.mode.as_ref() == Some(&SelectionMode::Mark) && !self.paths.is_empty() {
+        if self.mode == Some(SelectionMode::Mark) && !self.paths.is_empty() {
             self.deduplicated_paths()
         } else {
             vec![cursor_path.to_path_buf()]

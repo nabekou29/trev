@@ -51,23 +51,20 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         // Build spans for the line.
         let mut spans = Vec::new();
 
-        if in_selection {
+        let selection_indicator = if in_selection {
             match selection_mode {
-                Some(SelectionMode::Mark) => {
-                    spans.push(Span::styled("● ", Style::default().fg(Color::Green)));
-                }
-                Some(SelectionMode::Cut) => {
-                    spans.push(Span::styled("◆ ", Style::default().fg(Color::Yellow)));
-                }
-                Some(SelectionMode::Copy) => {
-                    spans.push(Span::styled("◇ ", Style::default().fg(Color::Cyan)));
-                }
-                None => {
-                    spans.push(Span::raw("  "));
-                }
+                Some(SelectionMode::Mark) => Some(("● ", Color::Green)),
+                Some(SelectionMode::Cut) => Some(("◆ ", Color::Yellow)),
+                Some(SelectionMode::Copy) => Some(("◇ ", Color::Cyan)),
+                None => None,
             }
         } else {
-            spans.push(Span::raw("  "));
+            None
+        };
+
+        match selection_indicator {
+            Some((marker, color)) => spans.push(Span::styled(marker, Style::default().fg(color))),
+            None => spans.push(Span::raw("  ")),
         }
 
         spans.push(Span::raw(indent));
