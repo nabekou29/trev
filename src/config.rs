@@ -35,7 +35,7 @@ pub struct Config {
 }
 
 /// Sort configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SortConfig {
     /// Sort order field.
@@ -47,7 +47,7 @@ pub struct SortConfig {
 }
 
 /// Display configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DisplayConfig {
     /// Show hidden files.
@@ -129,7 +129,7 @@ impl ExternalCommand {
 }
 
 /// File operation configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FileOpConfig {
     /// Delete mode for the `d` key.
@@ -150,7 +150,7 @@ pub enum DeleteMode {
 }
 
 /// Session persistence configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SessionConfig {
     /// Whether to restore session by default on startup.
@@ -160,7 +160,7 @@ pub struct SessionConfig {
 }
 
 /// File system watcher configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WatcherConfig {
     /// Whether FS watching is enabled.

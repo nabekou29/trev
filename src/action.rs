@@ -1,7 +1,7 @@
 //! Application action definitions.
 
 /// Top-level application actions.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     /// Tree-related actions.
     Tree(TreeAction),
@@ -14,7 +14,7 @@ pub enum Action {
 }
 
 /// Actions for file operations (copy, move, delete, create, rename, undo/redo, mark).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileOpAction {
     /// Yank (copy) selected files to yank buffer.
     Yank,
@@ -41,7 +41,7 @@ pub enum FileOpAction {
 }
 
 /// Actions that modify the tree state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TreeAction {
     /// Move cursor one line down.
     MoveDown,
@@ -68,7 +68,7 @@ pub enum TreeAction {
 }
 
 /// Actions for the preview panel.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewAction {
     /// Scroll preview content down.
     ScrollDown,

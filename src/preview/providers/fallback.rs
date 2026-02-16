@@ -14,7 +14,7 @@ use crate::preview::provider::{
 /// Produces `Directory` info for directories, `Binary` info for
 /// binary files, and `Empty` otherwise. Only enabled when no
 /// other provider can handle the file (sole candidate).
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct FallbackProvider;
 
 impl FallbackProvider {

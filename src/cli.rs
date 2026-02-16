@@ -83,7 +83,7 @@ pub struct Args {
 }
 
 /// Emit output format.
-#[derive(Debug, Clone, Default, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
 pub enum EmitFormat {
     /// One path per line.
     #[default]
@@ -95,7 +95,7 @@ pub enum EmitFormat {
 }
 
 /// Action for opening files in editor.
-#[derive(Debug, Clone, Default, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
 pub enum OpenAction {
     /// Open in current window.
     #[default]

@@ -20,13 +20,13 @@ use crate::tree::builder::TreeBuilder;
 
 /// Handle a tree action.
 pub fn handle_tree_action(
-    action: &crate::action::TreeAction,
+    action: crate::action::TreeAction,
     state: &mut AppState,
     ctx: &AppContext,
 ) {
     use crate::action::TreeAction;
 
-    match *action {
+    match action {
         TreeAction::MoveDown => {
             state.tree_state.move_cursor(1);
         }

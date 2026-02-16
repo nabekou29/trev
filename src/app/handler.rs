@@ -42,13 +42,13 @@ pub fn handle_key_event(key: crossterm::event::KeyEvent, state: &mut AppState, c
                 crate::action::Action::Quit => {
                     state.should_quit = true;
                 }
-                crate::action::Action::Tree(ref tree_action) => {
+                crate::action::Action::Tree(tree_action) => {
                     handle_tree_action(tree_action, state, ctx);
                 }
-                crate::action::Action::Preview(ref preview_action) => {
+                crate::action::Action::Preview(preview_action) => {
                     handle_preview_action(preview_action, state, ctx);
                 }
-                crate::action::Action::FileOp(ref file_op_action) => {
+                crate::action::Action::FileOp(file_op_action) => {
                     handle_file_op_action(file_op_action, state, ctx);
                 }
             }

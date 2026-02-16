@@ -18,7 +18,7 @@ use crate::preview::provider::{
 ///
 /// Falls back to plain text when no syntax definition is found.
 /// Detects binary files via `content_inspector` and skips them.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct TextPreviewProvider;
 
 impl TextPreviewProvider {

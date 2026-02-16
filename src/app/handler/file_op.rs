@@ -29,7 +29,7 @@ use crate::input::AppMode;
 
 /// Handle a file operation action.
 pub fn handle_file_op_action(
-    action: &crate::action::FileOpAction,
+    action: crate::action::FileOpAction,
     state: &mut AppState,
     ctx: &AppContext,
 ) {
@@ -40,7 +40,7 @@ pub fn handle_file_op_action(
         InputState,
     };
 
-    match *action {
+    match action {
         FileOpAction::ToggleMark => {
             if let Some(info) = state.tree_state.current_node_info() {
                 state.selection.toggle_mark(info.path);
@@ -282,7 +282,7 @@ pub fn execute_rename(target: &Path, new_name: &str, state: &mut AppState, ctx: 
 fn execute_paste(state: &mut AppState, ctx: &AppContext) {
     use crate::file_op::executor::is_ancestor;
 
-    let mode = state.selection.mode().cloned();
+    let mode = state.selection.mode().copied();
     let is_cut = matches!(mode, Some(SelectionMode::Cut));
 
     // Paste only works in Copy or Cut mode.

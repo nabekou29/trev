@@ -106,7 +106,7 @@ pub fn build_session_state(
         expanded_paths,
         cursor_path,
         selection_paths,
-        selection_mode: selection_mode.cloned(),
+        selection_mode: selection_mode.copied(),
         undo_stack: undo_stack.to_vec(),
         redo_stack: redo_stack.to_vec(),
     }

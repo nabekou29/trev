@@ -121,7 +121,7 @@ pub async fn run(args: &Args) -> Result<()> {
 
     // Restore session and clean up expired sessions.
     let (selection, undo_history, session_restored) =
-        restore_session_if_needed(args, &config, &root_path, &builder, &mut tree_state);
+        restore_session_if_needed(args, &config, &root_path, builder, &mut tree_state);
 
     // Create app state.
     let mut state = AppState {
@@ -155,7 +155,7 @@ pub async fn run(args: &Args) -> Result<()> {
         children_tx,
         preview_tx,
         preview_config: config.preview.clone(),
-        file_op_config: config.file_operations.clone(),
+        file_op_config: config.file_operations,
         keymap: KeyMap::default(),
         suppressed,
     };
@@ -286,7 +286,7 @@ fn restore_session_if_needed(
     args: &Args,
     config: &Config,
     root_path: &Path,
-    builder: &TreeBuilder,
+    builder: TreeBuilder,
     tree_state: &mut TreeState,
 ) -> (SelectionBuffer, UndoHistory, bool) {
     let should_restore = if args.restore {

@@ -16,7 +16,7 @@ use crate::state::tree::{
 /// Builds a tree from the file system.
 ///
 /// Uses `ignore::WalkBuilder` to respect `.gitignore` rules.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct TreeBuilder {
     /// Whether to show hidden (dot) files.
     show_hidden: bool,

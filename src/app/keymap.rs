@@ -26,6 +26,7 @@ type KeyBinding = (KeyCode, KeyModifiers);
 ///
 /// Wraps a `HashMap` of `(KeyCode, KeyModifiers) -> Action` bindings.
 /// Constructed with default vim-style bindings via [`KeyMap::default()`].
+#[derive(Debug)]
 pub struct KeyMap {
     /// Key binding lookup table.
     bindings: HashMap<KeyBinding, Action>,

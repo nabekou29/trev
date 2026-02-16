@@ -281,7 +281,7 @@ impl InputState {
 }
 
 /// Action to perform when confirmation dialog is accepted.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum ConfirmAction {
     /// Permanently delete files.
     PermanentDelete,

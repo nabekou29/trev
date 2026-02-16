@@ -12,7 +12,7 @@ use serde::{
 };
 
 /// Selection mode: determines how selected paths will be used.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SelectionMode {
     /// Marked for batch operations (delete, etc.).
     Mark,
@@ -276,7 +276,7 @@ mod tests {
         assert_eq!(mode, Some(&SelectionMode::Copy));
 
         // Reconstruct.
-        let restored = SelectionBuffer::from_parts(paths, mode.cloned());
+        let restored = SelectionBuffer::from_parts(paths, mode.copied());
         assert_that!(restored.count(), eq(2));
         assert_that!(restored.contains(Path::new("/a")), eq(true));
         assert_that!(restored.contains(Path::new("/b")), eq(true));

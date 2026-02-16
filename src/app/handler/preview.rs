@@ -18,7 +18,7 @@ use crate::preview::provider::{
 
 /// Handle a preview action.
 pub fn handle_preview_action(
-    action: &crate::action::PreviewAction,
+    action: crate::action::PreviewAction,
     state: &mut AppState,
     ctx: &AppContext,
 ) {
@@ -26,7 +26,7 @@ pub fn handle_preview_action(
 
     let viewport_height = state.viewport_height as usize;
 
-    match *action {
+    match action {
         PreviewAction::ScrollDown => {
             state.preview_state.scroll_down(1, viewport_height);
         }

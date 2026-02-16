@@ -106,7 +106,7 @@ impl StatusMessage {
 }
 
 /// Scroll position management for the tree view.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct ScrollState {
     /// Scroll offset (first visible row index).
     offset: usize,
@@ -155,6 +155,7 @@ impl ScrollState {
 ///
 /// Contains channel senders, configuration, and key mappings
 /// that do not change after initialization.
+#[derive(Debug)]
 pub struct AppContext {
     /// Sender for async directory children load results.
     pub children_tx: tokio::sync::mpsc::Sender<ChildrenLoadResult>,
