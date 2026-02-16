@@ -113,6 +113,16 @@ pub enum OpenAction {
 pub enum Command {
     /// Control a running trev daemon.
     Ctl {
+        /// Direct path to the daemon socket.
+        #[arg(long)]
+        socket: Option<PathBuf>,
+        /// PID of the daemon process.
+        #[arg(long)]
+        pid: Option<u32>,
+        /// Workspace key for targeting a specific daemon.
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Control action to perform.
         #[command(subcommand)]
         action: CtlAction,
     },
@@ -125,22 +135,11 @@ pub enum CtlAction {
     Reveal {
         /// Path to reveal.
         path: PathBuf,
-        /// Workspace key for targeting a specific daemon.
-        #[arg(long)]
-        workspace: Option<String>,
     },
     /// Ping the daemon.
-    Ping {
-        /// Workspace key for targeting a specific daemon.
-        #[arg(long)]
-        workspace: Option<String>,
-    },
+    Ping,
     /// Quit the daemon.
-    Quit {
-        /// Workspace key for targeting a specific daemon.
-        #[arg(long)]
-        workspace: Option<String>,
-    },
+    Quit,
 }
 
 impl From<OpenAction> for crate::ipc::types::EditorAction {

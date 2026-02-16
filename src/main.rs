@@ -20,30 +20,42 @@ async fn main() -> Result<()> {
         .init();
 
     // Handle ctl subcommands before entering TUI mode.
-    if let Some(trev::cli::Command::Ctl { action }) = &args.command {
-        return handle_ctl(action).await;
+    if let Some(trev::cli::Command::Ctl {
+        socket,
+        pid,
+        workspace,
+        action,
+    }) = &args.command
+    {
+        return handle_ctl(action, socket.as_deref(), *pid, workspace.as_deref()).await;
     }
 
     trev::app::run(&args).await
 }
 
 /// Handle `trev ctl` subcommands by connecting to a running daemon.
-async fn handle_ctl(action: &trev::cli::CtlAction) -> Result<()> {
+async fn handle_ctl(
+    action: &trev::cli::CtlAction,
+    socket: Option<&std::path::Path>,
+    pid: Option<u32>,
+    workspace: Option<&str>,
+) -> Result<()> {
     use trev::cli::CtlAction;
 
-    let (method, params, workspace) = match action {
-        CtlAction::Ping { workspace } => ("ping", None, workspace.as_deref()),
-        CtlAction::Quit { workspace } => ("quit", None, workspace.as_deref()),
-        CtlAction::Reveal { path, workspace } => {
+    let (method, params) = match action {
+        CtlAction::Ping => ("ping", None),
+        CtlAction::Quit => ("quit", None),
+        CtlAction::Reveal { path } => {
             let abs_path = std::fs::canonicalize(path)?;
             let params = serde_json::json!({"path": abs_path.to_string_lossy()});
-            ("reveal", Some(params), workspace.as_deref())
+            ("reveal", Some(params))
         }
     };
 
-    let socket = find_socket(workspace)?;
+    let socket_path = find_socket(socket, pid, workspace)?;
     let response =
-        trev::ipc::client::send_request(&socket, method, params, Duration::from_secs(5)).await?;
+        trev::ipc::client::send_request(&socket_path, method, params, Duration::from_secs(5))
+            .await?;
 
     // Print result for the user.
     #[allow(clippy::print_stdout)]
@@ -56,38 +68,50 @@ async fn handle_ctl(action: &trev::cli::CtlAction) -> Result<()> {
     Ok(())
 }
 
-/// Find a daemon socket file, optionally filtering by workspace key.
+/// Find a daemon socket file using the provided targeting options.
 ///
-/// Looks for `<workspace>-<pid>.sock` files in the runtime directory.
-fn find_socket(workspace: Option<&str>) -> Result<PathBuf> {
+/// Priority: `--socket` (direct path) > `--pid` + `--workspace` (filter).
+/// Socket filenames follow the pattern `<workspace>-<pid>.sock`.
+fn find_socket(
+    socket: Option<&std::path::Path>,
+    pid: Option<u32>,
+    workspace: Option<&str>,
+) -> Result<PathBuf> {
+    // Direct socket path — use as-is.
+    if let Some(path) = socket {
+        if !path.exists() {
+            bail!("socket not found: {}", path.display());
+        }
+        return Ok(path.to_path_buf());
+    }
+
     let runtime_dir = trev::ipc::paths::runtime_dir();
     if !runtime_dir.is_dir() {
         bail!("no trev daemons running (runtime dir not found)");
     }
 
+    let pid_str = pid.map(|p| p.to_string());
+
     let mut entries: Vec<PathBuf> = std::fs::read_dir(&runtime_dir)?
         .filter_map(std::result::Result::ok)
         .map(|e| e.path())
         .filter(|p| {
+            let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else {
+                return false;
+            };
             p.extension().is_some_and(|ext| ext == "sock")
-                && workspace.is_none_or(|ws| {
-                    p.file_stem()
-                        .and_then(|s| s.to_str())
-                        .is_some_and(|name| name.starts_with(&format!("{ws}-")))
-                })
+                && workspace.is_none_or(|ws| stem.starts_with(&format!("{ws}-")))
+                && pid_str
+                    .as_deref()
+                    .is_none_or(|pid| stem.ends_with(&format!("-{pid}")))
         })
         .collect();
 
     match entries.len() {
-        0 => bail!(
-            "no trev daemon found{}",
-            workspace.map_or_else(String::new, |w| format!(" for workspace '{w}'"))
-        ),
+        0 => bail!("no trev daemon found (try --socket, --pid, or --workspace to target)"),
         1 => Ok(entries.swap_remove(0)),
-        n => {
-            // Multiple daemons — use the first one.
-            tracing::warn!(count = n, "multiple trev daemons found, using first match");
-            Ok(entries.swap_remove(0))
-        }
+        n => bail!(
+            "{n} trev daemons found; specify --socket, --pid, or --workspace to target one"
+        ),
     }
 }
