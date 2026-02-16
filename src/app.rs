@@ -1,6 +1,7 @@
 //! Application state machine and main event loop.
 
 mod handler;
+mod key_parse;
 mod keymap;
 mod state;
 
@@ -22,7 +23,10 @@ use handler::{
     trigger_prefetch,
     trigger_preview,
 };
-pub use keymap::KeyMap;
+pub use keymap::{
+    KeyContext,
+    KeyMap,
+};
 use ratatui_image::picker::Picker;
 pub use state::*;
 
@@ -162,7 +166,7 @@ pub async fn run(args: &Args) -> Result<()> {
         preview_tx,
         preview_config: config.preview.clone(),
         file_op_config: config.file_operations,
-        keymap: KeyMap::default(),
+        keymap: KeyMap::from_config(&config.keybindings),
         suppressed,
         ipc_server,
         editor_action: args.action.into(),
