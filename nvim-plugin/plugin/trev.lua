@@ -1,0 +1,3 @@
+--- Plugin loader for trev.nvim.
+--- This file is sourced automatically by Neovim's plugin loader.
+--- Users must call require("trev").setup() to initialize the plugin.
