@@ -36,7 +36,7 @@ pub fn handle_tree_action(
         TreeAction::Expand => {
             let show_hidden = state.show_hidden;
             let show_ignored = state.show_ignored;
-            if let Some(result) = state.tree_state.expand_or_open() {
+            if let Some(result) = state.tree_state.expand_dir() {
                 // Watch newly expanded directory.
                 watch_if_expand(&result, &mut state.watcher);
                 handle_expand_result(
@@ -46,10 +46,6 @@ pub fn handle_tree_action(
                     show_hidden,
                     show_ignored,
                 );
-                // Emit mode: accumulate file path and quit.
-                if let ExpandResult::OpenFile(ref path) = result {
-                    handle_emit_open(path, state);
-                }
             }
         }
         TreeAction::Collapse => {

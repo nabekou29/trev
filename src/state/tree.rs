@@ -539,11 +539,30 @@ impl TreeState {
     pub fn expand_or_open(&mut self) -> Option<ExpandResult> {
         let visible = self.visible_nodes();
         let vnode = visible.get(self.cursor)?;
+        let is_dir = vnode.node.is_dir;
+
+        if !is_dir {
+            let path = vnode.node.path.clone();
+            return Some(ExpandResult::OpenFile(path));
+        }
+
+        self.expand_dir()
+    }
+
+    /// Expand a directory without opening files.
+    ///
+    /// Returns:
+    /// - `Some(ExpandResult::NeedsLoad(path))` if children need to be loaded
+    /// - `Some(ExpandResult::AlreadyLoaded(path))` if already loaded but was collapsed
+    /// - `None` if cursor is on a file, already expanded, or nothing to do
+    pub fn expand_dir(&mut self) -> Option<ExpandResult> {
+        let visible = self.visible_nodes();
+        let vnode = visible.get(self.cursor)?;
         let path = vnode.node.path.clone();
         let is_dir = vnode.node.is_dir;
 
         if !is_dir {
-            return Some(ExpandResult::OpenFile(path));
+            return None;
         }
 
         let node = self.find_node_mut(&path)?;
@@ -1210,6 +1229,25 @@ mod tests {
         let mut state = state_with_children(vec![subdir]);
         let result = state.expand_or_open();
         assert_eq!(result, Some(ExpandResult::NeedsLoad(root.join("subdir"))));
+    }
+
+    #[rstest]
+    fn expand_dir_on_file_returns_none() {
+        let root = Path::new("/test/root");
+        let mut state = state_with_children(vec![file_node("test.txt", root)]);
+        let result = state.expand_dir();
+        assert_eq!(result, None);
+    }
+
+    #[rstest]
+    fn expand_dir_on_directory_expands() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
+        let mut state = state_with_children(vec![subdir]);
+        let result = state.expand_dir();
+        assert_eq!(result, Some(ExpandResult::AlreadyLoaded(root.join("subdir"))));
+        assert_eq!(state.visible_node_count(), 2);
     }
 
     #[rstest]
