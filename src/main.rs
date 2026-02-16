@@ -12,12 +12,29 @@ use anyhow::{
 async fn main() -> Result<()> {
     let args = trev::cli::Args::parse_args();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .init();
+    let is_tui_mode = args.command.is_none();
+
+    // In TUI mode, redirect logs to a file so they don't corrupt the display.
+    // In subcommand mode, log to stderr as usual.
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+
+    if is_tui_mode {
+        let log_dir = dirs::state_dir()
+            .or_else(dirs::data_dir)
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join("trev");
+        let file_appender = tracing_appender::rolling::daily(log_dir, "trev.log");
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_writer(file_appender)
+            .with_ansi(false)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .init();
+    }
 
     // Handle subcommands before entering TUI mode.
     match &args.command {
