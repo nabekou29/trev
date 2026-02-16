@@ -78,6 +78,7 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
         scroll: ScrollState::new(),
         status_message: None,
         processing: false,
+        emit_paths: None,
     }
 }
 

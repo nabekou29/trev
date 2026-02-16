@@ -372,12 +372,10 @@ mod tests {
             .unwrap();
 
         // Respond via oneshot
-        match cmd {
-            IpcCommand::Quit { response_tx } => {
-                response_tx.send(json!({"ok": true})).unwrap();
-            }
-            _ => panic!("Expected Quit command"),
-        }
+        let IpcCommand::Quit { response_tx } = cmd else {
+            unreachable!("Expected Quit command");
+        };
+        response_tx.send(json!({"ok": true})).unwrap();
 
         // Read the JSON-RPC response
         let mut reader = BufReader::new(&mut stream);
@@ -410,13 +408,11 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        match cmd {
-            IpcCommand::Reveal { path, response_tx } => {
-                assert_eq!(path, PathBuf::from("/tmp/test.rs"));
-                response_tx.send(json!({"ok": true})).unwrap();
-            }
-            _ => panic!("Expected Reveal command"),
-        }
+        let IpcCommand::Reveal { path, response_tx } = cmd else {
+            unreachable!("Expected Reveal command");
+        };
+        assert_eq!(path, PathBuf::from("/tmp/test.rs"));
+        response_tx.send(json!({"ok": true})).unwrap();
 
         let mut reader = BufReader::new(&mut stream);
         let mut line = String::new();

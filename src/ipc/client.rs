@@ -122,13 +122,8 @@ mod tests {
 
         // Spawn a task to handle the reveal command.
         tokio::spawn(async move {
-            if let Some(cmd) = ipc_rx.recv().await {
-                match cmd {
-                    IpcCommand::Reveal { response_tx, .. } => {
-                        let _ = response_tx.send(json!({"ok": true}));
-                    }
-                    _ => {}
-                }
+            if let Some(IpcCommand::Reveal { response_tx, .. }) = ipc_rx.recv().await {
+                let _ = response_tx.send(json!({"ok": true}));
             }
         });
 

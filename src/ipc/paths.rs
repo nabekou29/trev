@@ -267,7 +267,7 @@ mod tests {
         let path = socket_path(&dir);
         let filename = path.file_name().unwrap().to_str().unwrap();
 
-        assert!(filename.ends_with(".sock"));
+        assert!(Path::new(filename).extension().is_some_and(|ext| ext == "sock"));
     }
 
     #[rstest]

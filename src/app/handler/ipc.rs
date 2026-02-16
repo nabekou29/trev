@@ -45,7 +45,11 @@ mod tests {
     use crate::preview::provider::PreviewRegistry;
     use crate::preview::providers::fallback::FallbackProvider;
     use crate::preview::state::PreviewState;
-    use crate::state::tree::TreeState;
+    use crate::state::tree::{
+        SortDirection,
+        SortOrder,
+        TreeState,
+    };
     use crate::tree::builder::TreeBuilder;
 
     /// Create a minimal `AppState` for testing with a real filesystem tree.
@@ -54,8 +58,8 @@ mod tests {
         let root_node = builder.build(root).unwrap();
         let tree_state = TreeState::new(
             root_node,
-            Default::default(),
-            Default::default(),
+            SortOrder::default(),
+            SortDirection::default(),
             true,
         );
         let registry = PreviewRegistry::new(vec![
