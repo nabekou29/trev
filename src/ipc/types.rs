@@ -1,10 +1,13 @@
 //! JSON-RPC 2.0 message types and IPC command definitions.
 
+use std::path::PathBuf;
+
 use serde::{
     Deserialize,
     Serialize,
 };
 use serde_json::Value;
+use tokio::sync::oneshot;
 
 /// JSON-RPC 2.0 error code: Parse error.
 pub const PARSE_ERROR: i64 = -32700;
@@ -108,6 +111,26 @@ impl JsonRpcMessage {
             params: Some(params),
         }
     }
+}
+
+/// Internal command dispatched from IPC server to the main event loop.
+///
+/// Each variant includes a `oneshot` response channel so the server
+/// can send the JSON-RPC response back to the client after processing.
+#[derive(Debug)]
+pub enum IpcCommand {
+    /// Reveal a file in the tree.
+    Reveal {
+        /// Absolute path to the file to reveal.
+        path: PathBuf,
+        /// Channel to send the JSON-RPC result value back.
+        response_tx: oneshot::Sender<Value>,
+    },
+    /// Quit the application.
+    Quit {
+        /// Channel to send the JSON-RPC result value back.
+        response_tx: oneshot::Sender<Value>,
+    },
 }
 
 /// Action for opening files in the editor.
