@@ -1,0 +1,188 @@
+#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::expect_used)]
+
+use std::path::{
+    Path,
+    PathBuf,
+};
+
+use criterion::{
+    Criterion,
+    criterion_group,
+    criterion_main,
+};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use trev::app::{
+    AppState,
+    ScrollState,
+};
+use trev::file_op::selection::SelectionBuffer;
+use trev::file_op::undo::UndoHistory;
+use trev::input::AppMode;
+use trev::preview::cache::PreviewCache;
+use trev::preview::provider::PreviewRegistry;
+use trev::preview::state::PreviewState;
+use trev::state::tree::{
+    ChildrenState,
+    SortDirection,
+    SortOrder,
+    TreeNode,
+    TreeState,
+};
+
+/// Helper: create a file node.
+fn file_node(name: &str, parent: &Path) -> TreeNode {
+    TreeNode {
+        name: name.to_string(),
+        path: parent.join(name),
+        is_dir: false,
+        is_symlink: false,
+        size: 100,
+        modified: None,
+        children: ChildrenState::NotLoaded,
+        is_expanded: false,
+    }
+}
+
+/// Helper: create a directory node with children.
+fn dir_node(name: &str, parent: &Path, children: Vec<TreeNode>) -> TreeNode {
+    TreeNode {
+        name: name.to_string(),
+        path: parent.join(name),
+        is_dir: true,
+        is_symlink: false,
+        size: 0,
+        modified: None,
+        children: ChildrenState::Loaded(children),
+        is_expanded: false,
+    }
+}
+
+/// Helper: create a minimal `AppState` from a `TreeState`.
+fn app_state_from_tree(tree_state: TreeState) -> AppState {
+    AppState {
+        tree_state,
+        preview_state: PreviewState::new(),
+        preview_cache: PreviewCache::new(10),
+        preview_registry: PreviewRegistry::new(vec![]).unwrap(),
+        mode: AppMode::Normal,
+        selection: SelectionBuffer::new(),
+        undo_history: UndoHistory::new(100),
+        watcher: None,
+        should_quit: false,
+        show_icons: true,
+        show_preview: false,
+        show_hidden: false,
+        show_ignored: false,
+        viewport_height: 50,
+        scroll: ScrollState::new(),
+        status_message: None,
+        processing: false,
+    }
+}
+
+/// Helper: create a `TreeState` with root expanded.
+fn tree_with_children(children: Vec<TreeNode>) -> TreeState {
+    let root = TreeNode {
+        name: "root".to_string(),
+        path: PathBuf::from("/test/root"),
+        is_dir: true,
+        is_symlink: false,
+        size: 0,
+        modified: None,
+        children: ChildrenState::Loaded(children),
+        is_expanded: true,
+    };
+    TreeState::new(root, SortOrder::Name, SortDirection::Asc, true)
+}
+
+fn bench_render_tree_100k_flat(c: &mut Criterion) {
+    let root_path = Path::new("/test/root");
+    let children: Vec<TreeNode> =
+        (0..100_000).map(|i| file_node(&format!("file{i:06}.txt"), root_path)).collect();
+    let state = app_state_from_tree(tree_with_children(children));
+    let mut terminal = Terminal::new(TestBackend::new(120, 50)).unwrap();
+
+    c.bench_function("render_tree_100k_flat", |b| {
+        b.iter(|| {
+            terminal
+                .draw(|frame| {
+                    trev::ui::tree_view::render_tree(frame, frame.area(), &state);
+                })
+                .unwrap();
+        });
+    });
+}
+
+fn bench_render_tree_100k_nested(c: &mut Criterion) {
+    let root_path = Path::new("/test/root");
+    let children: Vec<TreeNode> = (0..100)
+        .map(|d| {
+            let dir_path = root_path.join(format!("dir{d:03}"));
+            let files: Vec<TreeNode> =
+                (0..1000).map(|f| file_node(&format!("file{f:04}.txt"), &dir_path)).collect();
+            let mut d = dir_node(&format!("dir{d:03}"), root_path, files);
+            d.is_expanded = true;
+            d
+        })
+        .collect();
+    let state = app_state_from_tree(tree_with_children(children));
+    let mut terminal = Terminal::new(TestBackend::new(120, 50)).unwrap();
+
+    c.bench_function("render_tree_100k_nested", |b| {
+        b.iter(|| {
+            terminal
+                .draw(|frame| {
+                    trev::ui::tree_view::render_tree(frame, frame.area(), &state);
+                })
+                .unwrap();
+        });
+    });
+}
+
+fn bench_render_tree_100k_scrolled(c: &mut Criterion) {
+    let root_path = Path::new("/test/root");
+    let children: Vec<TreeNode> =
+        (0..100_000).map(|i| file_node(&format!("file{i:06}.txt"), root_path)).collect();
+    let mut state = app_state_from_tree(tree_with_children(children));
+    state.scroll.clamp_to_cursor(50_000, 50);
+    state.tree_state.move_cursor_to(50_000);
+    let mut terminal = Terminal::new(TestBackend::new(120, 50)).unwrap();
+
+    c.bench_function("render_tree_100k_scrolled", |b| {
+        b.iter(|| {
+            terminal
+                .draw(|frame| {
+                    trev::ui::tree_view::render_tree(frame, frame.area(), &state);
+                })
+                .unwrap();
+        });
+    });
+}
+
+fn bench_full_frame_render_100k(c: &mut Criterion) {
+    let root_path = Path::new("/test/root");
+    let children: Vec<TreeNode> =
+        (0..100_000).map(|i| file_node(&format!("file{i:06}.txt"), root_path)).collect();
+    let mut state = app_state_from_tree(tree_with_children(children));
+    let mut terminal = Terminal::new(TestBackend::new(120, 50)).unwrap();
+
+    c.bench_function("full_frame_render_100k", |b| {
+        b.iter(|| {
+            terminal
+                .draw(|frame| {
+                    trev::ui::render(frame, &mut state);
+                })
+                .unwrap();
+        });
+    });
+}
+
+criterion_group!(
+    benches,
+    bench_render_tree_100k_flat,
+    bench_render_tree_100k_nested,
+    bench_render_tree_100k_scrolled,
+    bench_full_frame_render_100k,
+);
+criterion_main!(benches);

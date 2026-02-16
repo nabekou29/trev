@@ -97,29 +97,6 @@ mod tests {
     }
 
     #[rstest]
-    #[ignore = "Performance test — run with `cargo test -- --ignored`"]
-    fn perf_cache_hit_under_1ms() {
-        let mut cache = PreviewCache::new(100);
-
-        // Populate cache with entries.
-        for i in 0..50 {
-            let key = make_key(&format!("/test/file_{i}.rs"), "text");
-            cache.put(key, PreviewContent::Empty);
-        }
-
-        // Measure cache hit time over many lookups.
-        let key = make_key("/test/file_25.rs", "text");
-        let start = std::time::Instant::now();
-        for _ in 0..10_000 {
-            let _ = cache.get(&key);
-        }
-        let elapsed = start.elapsed();
-        let per_op = elapsed / 10_000;
-
-        assert!(per_op.as_micros() < 1000, "Cache hit took {per_op:?} per op, expected < 1ms");
-    }
-
-    #[rstest]
     fn different_provider_same_path_stores_separately() {
         let mut cache = PreviewCache::new(10);
         let key_text = make_key("/file.svg", "text");

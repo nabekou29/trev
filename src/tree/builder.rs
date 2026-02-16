@@ -250,28 +250,4 @@ mod tests {
         verify_that!(link.is_symlink, eq(true))?;
         Ok(())
     }
-
-    #[rstest]
-    #[ignore = "Performance test — run with `cargo test -- --ignored`"]
-    fn test_perf_build_1k_files() {
-        let dir = TempDir::new().unwrap();
-
-        // Create 1000 files
-        for i in 0..1000 {
-            fs::write(dir.path().join(format!("file{i:04}.txt")), "content").unwrap();
-        }
-
-        let builder = TreeBuilder::new(false, false);
-        let start = std::time::Instant::now();
-        let root = builder.build(dir.path()).unwrap();
-        let elapsed = start.elapsed();
-
-        let children = root.children.as_loaded().unwrap();
-        assert_eq!(children.len(), 1000);
-        assert!(
-            elapsed.as_millis() < 100,
-            "TreeBuilder::build took {}ms (limit: 100ms)",
-            elapsed.as_millis()
-        );
-    }
 }

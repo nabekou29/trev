@@ -124,7 +124,6 @@ pub fn detect_language(extension: &str) -> String {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
-    use std::fmt::Write;
 
     use googletest::prelude::*;
     use rstest::*;
@@ -161,27 +160,5 @@ mod tests {
     fn detect_language_python() {
         let lang = detect_language("py");
         assert_that!(lang.as_str(), eq("Python"));
-    }
-
-    #[rstest]
-    #[ignore = "Performance test — run with `cargo test -- --ignored`"]
-    fn perf_highlight_1000_lines() {
-        // Generate a 1000-line Rust source.
-        let mut code = String::new();
-        for i in 0..1000 {
-            let _ = writeln!(code, "fn func_{i}() {{ let x = {i}; }}");
-        }
-
-        let start = std::time::Instant::now();
-        let lines = highlight_lines(&code, "rs");
-        let elapsed = start.elapsed();
-
-        assert_that!(lines.len(), eq(1000));
-        // Debug builds are ~4x slower than release.
-        let threshold_ms: u128 = if cfg!(debug_assertions) { 500 } else { 50 };
-        assert!(
-            elapsed.as_millis() < threshold_ms,
-            "Highlighting 1000 lines took {elapsed:?}, expected < {threshold_ms}ms"
-        );
     }
 }

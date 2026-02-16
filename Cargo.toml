@@ -9,9 +9,6 @@ keywords = ["tui", "file-manager", "tree-view", "neovim", "terminal"]
 categories = ["command-line-utilities"]
 readme = "README.md"
 
-[features]
-perf = []
-
 [dependencies]
 # TUI
 ratatui = "0.30"
@@ -82,10 +79,23 @@ unicode-width = "0.2"
 pathdiff = "0.2"
 
 [dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
 googletest = "0.14"
 rstest = "0.26"
 tempfile = "3"
 tokio-test = "0.4"
+
+[[bench]]
+name = "tree"
+harness = false
+
+[[bench]]
+name = "render"
+harness = false
+
+[[bench]]
+name = "preview"
+harness = false
 
 [lints.rust]
 # === Forbidden ===
