@@ -105,6 +105,58 @@ pub fn handle_tree_action(
         TreeAction::HalfPageUp => {
             state.tree_state.half_page_up(state.viewport_height as usize);
         }
+        TreeAction::ExpandAll => {
+            handle_expand_all(state, ctx);
+        }
+        TreeAction::CollapseAll => {
+            handle_collapse_all(state);
+        }
+    }
+}
+
+/// Maximum number of directories to expand in a single expand-all operation.
+const EXPAND_ALL_LIMIT: usize = 300;
+
+/// Handle expand-all: recursively expand the subtree under cursor.
+fn handle_expand_all(state: &mut AppState, ctx: &AppContext) {
+    let Some(dir_path) = state.tree_state.cursor_dir_path() else {
+        return;
+    };
+    let show_hidden = state.show_hidden;
+    let show_ignored = state.show_ignored;
+    let result = state.tree_state.expand_subtree(&dir_path, EXPAND_ALL_LIMIT);
+
+    // Spawn loads and watch directories that need loading.
+    for path in &result.needs_load {
+        spawn_load_children(&ctx.children_tx, path.clone(), show_hidden, show_ignored, false);
+        watch_dir(path, &mut state.watcher);
+    }
+
+    // Status message.
+    if result.hit_limit {
+        state.set_status(format!(
+            "Expanded {} directories (limit: {EXPAND_ALL_LIMIT})",
+            result.expanded
+        ));
+    } else if result.expanded > 0 {
+        state.set_status(format!("Expanded {} directories", result.expanded));
+    }
+}
+
+/// Handle collapse-all: collapse the subtree under cursor.
+fn handle_collapse_all(state: &mut AppState) {
+    let Some(dir_path) = state.tree_state.cursor_dir_path() else {
+        return;
+    };
+    let collapsed = state.tree_state.collapse_subtree(&dir_path);
+
+    // Unwatch collapsed directories.
+    for path in &collapsed {
+        unwatch_dir(path, &mut state.watcher);
+    }
+
+    if !collapsed.is_empty() {
+        state.set_status(format!("Collapsed {} directories", collapsed.len()));
     }
 }
 
@@ -119,6 +171,15 @@ fn watch_if_expand(result: &ExpandResult, watcher: &mut Option<crate::watcher::F
             }
         }
         ExpandResult::OpenFile(_) => {}
+    }
+}
+
+/// Watch a directory.
+fn watch_dir(path: &Path, watcher: &mut Option<crate::watcher::FsWatcher>) {
+    if let Some(w) = watcher
+        && let Err(e) = w.watch(path)
+    {
+        tracing::warn!(%e, ?path, "failed to watch directory");
     }
 }
 

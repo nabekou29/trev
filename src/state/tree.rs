@@ -506,6 +506,55 @@ impl TreeState {
         visible.get(self.cursor).map(|vn| vn.node.to_node_info())
     }
 
+    /// Get the directory path at the current cursor position.
+    ///
+    /// If the cursor is on a directory, returns its path.
+    /// If the cursor is on a file, returns the parent directory path.
+    pub fn cursor_dir_path(&self) -> Option<PathBuf> {
+        let visible = self.visible_nodes();
+        let vnode = visible.get(self.cursor)?;
+        if vnode.node.is_dir {
+            Some(vnode.node.path.clone())
+        } else {
+            vnode.node.path.parent().map(Path::to_path_buf)
+        }
+    }
+
+    /// Expand all directories under the given path recursively, up to `limit`.
+    ///
+    /// Sets `is_expanded = true` for each directory and transitions `NotLoaded`
+    /// children to `Loading`. Returns an [`ExpandAllResult`] with the count of
+    /// expanded directories, paths needing async load, and whether the limit
+    /// was reached.
+    pub fn expand_subtree(&mut self, path: &Path, limit: usize) -> ExpandAllResult {
+        let Some(node) = self.find_node_mut(path) else {
+            return ExpandAllResult { expanded: 0, needs_load: Vec::new(), hit_limit: false };
+        };
+        let mut needs_load = Vec::new();
+        let expanded = expand_subtree_recursive(node, limit, &mut needs_load);
+        let hit_limit = expanded >= limit;
+        ExpandAllResult { expanded, needs_load, hit_limit }
+    }
+
+    /// Collapse all directories under the given path (including itself).
+    ///
+    /// Returns paths of directories that were expanded (for unwatching).
+    pub fn collapse_subtree(&mut self, path: &Path) -> Vec<PathBuf> {
+        let Some(node) = self.find_node_mut(path) else {
+            return Vec::new();
+        };
+        let mut collapsed = Vec::new();
+        collapse_subtree_recursive(node, &mut collapsed);
+        // Clamp cursor to valid range after collapse.
+        let count = self.visible_node_count();
+        if count == 0 {
+            self.cursor = 0;
+        } else {
+            self.cursor = self.cursor.min(count - 1);
+        }
+        collapsed
+    }
+
     /// Apply sort settings and re-sort all loaded children.
     pub fn apply_sort(
         &mut self,
@@ -523,6 +572,17 @@ impl TreeState {
             directories_first,
         );
     }
+}
+
+/// Result of an expand-all operation on a subtree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpandAllResult {
+    /// Number of directories expanded.
+    pub expanded: usize,
+    /// Paths of directories that need loading (transitioned `NotLoaded` → `Loading`).
+    pub needs_load: Vec<PathBuf>,
+    /// Whether the expansion limit was reached.
+    pub hit_limit: bool,
 }
 
 /// Result of an expand-or-open operation.
@@ -556,6 +616,58 @@ fn collect_expanded(node: &TreeNode, result: &mut Vec<PathBuf>) {
     if let Some(children) = node.children.as_loaded() {
         for child in children {
             collect_expanded(child, result);
+        }
+    }
+}
+
+/// Recursively expand directories in a subtree, up to `remaining` limit.
+///
+/// Returns the number of directories expanded.
+fn expand_subtree_recursive(
+    node: &mut TreeNode,
+    remaining: usize,
+    needs_load: &mut Vec<PathBuf>,
+) -> usize {
+    if !node.is_dir || remaining == 0 {
+        return 0;
+    }
+
+    let mut count = 0;
+
+    // Expand this directory if not already expanded.
+    if !node.is_expanded {
+        node.is_expanded = true;
+        count += 1;
+
+        // Transition NotLoaded → Loading.
+        if matches!(node.children, ChildrenState::NotLoaded) {
+            node.children = ChildrenState::Loading;
+            needs_load.push(node.path.clone());
+        }
+    }
+
+    // Recurse into loaded children.
+    if let Some(children) = node.children.as_loaded_mut() {
+        for child in children.iter_mut() {
+            if count >= remaining {
+                break;
+            }
+            count += expand_subtree_recursive(child, remaining - count, needs_load);
+        }
+    }
+
+    count
+}
+
+/// Recursively collapse directories in a subtree.
+fn collapse_subtree_recursive(node: &mut TreeNode, collapsed: &mut Vec<PathBuf>) {
+    if node.is_dir && node.is_expanded {
+        collapsed.push(node.path.clone());
+        node.is_expanded = false;
+    }
+    if let Some(children) = node.children.as_loaded_mut() {
+        for child in children.iter_mut() {
+            collapse_subtree_recursive(child, collapsed);
         }
     }
 }
@@ -1274,5 +1386,158 @@ mod tests {
         let mut state = state_with_children(vec![file_node("a.txt", root)]);
         assert_that!(state.move_cursor_to_path(&root.join("nonexistent.txt")), eq(false));
         assert_that!(state.cursor(), eq(0));
+    }
+
+    // =========================================================================
+    // ExpandAll / CollapseAll
+    // =========================================================================
+
+    /// Helper: create a directory node with `NotLoaded` children.
+    fn not_loaded_dir(name: &str, parent: &Path) -> TreeNode {
+        TreeNode {
+            name: name.to_string(),
+            path: parent.join(name),
+            is_dir: true,
+            is_symlink: false,
+            size: 0,
+            modified: None,
+            children: ChildrenState::NotLoaded,
+            is_expanded: false,
+        }
+    }
+
+    #[rstest]
+    fn cursor_dir_path_on_dir() {
+        let root = Path::new("/test/root");
+        let subdir = dir_node("subdir", root, vec![]);
+        let state = state_with_children(vec![subdir, file_node("a.txt", root)]);
+        // Cursor at index 0 = subdir.
+        assert_eq!(state.cursor_dir_path(), Some(root.join("subdir")));
+    }
+
+    #[rstest]
+    fn cursor_dir_path_on_file() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let mut subdir = dir_node("subdir", root, vec![file_node("child.txt", &subdir_path)]);
+        subdir.is_expanded = true;
+
+        let mut state = state_with_children(vec![subdir]);
+        state.move_cursor_to(1); // child.txt
+        // File → returns parent dir path.
+        assert_eq!(state.cursor_dir_path(), Some(subdir_path));
+    }
+
+    #[rstest]
+    fn expand_subtree_expands_loaded_dirs() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let inner_path = subdir_path.join("inner");
+        let inner = dir_node("inner", &subdir_path, vec![file_node("deep.txt", &inner_path)]);
+        let subdir = dir_node("subdir", root, vec![inner, file_node("a.txt", &subdir_path)]);
+
+        let mut state = state_with_children(vec![subdir]);
+        let result = state.expand_subtree(&root.join("subdir"), 300);
+
+        // subdir + inner = 2 expanded.
+        assert_eq!(result.expanded, 2);
+        assert!(result.needs_load.is_empty());
+        assert!(!result.hit_limit);
+
+        // All should be visible now: subdir, inner, deep.txt, a.txt.
+        assert_eq!(state.visible_node_count(), 4);
+    }
+
+    #[rstest]
+    fn expand_subtree_returns_not_loaded_paths() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let subdir = dir_node(
+            "subdir",
+            root,
+            vec![not_loaded_dir("child_dir", &subdir_path), file_node("a.txt", &subdir_path)],
+        );
+
+        let mut state = state_with_children(vec![subdir]);
+        let result = state.expand_subtree(&root.join("subdir"), 300);
+
+        // subdir + child_dir = 2 expanded.
+        assert_eq!(result.expanded, 2);
+        // child_dir had NotLoaded children → now Loading, path returned.
+        assert_eq!(result.needs_load, vec![subdir_path.join("child_dir")]);
+    }
+
+    #[rstest]
+    fn expand_subtree_respects_limit() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let inner = dir_node("inner", &subdir_path, vec![]);
+        let subdir = dir_node("subdir", root, vec![inner]);
+
+        let mut state = state_with_children(vec![subdir]);
+        let result = state.expand_subtree(&root.join("subdir"), 1);
+
+        // Only 1 expanded (subdir), inner not expanded.
+        assert_eq!(result.expanded, 1);
+        assert!(result.hit_limit);
+    }
+
+    #[rstest]
+    fn expand_subtree_skips_already_expanded() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let mut subdir = dir_node("subdir", root, vec![file_node("a.txt", &subdir_path)]);
+        subdir.is_expanded = true;
+
+        let mut state = state_with_children(vec![subdir]);
+        let result = state.expand_subtree(&root.join("subdir"), 300);
+
+        // Already expanded, count = 0.
+        assert_eq!(result.expanded, 0);
+    }
+
+    #[rstest]
+    fn collapse_subtree_collapses_all() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let inner_path = subdir_path.join("inner");
+        let mut inner = dir_node("inner", &subdir_path, vec![file_node("deep.txt", &inner_path)]);
+        inner.is_expanded = true;
+        let mut subdir = dir_node("subdir", root, vec![inner, file_node("a.txt", &subdir_path)]);
+        subdir.is_expanded = true;
+
+        let mut state = state_with_children(vec![subdir]);
+        // Before: subdir, inner, deep.txt, a.txt = 4 visible.
+        assert_eq!(state.visible_node_count(), 4);
+
+        let collapsed = state.collapse_subtree(&root.join("subdir"));
+
+        // After: only subdir visible (collapsed).
+        assert_eq!(state.visible_node_count(), 1);
+        // Both subdir and inner were collapsed.
+        assert_eq!(collapsed.len(), 2);
+        assert!(collapsed.contains(&root.join("subdir")));
+        assert!(collapsed.contains(&subdir_path.join("inner")));
+    }
+
+    #[rstest]
+    fn collapse_subtree_clamps_cursor() {
+        let root = Path::new("/test/root");
+        let subdir_path = root.join("subdir");
+        let mut subdir = dir_node(
+            "subdir",
+            root,
+            vec![file_node("a.txt", &subdir_path), file_node("b.txt", &subdir_path)],
+        );
+        subdir.is_expanded = true;
+
+        let mut state = state_with_children(vec![subdir]);
+        state.move_cursor_to(2); // b.txt (index 2)
+        assert_eq!(state.cursor(), 2);
+
+        state.collapse_subtree(&root.join("subdir"));
+
+        // After collapse only 1 node visible, cursor clamped to 0.
+        assert_eq!(state.cursor(), 0);
     }
 }

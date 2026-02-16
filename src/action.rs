@@ -61,6 +61,10 @@ pub enum TreeAction {
     HalfPageDown,
     /// Move cursor half a page up.
     HalfPageUp,
+    /// Expand all directories under cursor recursively.
+    ExpandAll,
+    /// Collapse all directories under cursor.
+    CollapseAll,
 }
 
 /// Actions for the preview panel.

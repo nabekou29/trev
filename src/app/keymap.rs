@@ -100,6 +100,12 @@ impl Default for KeyMap {
         );
         km.bind(KeyCode::Char('U'), KeyModifiers::NONE, Action::Preview(PreviewAction::HalfPageUp));
 
+        // Expand/Collapse all.
+        km.bind(KeyCode::Char('E'), KeyModifiers::SHIFT, Action::Tree(TreeAction::ExpandAll));
+        km.bind(KeyCode::Char('E'), KeyModifiers::NONE, Action::Tree(TreeAction::ExpandAll));
+        km.bind(KeyCode::Char('W'), KeyModifiers::SHIFT, Action::Tree(TreeAction::CollapseAll));
+        km.bind(KeyCode::Char('W'), KeyModifiers::NONE, Action::Tree(TreeAction::CollapseAll));
+
         // Provider cycling.
         km.bind(KeyCode::Tab, KeyModifiers::NONE, Action::Preview(PreviewAction::CycleProvider));
 
@@ -207,6 +213,20 @@ mod tests {
         let km = default_keymap();
         let key = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE);
         assert_eq!(km.resolve(key), Some(&Action::FileOp(FileOpAction::ToggleMark)));
+    }
+
+    #[rstest]
+    fn resolve_shift_e_to_expand_all() {
+        let km = default_keymap();
+        let key = KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT);
+        assert_eq!(km.resolve(key), Some(&Action::Tree(TreeAction::ExpandAll)));
+    }
+
+    #[rstest]
+    fn resolve_shift_w_to_collapse_all() {
+        let km = default_keymap();
+        let key = KeyEvent::new(KeyCode::Char('W'), KeyModifiers::SHIFT);
+        assert_eq!(km.resolve(key), Some(&Action::Tree(TreeAction::CollapseAll)));
     }
 
     #[rstest]
