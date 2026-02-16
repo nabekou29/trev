@@ -19,15 +19,20 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    // Handle ctl subcommands before entering TUI mode.
-    if let Some(trev::cli::Command::Ctl {
-        socket,
-        pid,
-        workspace,
-        action,
-    }) = &args.command
-    {
-        return handle_ctl(action, socket.as_deref(), *pid, workspace.as_deref()).await;
+    // Handle subcommands before entering TUI mode.
+    match &args.command {
+        Some(trev::cli::Command::Ctl {
+            socket,
+            pid,
+            workspace,
+            action,
+        }) => {
+            return handle_ctl(action, socket.as_deref(), *pid, workspace.as_deref()).await;
+        }
+        Some(trev::cli::Command::SocketPath { workspace }) => {
+            return handle_socket_path(workspace.as_deref());
+        }
+        None => {}
     }
 
     trev::app::run(&args).await
@@ -63,6 +68,40 @@ async fn handle_ctl(
         println!("{result}");
     } else if let Some(error) = response.get("error") {
         bail!("server error: {error}");
+    }
+
+    Ok(())
+}
+
+/// List socket paths of running daemons.
+#[allow(clippy::print_stdout)]
+fn handle_socket_path(workspace: Option<&str>) -> Result<()> {
+    let runtime_dir = trev::ipc::paths::runtime_dir();
+    if !runtime_dir.is_dir() {
+        return Ok(());
+    }
+
+    let mut entries: Vec<_> = std::fs::read_dir(&runtime_dir)?
+        .filter_map(std::result::Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|ext| ext == "sock"))
+        .filter(|p| {
+            workspace.is_none_or(|ws| {
+                trev::ipc::paths::read_meta(p)
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .is_some_and(|path| path.contains(ws))
+            })
+        })
+        .collect();
+    entries.sort();
+
+    for sock in &entries {
+        let meta = trev::ipc::paths::read_meta(sock);
+        if let Some(workspace_path) = meta {
+            println!("{}\t{}", sock.display(), workspace_path.display());
+        } else {
+            println!("{}", sock.display());
+        }
     }
 
     Ok(())

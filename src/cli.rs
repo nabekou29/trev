@@ -126,6 +126,12 @@ pub enum Command {
         #[command(subcommand)]
         action: CtlAction,
     },
+    /// List socket paths of running daemons.
+    SocketPath {
+        /// Filter by workspace path substring.
+        #[arg(long)]
+        workspace: Option<String>,
+    },
 }
 
 /// Control actions for a running daemon.
