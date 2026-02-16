@@ -9,6 +9,9 @@ keywords = ["tui", "file-manager", "tree-view", "neovim", "terminal"]
 categories = ["command-line-utilities"]
 readme = "README.md"
 
+[features]
+perf = []
+
 [dependencies]
 # TUI
 ratatui = "0.30"
