@@ -243,7 +243,7 @@ pub async fn run(args: &Args) -> Result<()> {
 
         // Receive IPC commands.
         while let Ok(cmd) = ipc_rx.try_recv() {
-            handle_ipc_command(cmd, &mut state.should_quit);
+            handle_ipc_command(cmd, &mut state);
         }
 
         // Receive async preview load results.

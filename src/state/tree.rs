@@ -236,6 +236,69 @@ impl TreeState {
         false
     }
 
+    /// Reveal a path in the tree by loading and expanding ancestor directories.
+    ///
+    /// Walks from the root to the target path, synchronously loading children
+    /// for each ancestor that hasn't been loaded yet. After all ancestors are
+    /// expanded, moves the cursor to the target.
+    ///
+    /// Returns `true` if the target was found and the cursor moved.
+    pub fn reveal_path(
+        &mut self,
+        target: &Path,
+        builder: crate::tree::builder::TreeBuilder,
+    ) -> bool {
+        // Canonicalize target to match tree paths (which are canonicalized).
+        let Ok(target) = std::fs::canonicalize(target) else {
+            return false;
+        };
+
+        // Collect directories to expand: all ancestors between root and target.
+        let mut dirs_to_expand = Vec::new();
+        let mut current = target.parent();
+        while let Some(dir) = current {
+            if dir == self.root.path {
+                break;
+            }
+            dirs_to_expand.push(dir.to_path_buf());
+            current = dir.parent();
+        }
+        // Expand from root downward (shallowest first).
+        dirs_to_expand.reverse();
+
+        // Ensure each directory is loaded and expanded.
+        for dir in &dirs_to_expand {
+            if !self.ensure_expanded(dir, builder) {
+                return false;
+            }
+        }
+
+        self.move_cursor_to_path(&target)
+    }
+
+    /// Ensure a directory node is loaded and expanded.
+    ///
+    /// Returns `false` if the node could not be found or children failed to load.
+    fn ensure_expanded(
+        &mut self,
+        dir: &Path,
+        builder: crate::tree::builder::TreeBuilder,
+    ) -> bool {
+        let Some(node) = self.find_node_mut(dir) else {
+            return false;
+        };
+        if matches!(node.children, ChildrenState::Loaded(_)) {
+            node.is_expanded = true;
+            return true;
+        }
+        // Need to load children.
+        let Ok(children) = builder.load_children(dir) else {
+            return false;
+        };
+        self.set_children(dir, children, true);
+        true
+    }
+
     /// Generate the flattened list of visible nodes by DFS walk.
     ///
     /// Only includes nodes that are in expanded + `Loaded` directories.
