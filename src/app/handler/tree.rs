@@ -46,6 +46,10 @@ pub fn handle_tree_action(
                     show_hidden,
                     show_ignored,
                 );
+                // Emit mode: accumulate file path and quit.
+                if let ExpandResult::OpenFile(ref path) = result {
+                    handle_emit_open(path, state);
+                }
             }
         }
         TreeAction::Collapse => {
@@ -88,6 +92,10 @@ pub fn handle_tree_action(
                     show_hidden,
                     show_ignored,
                 );
+                // Emit mode: accumulate file path and quit.
+                if let ExpandResult::OpenFile(ref path) = result {
+                    handle_emit_open(path, state);
+                }
             } else if let Some(path) = collapse_path {
                 // Collapsed — unwatch.
                 unwatch_dir(&path, &mut state.watcher);
@@ -212,9 +220,37 @@ fn handle_expand_result(
             // Directory was prefetched — trigger prefetch for its children.
             trigger_prefetch(tree_state, path, ctx, show_hidden, show_ignored);
         }
-        ExpandResult::OpenFile(_) => {
-            // File opening not implemented yet.
+        ExpandResult::OpenFile(ref path) => {
+            send_open_file_notification(ctx, path);
         }
+    }
+}
+
+/// Handle file open in emit mode: accumulate the path and quit.
+fn handle_emit_open(path: &Path, state: &mut AppState) {
+    if let Some(ref mut paths) = state.emit_paths {
+        paths.push(path.to_path_buf());
+        state.should_quit = true;
+    }
+}
+
+/// Send an `open_file` notification to the connected Neovim client.
+///
+/// Only sends if the IPC server is running (daemon mode). The notification
+/// includes the configured `EditorAction` and the file path.
+fn send_open_file_notification(ctx: &AppContext, path: &Path) {
+    if let Some(server) = &ctx.ipc_server {
+        let server = server.clone();
+        let action = ctx.editor_action;
+        let path = path.to_path_buf();
+        tokio::spawn(async move {
+            server
+                .send_notification(
+                    "open_file",
+                    serde_json::json!({"action": action, "path": path.to_string_lossy()}),
+                )
+                .await;
+        });
     }
 }
 

@@ -143,6 +143,17 @@ pub enum CtlAction {
     },
 }
 
+impl From<OpenAction> for crate::ipc::types::EditorAction {
+    fn from(action: OpenAction) -> Self {
+        match action {
+            OpenAction::Edit => Self::Edit,
+            OpenAction::Split => Self::Split,
+            OpenAction::Vsplit => Self::Vsplit,
+            OpenAction::Tabedit => Self::Tabedit,
+        }
+    }
+}
+
 impl Args {
     /// Parse CLI arguments.
     pub fn parse_args() -> Self {

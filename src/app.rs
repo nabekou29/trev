@@ -122,7 +122,7 @@ pub async fn run(args: &Args) -> Result<()> {
     };
 
     // Start IPC server in daemon mode.
-    let (_ipc_server, mut ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
+    let (ipc_server, mut ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
 
     // Restore session and clean up expired sessions.
     let (selection, undo_history, session_restored) =
@@ -147,6 +147,7 @@ pub async fn run(args: &Args) -> Result<()> {
         scroll: ScrollState::new(),
         status_message: None,
         processing: false,
+        emit_paths: if args.emit { Some(Vec::new()) } else { None },
     };
 
     // Set up async children load channel.
@@ -163,6 +164,8 @@ pub async fn run(args: &Args) -> Result<()> {
         file_op_config: config.file_operations,
         keymap: KeyMap::default(),
         suppressed,
+        ipc_server,
+        editor_action: args.action.into(),
     };
 
     // Prefetch root's child directories for instant first expansion.
@@ -270,20 +273,8 @@ pub async fn run(args: &Args) -> Result<()> {
         }
     }
 
-    // Save session state before exiting.
-    let session_state = session::build_session_state(
-        &root_path,
-        state.tree_state.expanded_paths(),
-        state.tree_state.cursor_path(),
-        &state.selection,
-        &state.undo_history,
-    );
-    if let Err(e) = session::save(&session_state) {
-        tracing::warn!(%e, "failed to save session");
-    }
-
-    // Restore terminal.
-    crate::terminal::restore();
+    // Shutdown: save session, restore terminal, emit paths.
+    shutdown(&root_path, &state, args);
 
     Ok(())
 }
@@ -364,6 +355,68 @@ fn restore_session_if_needed(
     });
 
     (selection, undo_history, restored)
+}
+
+/// Save session, restore terminal, and output emit paths.
+fn shutdown(root_path: &Path, state: &AppState, args: &Args) {
+    // Save session state.
+    let session_state = session::build_session_state(
+        root_path,
+        state.tree_state.expanded_paths(),
+        state.tree_state.cursor_path(),
+        &state.selection,
+        &state.undo_history,
+    );
+    if let Err(e) = session::save(&session_state) {
+        tracing::warn!(%e, "failed to save session");
+    }
+
+    // Restore terminal.
+    crate::terminal::restore();
+
+    // Output emit paths after terminal restore (stdout is now safe).
+    if let Some(paths) = &state.emit_paths {
+        emit_paths(paths, args.emit_format);
+    }
+}
+
+/// Output accumulated emit paths to stdout.
+///
+/// Format depends on the `--emit-format` flag:
+/// - `Lines`: one path per line
+/// - `Nul`: null-separated paths
+/// - `Json`: JSON array of strings
+#[allow(clippy::print_stdout)]
+fn emit_paths(paths: &[PathBuf], format: crate::cli::EmitFormat) {
+    use crate::cli::EmitFormat;
+
+    if paths.is_empty() {
+        return;
+    }
+    match format {
+        EmitFormat::Lines => {
+            for path in paths {
+                println!("{}", path.display());
+            }
+        }
+        EmitFormat::Nul => {
+            for (i, path) in paths.iter().enumerate() {
+                if i > 0 {
+                    print!("\0");
+                }
+                print!("{}", path.display());
+            }
+        }
+        EmitFormat::Json => {
+            let json: Vec<&str> = paths
+                .iter()
+                .filter_map(|p| p.to_str())
+                .collect();
+            if let Ok(output) = serde_json::to_string(&json) {
+                println!("{output}");
+            }
+        }
+    }
 }
 
 /// Start IPC server when running in daemon mode.

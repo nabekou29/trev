@@ -65,6 +65,9 @@ pub struct AppState {
     pub status_message: Option<StatusMessage>,
     /// Whether a blocking file operation is in progress.
     pub processing: bool,
+    /// Emit mode: accumulated file paths for stdout output on exit.
+    /// `Some(vec)` when `--emit` is active, `None` otherwise.
+    pub emit_paths: Option<Vec<PathBuf>>,
 }
 
 impl AppState {
@@ -169,6 +172,10 @@ pub struct AppContext {
     pub keymap: KeyMap,
     /// Shared suppression flag for file system watcher.
     pub suppressed: Arc<AtomicBool>,
+    /// IPC server handle (None if not in daemon mode).
+    pub ipc_server: Option<Arc<crate::ipc::server::IpcServer>>,
+    /// Default editor action for opening files (from `--action` flag).
+    pub editor_action: crate::ipc::types::EditorAction,
 }
 
 /// Result of an async directory children load operation.
