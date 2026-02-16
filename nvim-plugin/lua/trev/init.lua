@@ -324,7 +324,6 @@ function M.open()
     "--daemon",
     "--action",
     config.action,
-    "--no-icons",
     workspace,
   }
 
@@ -443,7 +442,6 @@ function M.float_pick(action)
   local cmd = {
     config.trev_path,
     "--emit",
-    "--no-icons",
     workspace,
   }
 
