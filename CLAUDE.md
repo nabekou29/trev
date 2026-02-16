@@ -30,3 +30,10 @@ src/
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
+
+## Active Technologies
+- Rust 2024 edition, nightly-2026-01-24 + okio (full, 既存), serde + serde_json (既存), dirs (既存), clap 4 (既存) (013-neovim-ipc)
+- Unix Domain Socket (JSON-RPC 2.0) (013-neovim-ipc)
+
+## Recent Changes
+- 013-neovim-ipc: Added Rust 2024 edition, nightly-2026-01-24 + okio (full, 既存), serde + serde_json (既存), dirs (既存), clap 4 (既存)
