@@ -28,11 +28,14 @@ use crate::preview::state::PreviewState;
 ///
 /// Dispatches to variant-specific rendering based on the current
 /// `PreviewContent` in the `PreviewState`.
-pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewState) {
+///
+/// When `is_narrow` is true, the preview is below the tree and uses a top border;
+/// otherwise it is beside the tree and uses a left border.
+pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewState, is_narrow: bool) {
     let title = build_title(state);
 
-    let block =
-        Block::default().borders(Borders::LEFT).title(title).title_alignment(Alignment::Left);
+    let border = if is_narrow { Borders::TOP } else { Borders::LEFT };
+    let block = Block::default().borders(border).title(title).title_alignment(Alignment::Left);
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
