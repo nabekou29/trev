@@ -143,7 +143,13 @@ pub fn restore(root_path: &Path) -> Result<Option<SessionState>> {
 ///
 /// Returns the number of deleted sessions.
 pub fn cleanup_expired(expiry_days: u64) -> Result<usize> {
-    let dir = session_dir()?;
+    cleanup_expired_in(&session_dir()?, expiry_days)
+}
+
+/// Delete expired session files in the given directory.
+///
+/// Returns the number of deleted sessions.
+fn cleanup_expired_in(dir: &Path, expiry_days: u64) -> Result<usize> {
     if !dir.exists() {
         return Ok(0);
     }
@@ -152,7 +158,7 @@ pub fn cleanup_expired(expiry_days: u64) -> Result<usize> {
     let now = SystemTime::now();
     let mut deleted = 0;
 
-    let entries = std::fs::read_dir(&dir).context("failed to read session directory")?;
+    let entries = std::fs::read_dir(dir).context("failed to read session directory")?;
 
     for entry in entries {
         let entry = entry.context("failed to read directory entry")?;
@@ -289,17 +295,31 @@ mod tests {
         assert_that!(state.selection_paths.len(), eq(1));
     }
 
+    /// Write a session file directly into a custom directory for isolated testing.
+    fn save_session_in(dir: &Path, state: &SessionState) -> PathBuf {
+        use sha2::Digest;
+
+        std::fs::create_dir_all(dir).unwrap();
+
+        let mut hasher = Sha256::new();
+        hasher.update(state.root_path.to_string_lossy().as_bytes());
+        let hash = hasher.finalize();
+        let hex = format!("{hash:x}");
+        let file_path = dir.join(format!("{}.json", &hex[..16]));
+
+        let json = serde_json::to_string_pretty(state).unwrap();
+        std::fs::write(&file_path, json).unwrap();
+        file_path
+    }
+
     #[rstest]
     fn cleanup_expired_removes_old_sessions() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let root = tmp.path().join("old_project");
-        std::fs::create_dir_all(&root).unwrap();
+        let session_dir = tmp.path().join("sessions");
 
-        // Create a session with last_accessed set far in the past.
-        let old_time = SystemTime::UNIX_EPOCH;
         let state = SessionState {
-            root_path: root.clone(),
-            last_accessed: old_time,
+            root_path: PathBuf::from("/test/old_project"),
+            last_accessed: SystemTime::UNIX_EPOCH,
             expanded_paths: vec![],
             cursor_path: None,
             selection_paths: vec![],
@@ -308,26 +328,22 @@ mod tests {
             redo_stack: vec![],
         };
 
-        save(&state).unwrap();
-
-        // Verify file exists.
-        let path = session_path(&root).unwrap();
-        assert!(path.exists());
+        let file_path = save_session_in(&session_dir, &state);
+        assert!(file_path.exists());
 
         // Cleanup with 1 day expiry — should remove the old session.
-        let deleted = cleanup_expired(1).unwrap();
-        assert_that!(deleted, ge(1));
-        assert!(!path.exists());
+        let deleted = cleanup_expired_in(&session_dir, 1).unwrap();
+        assert_that!(deleted, eq(1));
+        assert!(!file_path.exists());
     }
 
     #[rstest]
     fn cleanup_expired_keeps_recent_sessions() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let root = tmp.path().join("recent_project");
-        std::fs::create_dir_all(&root).unwrap();
+        let session_dir = tmp.path().join("sessions");
 
         let state = SessionState {
-            root_path: root.clone(),
+            root_path: PathBuf::from("/test/recent_project"),
             last_accessed: SystemTime::now(),
             expanded_paths: vec![],
             cursor_path: None,
@@ -337,17 +353,12 @@ mod tests {
             redo_stack: vec![],
         };
 
-        save(&state).unwrap();
-
-        let path = session_path(&root).unwrap();
-        assert!(path.exists());
+        let file_path = save_session_in(&session_dir, &state);
+        assert!(file_path.exists());
 
         // Cleanup with 90 day expiry — should keep the recent session.
-        let deleted = cleanup_expired(90).unwrap();
-        // Our session should not be deleted (it was just created).
-        assert!(path.exists());
-        // Note: other expired sessions from previous tests might also be deleted,
-        // so we only assert our file still exists.
-        let _ = deleted;
+        let deleted = cleanup_expired_in(&session_dir, 90).unwrap();
+        assert_that!(deleted, eq(0));
+        assert!(file_path.exists());
     }
 }
