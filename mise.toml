@@ -30,6 +30,10 @@ run = "cargo fmt --all"
 description = "Format check"
 run = "cargo fmt --all -- --check"
 
+[tasks.bench]
+description = "Run all benchmarks"
+run = "cargo bench"
+
 [tasks.install-components]
 description = "Install components"
 run = [
