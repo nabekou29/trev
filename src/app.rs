@@ -432,6 +432,14 @@ fn start_ipc_if_daemon(
 ) {
     let (ipc_tx, ipc_rx) = tokio::sync::mpsc::unbounded_channel::<IpcCommand>();
     let server = if daemon {
+        // Clean up stale sockets from crashed processes in the background.
+        tokio::spawn(async {
+            let removed = crate::ipc::paths::cleanup_stale_sockets();
+            if removed > 0 {
+                tracing::info!(removed, "cleaned up stale sockets");
+            }
+        });
+
         let socket_path = crate::ipc::paths::socket_path(root_path);
         match crate::ipc::server::IpcServer::start_on_path(socket_path.clone(), ipc_tx) {
             Ok(s) => {

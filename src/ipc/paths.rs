@@ -91,6 +91,52 @@ pub fn remove_meta(sock_path: &Path) {
     let _ = std::fs::remove_file(meta);
 }
 
+/// Remove stale socket and metadata files left by crashed processes.
+///
+/// Scans the runtime directory for `.sock` files and tries to connect
+/// to each one. If the connection fails, the daemon is no longer running
+/// and the socket (and its metadata) is removed.
+///
+/// Skips the current process's own socket (by PID in filename).
+/// Returns the number of cleaned-up sockets.
+pub fn cleanup_stale_sockets() -> usize {
+    let dir = runtime_dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return 0;
+    };
+
+    let own_pid = std::process::id();
+    let mut removed = 0;
+
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "sock") {
+            continue;
+        }
+        // Skip our own socket.
+        if extract_pid_from_socket(&path).is_some_and(|pid| pid == own_pid) {
+            continue;
+        }
+        // Try connecting — if it fails, the daemon is gone.
+        if std::os::unix::net::UnixStream::connect(&path).is_err() {
+            let _ = std::fs::remove_file(&path);
+            remove_meta(&path);
+            removed += 1;
+            tracing::debug!(path = %path.display(), "removed stale socket");
+        }
+    }
+    removed
+}
+
+/// Extract the PID from a socket filename.
+///
+/// Expects format `<key>-<pid>.sock`, returns the PID portion.
+fn extract_pid_from_socket(path: &Path) -> Option<u32> {
+    let stem = path.file_stem()?.to_str()?;
+    let pid_str = stem.rsplit('-').next()?;
+    pid_str.parse().ok()
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -240,5 +286,25 @@ mod tests {
         let sock = PathBuf::from("/tmp/trev/proj-a1b2c3d4-12345.sock");
         let meta = meta_path(&sock);
         assert_eq!(meta, PathBuf::from("/tmp/trev/proj-a1b2c3d4-12345.json"));
+    }
+
+    // --- extract_pid_from_socket ---
+
+    #[rstest]
+    fn extract_pid_from_standard_socket_name() {
+        let path = PathBuf::from("/tmp/trev/proj-a1b2c3d4-12345.sock");
+        assert_eq!(extract_pid_from_socket(&path), Some(12345));
+    }
+
+    #[rstest]
+    fn extract_pid_returns_none_for_no_dash() {
+        let path = PathBuf::from("/tmp/trev/nodash.sock");
+        assert_eq!(extract_pid_from_socket(&path), None);
+    }
+
+    #[rstest]
+    fn extract_pid_returns_none_for_non_numeric() {
+        let path = PathBuf::from("/tmp/trev/proj-abc.sock");
+        assert_eq!(extract_pid_from_socket(&path), None);
     }
 }
