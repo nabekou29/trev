@@ -110,6 +110,18 @@ impl Default for KeyMap {
         // Provider cycling.
         km.bind(KeyCode::Tab, KeyModifiers::NONE, Action::Preview(PreviewAction::CycleProvider));
 
+        // Preview toggle.
+        km.bind(
+            KeyCode::Char('P'),
+            KeyModifiers::SHIFT,
+            Action::Preview(PreviewAction::TogglePreview),
+        );
+        km.bind(
+            KeyCode::Char('P'),
+            KeyModifiers::NONE,
+            Action::Preview(PreviewAction::TogglePreview),
+        );
+
         // File operations.
         km.bind(KeyCode::Char(' '), KeyModifiers::NONE, Action::FileOp(FileOpAction::ToggleMark));
         km.bind(KeyCode::Char('a'), KeyModifiers::NONE, Action::FileOp(FileOpAction::CreateFile));
@@ -228,6 +240,13 @@ mod tests {
         let km = default_keymap();
         let key = KeyEvent::new(KeyCode::Char('W'), KeyModifiers::SHIFT);
         assert_eq!(km.resolve(key), Some(&Action::Tree(TreeAction::CollapseAll)));
+    }
+
+    #[rstest]
+    fn resolve_shift_p_to_toggle_preview() {
+        let km = default_keymap();
+        let key = KeyEvent::new(KeyCode::Char('P'), KeyModifiers::SHIFT);
+        assert_eq!(km.resolve(key), Some(&Action::Preview(PreviewAction::TogglePreview)));
     }
 
     #[rstest]

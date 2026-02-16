@@ -186,6 +186,7 @@ pub async fn run(args: &Args) -> Result<()> {
     // Track cursor for change detection.
     let mut last_cursor = state.tree_state.cursor();
     let mut needs_center_scroll = session_restored;
+    let mut needs_initial_width_check = true;
 
     // Main event loop.
     loop {
@@ -203,6 +204,16 @@ pub async fn run(args: &Args) -> Result<()> {
             state
                 .scroll
                 .center_on_cursor(state.tree_state.cursor(), state.viewport_height as usize);
+        }
+
+        // Auto-hide preview on narrow terminals after first draw.
+        if needs_initial_width_check {
+            needs_initial_width_check = false;
+            if let Ok((width, _)) = crossterm::terminal::size()
+                && width <= crate::ui::NARROW_WIDTH_THRESHOLD
+            {
+                state.show_preview = false;
+            }
         }
 
         // Poll for events (50ms timeout for responsive async result handling).

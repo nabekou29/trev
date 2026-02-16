@@ -85,4 +85,6 @@ pub enum PreviewAction {
     HalfPageUp,
     /// Cycle to the next available preview provider.
     CycleProvider,
+    /// Toggle preview panel visibility.
+    TogglePreview,
 }

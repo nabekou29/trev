@@ -50,6 +50,12 @@ pub fn handle_preview_action(
                 reload_preview(state, ctx);
             }
         }
+        PreviewAction::TogglePreview => {
+            state.show_preview = !state.show_preview;
+            if state.show_preview {
+                trigger_preview(state, ctx);
+            }
+        }
     }
 }
 
