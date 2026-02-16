@@ -115,6 +115,18 @@ pub fn handle_tree_action(
         TreeAction::CollapseAll => {
             handle_collapse_all(state);
         }
+        TreeAction::ToggleHidden => {
+            state.show_hidden = !state.show_hidden;
+            rebuild_tree(state, ctx);
+            let label = if state.show_hidden { "shown" } else { "hidden" };
+            state.set_status(format!("Hidden files: {label}"));
+        }
+        TreeAction::ToggleIgnored => {
+            state.show_ignored = !state.show_ignored;
+            rebuild_tree(state, ctx);
+            let label = if state.show_ignored { "shown" } else { "hidden" };
+            state.set_status(format!("Ignored files: {label}"));
+        }
     }
 }
 
@@ -162,6 +174,52 @@ fn handle_collapse_all(state: &mut AppState) {
     if !collapsed.is_empty() {
         state.set_status(format!("Collapsed {} directories", collapsed.len()));
     }
+}
+
+/// Rebuild the entire tree with the current `show_hidden` / `show_ignored` settings.
+///
+/// Re-expands previously expanded directories and restores the cursor position.
+fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
+    let expanded = state.tree_state.expanded_paths();
+    let cursor_path = state.tree_state.cursor_path();
+    let order = state.tree_state.sort_order();
+    let direction = state.tree_state.sort_direction();
+    let dirs_first = state.tree_state.directories_first();
+    let root_path = state.tree_state.root_path().to_path_buf();
+
+    let builder = TreeBuilder::new(state.show_hidden, state.show_ignored);
+    let Ok(root) = builder.build(&root_path) else {
+        return;
+    };
+
+    let mut new_tree = TreeState::new(root, order, direction, dirs_first);
+
+    // Re-expand directories (shortest paths first so parents load before children).
+    let mut sorted_expanded = expanded;
+    sorted_expanded.sort_by_key(|p| p.as_os_str().len());
+    for path in &sorted_expanded {
+        if let Ok(children) = builder.load_children(path) {
+            new_tree.set_children(path, children, true);
+        }
+    }
+
+    new_tree.apply_sort(order, direction, dirs_first);
+
+    // Restore cursor position.
+    if let Some(ref cp) = cursor_path {
+        new_tree.move_cursor_to_path(cp);
+    }
+
+    state.tree_state = new_tree;
+
+    // Re-trigger prefetch for visible directories.
+    trigger_prefetch(
+        &mut state.tree_state,
+        &root_path,
+        ctx,
+        state.show_hidden,
+        state.show_ignored,
+    );
 }
 
 /// Watch a directory if the expand result indicates expansion.

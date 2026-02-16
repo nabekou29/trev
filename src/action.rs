@@ -67,6 +67,10 @@ pub enum TreeAction {
     ExpandAll,
     /// Collapse all directories under cursor.
     CollapseAll,
+    /// Toggle hidden (dot) file visibility.
+    ToggleHidden,
+    /// Toggle gitignored file visibility.
+    ToggleIgnored,
 }
 
 /// Actions for the preview panel.

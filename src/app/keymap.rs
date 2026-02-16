@@ -122,6 +122,11 @@ impl Default for KeyMap {
             Action::Preview(PreviewAction::TogglePreview),
         );
 
+        // Display toggles.
+        km.bind(KeyCode::Char('.'), KeyModifiers::NONE, Action::Tree(TreeAction::ToggleHidden));
+        km.bind(KeyCode::Char('I'), KeyModifiers::SHIFT, Action::Tree(TreeAction::ToggleIgnored));
+        km.bind(KeyCode::Char('I'), KeyModifiers::NONE, Action::Tree(TreeAction::ToggleIgnored));
+
         // File operations.
         km.bind(KeyCode::Char(' '), KeyModifiers::NONE, Action::FileOp(FileOpAction::ToggleMark));
         km.bind(KeyCode::Char('a'), KeyModifiers::NONE, Action::FileOp(FileOpAction::CreateFile));
@@ -255,6 +260,20 @@ mod tests {
         let km = default_keymap();
         let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE);
         assert_eq!(km.resolve(key), Some(&Action::FileOp(FileOpAction::CopyMenu)));
+    }
+
+    #[rstest]
+    fn resolve_dot_to_toggle_hidden() {
+        let km = default_keymap();
+        let key = KeyEvent::new(KeyCode::Char('.'), KeyModifiers::NONE);
+        assert_eq!(km.resolve(key), Some(&Action::Tree(TreeAction::ToggleHidden)));
+    }
+
+    #[rstest]
+    fn resolve_shift_i_to_toggle_ignored() {
+        let km = default_keymap();
+        let key = KeyEvent::new(KeyCode::Char('I'), KeyModifiers::SHIFT);
+        assert_eq!(km.resolve(key), Some(&Action::Tree(TreeAction::ToggleIgnored)));
     }
 
     #[rstest]
