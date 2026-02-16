@@ -2,6 +2,7 @@
 
 mod file_op;
 mod input;
+pub mod ipc;
 mod preview;
 mod tree;
 
@@ -10,6 +11,7 @@ use input::{
     handle_confirm_mode_key,
     handle_input_mode_key,
 };
+pub use ipc::handle_ipc_command;
 use preview::handle_preview_action;
 pub use preview::trigger_preview;
 use tree::handle_tree_action;

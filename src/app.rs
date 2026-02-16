@@ -16,6 +16,7 @@ use std::time::Duration;
 use anyhow::Result;
 use crossterm::event::Event;
 use handler::{
+    handle_ipc_command,
     handle_key_event,
     refresh_directory,
     trigger_prefetch,
@@ -27,6 +28,7 @@ pub use state::*;
 
 use crate::cli::Args;
 use crate::config::Config;
+use crate::ipc::types::IpcCommand;
 use crate::file_op::selection::SelectionBuffer;
 use crate::file_op::undo::UndoHistory;
 use crate::input::AppMode;
@@ -118,6 +120,9 @@ pub async fn run(args: &Args) -> Result<()> {
         drop(watcher_tx);
         (None, Arc::new(AtomicBool::new(false)))
     };
+
+    // Start IPC server in daemon mode.
+    let (_ipc_server, mut ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
 
     // Restore session and clean up expired sessions.
     let (selection, undo_history, session_restored) =
@@ -232,6 +237,11 @@ pub async fn run(args: &Args) -> Result<()> {
 
         // Receive watcher events (file system changes in watched directories).
         process_watcher_events(&mut watcher_rx, &mut state, &ctx);
+
+        // Receive IPC commands.
+        while let Ok(cmd) = ipc_rx.try_recv() {
+            handle_ipc_command(cmd, &mut state.should_quit);
+        }
 
         // Receive async preview load results.
         while let Ok(result) = preview_rx.try_recv() {
@@ -354,6 +364,34 @@ fn restore_session_if_needed(
     });
 
     (selection, undo_history, restored)
+}
+
+/// Start IPC server when running in daemon mode.
+///
+/// Returns the server handle (kept alive for the process lifetime) and
+/// the receiver end of the command channel.
+fn start_ipc_if_daemon(
+    daemon: bool,
+    root_path: &Path,
+) -> (
+    Option<Arc<crate::ipc::server::IpcServer>>,
+    tokio::sync::mpsc::UnboundedReceiver<IpcCommand>,
+) {
+    let (ipc_tx, ipc_rx) = tokio::sync::mpsc::unbounded_channel::<IpcCommand>();
+    let server = if daemon {
+        let socket_path = crate::ipc::paths::socket_path(root_path);
+        match crate::ipc::server::IpcServer::start_on_path(socket_path, ipc_tx) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                tracing::warn!(%e, "failed to start IPC server");
+                None
+            }
+        }
+    } else {
+        drop(ipc_tx);
+        None
+    };
+    (server, ipc_rx)
 }
 
 /// Process pending file system watcher events and refresh affected directories.
