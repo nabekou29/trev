@@ -135,6 +135,7 @@ impl Default for KeyMap {
         km.bind(KeyCode::Char('u'), KeyModifiers::NONE, Action::FileOp(FileOpAction::Undo));
         km.bind(KeyCode::Char('r'), KeyModifiers::CONTROL, Action::FileOp(FileOpAction::Redo));
         km.bind(KeyCode::Esc, KeyModifiers::NONE, Action::FileOp(FileOpAction::ClearSelections));
+        km.bind(KeyCode::Char('c'), KeyModifiers::NONE, Action::FileOp(FileOpAction::CopyMenu));
 
         km
     }
@@ -247,6 +248,13 @@ mod tests {
         let km = default_keymap();
         let key = KeyEvent::new(KeyCode::Char('P'), KeyModifiers::SHIFT);
         assert_eq!(km.resolve(key), Some(&Action::Preview(PreviewAction::TogglePreview)));
+    }
+
+    #[rstest]
+    fn resolve_c_to_copy_menu() {
+        let km = default_keymap();
+        let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE);
+        assert_eq!(km.resolve(key), Some(&Action::FileOp(FileOpAction::CopyMenu)));
     }
 
     #[rstest]

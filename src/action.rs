@@ -38,6 +38,8 @@ pub enum FileOpAction {
     ToggleMark,
     /// Clear yank buffer and mark set.
     ClearSelections,
+    /// Open copy-to-clipboard menu.
+    CopyMenu,
 }
 
 /// Actions that modify the tree state.

@@ -302,6 +302,28 @@ pub struct ConfirmState {
     pub on_confirm: ConfirmAction,
 }
 
+/// A single item in a selection menu.
+#[derive(Debug, Clone)]
+pub struct MenuItem {
+    /// Shortcut key to select this item.
+    pub key: char,
+    /// Display label for the item.
+    pub label: String,
+    /// Value associated with the item (e.g. text to copy).
+    pub value: String,
+}
+
+/// State for a selection menu overlay.
+#[derive(Debug, Clone)]
+pub struct MenuState {
+    /// Menu title displayed in the border.
+    pub title: String,
+    /// Available menu items.
+    pub items: Vec<MenuItem>,
+    /// Currently highlighted item index.
+    pub cursor: usize,
+}
+
 /// Application mode state machine.
 #[derive(Debug, Clone, Default)]
 pub enum AppMode {
@@ -312,6 +334,8 @@ pub enum AppMode {
     Input(InputState),
     /// Confirmation dialog mode (delete).
     Confirm(ConfirmState),
+    /// Selection menu overlay.
+    Menu(MenuState),
 }
 
 #[cfg(test)]

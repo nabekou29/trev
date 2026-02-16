@@ -118,7 +118,55 @@ pub fn handle_file_op_action(
         FileOpAction::Redo => {
             execute_redo(state, ctx);
         }
+        FileOpAction::CopyMenu => {
+            open_copy_menu(state);
+        }
     }
+}
+
+/// Build and open the copy-to-clipboard menu for the current cursor node.
+fn open_copy_menu(state: &mut AppState) {
+    use crate::input::{
+        MenuItem,
+        MenuState,
+    };
+
+    let Some(info) = state.tree_state.current_node_info() else {
+        return;
+    };
+
+    let abs_path = info.path.to_string_lossy().to_string();
+    let rel_path = info
+        .path
+        .strip_prefix(state.tree_state.root_path())
+        .unwrap_or(&info.path)
+        .to_string_lossy()
+        .to_string();
+    let file_name = info.name.clone();
+    let stem = info
+        .path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let parent_dir = info
+        .path
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .to_string_lossy()
+        .to_string();
+
+    state.mode = AppMode::Menu(MenuState {
+        title: "Copy to clipboard".to_string(),
+        items: vec![
+            MenuItem { key: 'p', label: "Absolute path".to_string(), value: abs_path },
+            MenuItem { key: 'r', label: "Relative path".to_string(), value: rel_path },
+            MenuItem { key: 'n', label: "File name".to_string(), value: file_name },
+            MenuItem { key: 's', label: "Stem".to_string(), value: stem },
+            MenuItem { key: 'd', label: "Parent directory".to_string(), value: parent_dir },
+        ],
+        cursor: 0,
+    });
 }
 
 /// Execute the confirmed delete operation.

@@ -26,7 +26,10 @@ use ratatui::widgets::{
     Paragraph,
 };
 
-use crate::input::ConfirmState;
+use crate::input::{
+    ConfirmState,
+    MenuState,
+};
 
 /// Render a confirmation dialog as a centered modal overlay.
 ///
@@ -94,6 +97,91 @@ pub fn render_confirm_dialog(frame: &mut Frame<'_>, area: Rect, confirm: &Confir
         Span::styled(": confirm  ", Style::default().fg(Color::DarkGray)),
         Span::styled("n", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
         Span::raw("/"),
+        Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        Span::styled(": cancel", Style::default().fg(Color::DarkGray)),
+    ]))
+    .alignment(Alignment::Center);
+    frame.render_widget(footer, footer_area);
+}
+
+/// Render a selection menu as a centered modal overlay.
+///
+/// Shows the menu title and a list of items with shortcut keys.
+pub fn render_menu(frame: &mut Frame<'_>, area: Rect, menu: &MenuState) {
+    let dialog_area = centered_rect(area, 50, 80, menu.items.len());
+
+    // Clear the area behind the dialog.
+    frame.render_widget(Clear, dialog_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                &menu.title,
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+        ]))
+        .title_alignment(Alignment::Center);
+
+    let inner = block.inner(dialog_area);
+    frame.render_widget(block, dialog_area);
+
+    if inner.height < 2 {
+        return;
+    }
+
+    // Split inner area: item list + footer.
+    let chunks = Layout::vertical([
+        Constraint::Min(1),    // item list
+        Constraint::Length(1), // footer
+    ])
+    .split(inner);
+
+    let Some(&list_area) = chunks.first() else {
+        return;
+    };
+    let Some(&footer_area) = chunks.get(1) else {
+        return;
+    };
+
+    // Menu items with cursor highlight.
+    let items: Vec<ListItem<'_>> = menu
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let is_selected = i == menu.cursor;
+            let marker = if is_selected { ">" } else { " " };
+            let label_style = if is_selected {
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let bg_style = if is_selected {
+                Style::default().bg(Color::DarkGray)
+            } else {
+                Style::default()
+            };
+            ListItem::new(Line::from(vec![
+                Span::raw(format!(" {marker} ")),
+                Span::styled(
+                    format!("[{}]", item.key),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+                Span::styled(&item.label, label_style),
+            ]).style(bg_style))
+        })
+        .collect();
+
+    let list = List::new(items);
+    frame.render_widget(list, list_area);
+
+    // Footer.
+    let footer = Paragraph::new(Line::from(vec![
         Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
         Span::styled(": cancel", Style::default().fg(Color::DarkGray)),
     ]))

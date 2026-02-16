@@ -77,8 +77,14 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
 
     status_bar::render_status(frame, status_area, state);
 
-    // Render modal overlay on top of everything when in Confirm mode.
-    if let AppMode::Confirm(ref confirm) = state.mode {
-        modal::render_confirm_dialog(frame, frame.area(), confirm);
+    // Render modal overlays on top of everything.
+    match &state.mode {
+        AppMode::Confirm(confirm) => {
+            modal::render_confirm_dialog(frame, frame.area(), confirm);
+        }
+        AppMode::Menu(menu) => {
+            modal::render_menu(frame, frame.area(), menu);
+        }
+        AppMode::Normal | AppMode::Input(_) => {}
     }
 }

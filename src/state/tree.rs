@@ -211,6 +211,11 @@ impl TreeState {
         self.directories_first
     }
 
+    /// Get the root directory path.
+    pub fn root_path(&self) -> &Path {
+        &self.root.path
+    }
+
     /// Collect paths of all expanded directories in the tree.
     pub fn expanded_paths(&self) -> Vec<PathBuf> {
         let mut result = Vec::new();

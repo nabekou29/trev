@@ -10,6 +10,7 @@ use file_op::handle_file_op_action;
 use input::{
     handle_confirm_mode_key,
     handle_input_mode_key,
+    handle_menu_mode_key,
 };
 pub use ipc::handle_ipc_command;
 use preview::handle_preview_action;
@@ -35,6 +36,9 @@ pub fn handle_key_event(key: crossterm::event::KeyEvent, state: &mut AppState, c
         }
         AppMode::Confirm(_) => {
             handle_confirm_mode_key(key, state, ctx);
+        }
+        AppMode::Menu(_) => {
+            handle_menu_mode_key(key, state);
         }
         AppMode::Normal => {
             let Some(action) = ctx.keymap.resolve(key) else {
