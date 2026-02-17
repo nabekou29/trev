@@ -51,3 +51,9 @@ run = "cargo llvm-cov --all-features"
 [tasks.coverage-html]
 description = "Run tests with coverage and generate HTML report"
 run = "cargo llvm-cov --all-features --html --open"
+
+[tasks.build-install-release]
+description = "Build and install"
+run = "cargo install --path . --force"
+sources = ["Cargo.toml", "src/**/*.rs"]
+outputs = ["{{env.CARGO_HOME}}/bin/trev"]
