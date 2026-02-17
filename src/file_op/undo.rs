@@ -1,5 +1,6 @@
 //! Undo/redo history management with operation groups.
 
+use std::collections::VecDeque;
 use std::path::Path;
 
 use anyhow::{
@@ -35,10 +36,10 @@ pub struct OpGroup {
 /// Bounded undo/redo history.
 #[derive(Debug)]
 pub struct UndoHistory {
-    /// Completed operations (undo target). Last = most recent.
-    undo_stack: Vec<OpGroup>,
-    /// Undone operations (redo target). Last = most recent undo.
-    redo_stack: Vec<OpGroup>,
+    /// Completed operations (undo target). Back = most recent.
+    undo_stack: VecDeque<OpGroup>,
+    /// Undone operations (redo target). Back = most recent undo.
+    redo_stack: VecDeque<OpGroup>,
     /// Maximum undo stack size.
     max_size: usize,
 }
@@ -46,7 +47,7 @@ pub struct UndoHistory {
 impl UndoHistory {
     /// Create a new undo history with the given maximum stack size.
     pub const fn new(max_size: usize) -> Self {
-        Self { undo_stack: Vec::new(), redo_stack: Vec::new(), max_size }
+        Self { undo_stack: VecDeque::new(), redo_stack: VecDeque::new(), max_size }
     }
 
     /// Push a completed operation group onto the undo stack.
@@ -56,14 +57,14 @@ impl UndoHistory {
     /// cleaning up any trash files referenced by the evicted group.
     pub fn push(&mut self, group: OpGroup) {
         self.redo_stack.clear();
-        self.undo_stack.push(group);
+        self.undo_stack.push_back(group);
 
         // Evict oldest if over capacity.
         if self.undo_stack.len() > self.max_size {
-            if let Some(evicted) = self.undo_stack.first() {
+            if let Some(evicted) = self.undo_stack.front() {
                 cleanup_trash_refs(evicted);
             }
-            self.undo_stack.remove(0);
+            self.undo_stack.pop_front();
         }
     }
 
@@ -72,7 +73,7 @@ impl UndoHistory {
     /// Validates file system preconditions before returning.
     /// On success, moves the group to the redo stack and returns it.
     pub fn undo(&mut self) -> Result<Option<&OpGroup>> {
-        let Some(group) = self.undo_stack.last() else {
+        let Some(group) = self.undo_stack.back() else {
             return Ok(None);
         };
 
@@ -81,12 +82,12 @@ impl UndoHistory {
             validate_op_precondition(&undo_op.reverse)?;
         }
 
-        // Safe: validated that undo_stack.last() is Some above.
-        let Some(group) = self.undo_stack.pop() else {
+        // Safe: validated that undo_stack.back() is Some above.
+        let Some(group) = self.undo_stack.pop_back() else {
             return Ok(None);
         };
-        self.redo_stack.push(group);
-        Ok(self.redo_stack.last())
+        self.redo_stack.push_back(group);
+        Ok(self.redo_stack.back())
     }
 
     /// Pop the most recent undone operation group for redo.
@@ -94,7 +95,7 @@ impl UndoHistory {
     /// Validates file system preconditions before returning.
     /// On success, moves the group back to the undo stack and returns it.
     pub fn redo(&mut self) -> Result<Option<&OpGroup>> {
-        let Some(group) = self.redo_stack.last() else {
+        let Some(group) = self.redo_stack.back() else {
             return Ok(None);
         };
 
@@ -103,38 +104,43 @@ impl UndoHistory {
             validate_op_precondition(&undo_op.forward)?;
         }
 
-        // Safe: validated that redo_stack.last() is Some above.
-        let Some(group) = self.redo_stack.pop() else {
+        // Safe: validated that redo_stack.back() is Some above.
+        let Some(group) = self.redo_stack.pop_back() else {
             return Ok(None);
         };
-        self.undo_stack.push(group);
-        Ok(self.undo_stack.last())
+        self.undo_stack.push_back(group);
+        Ok(self.undo_stack.back())
     }
 
     /// Whether there are operations to undo.
-    #[allow(dead_code)]
-    pub const fn can_undo(&self) -> bool {
+    pub fn can_undo(&self) -> bool {
         !self.undo_stack.is_empty()
     }
 
     /// Whether there are operations to redo.
-    #[allow(dead_code)]
-    pub const fn can_redo(&self) -> bool {
+    pub fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
     }
 
     /// Export undo and redo stacks for serialization.
-    pub fn export_stacks(&self) -> (&[OpGroup], &[OpGroup]) {
-        (&self.undo_stack, &self.redo_stack)
+    pub fn export_stacks(&self) -> (Vec<OpGroup>, Vec<OpGroup>) {
+        (
+            self.undo_stack.iter().cloned().collect(),
+            self.redo_stack.iter().cloned().collect(),
+        )
     }
 
     /// Reconstruct an `UndoHistory` from previously exported stacks.
-    pub const fn from_stacks(
+    pub fn from_stacks(
         undo_stack: Vec<OpGroup>,
         redo_stack: Vec<OpGroup>,
         max_size: usize,
     ) -> Self {
-        Self { undo_stack, redo_stack, max_size }
+        Self {
+            undo_stack: undo_stack.into(),
+            redo_stack: redo_stack.into(),
+            max_size,
+        }
     }
 }
 
@@ -273,8 +279,8 @@ mod tests {
         history.push(sample_group("first"));
 
         // Simulate undo manually (move from undo to redo).
-        let group = history.undo_stack.pop().unwrap();
-        history.redo_stack.push(group);
+        let group = history.undo_stack.pop_back().unwrap();
+        history.redo_stack.push_back(group);
         assert_that!(history.can_redo(), eq(true));
 
         // New push should clear redo.
@@ -407,8 +413,8 @@ mod tests {
         history.push(sample_group("second"));
 
         // Simulate an undo to populate redo stack.
-        let group = history.undo_stack.pop().unwrap();
-        history.redo_stack.push(group);
+        let group = history.undo_stack.pop_back().unwrap();
+        history.redo_stack.push_back(group);
 
         let (undo, redo) = history.export_stacks();
         assert_that!(undo.len(), eq(1));
@@ -417,7 +423,7 @@ mod tests {
         assert_eq!(redo[0].description, "second");
 
         // Reconstruct.
-        let restored = UndoHistory::from_stacks(undo.to_vec(), redo.to_vec(), 10);
+        let restored = UndoHistory::from_stacks(undo, redo, 10);
         assert_that!(restored.can_undo(), eq(true));
         assert_that!(restored.can_redo(), eq(true));
 

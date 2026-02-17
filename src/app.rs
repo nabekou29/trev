@@ -52,7 +52,8 @@ use crate::tree::builder::TreeBuilder;
 use crate::watcher::FsWatcher;
 
 /// Run the application.
-#[allow(clippy::unused_async, clippy::too_many_lines)]
+#[expect(clippy::unused_async, reason = "Called from tokio async context")]
+#[expect(clippy::too_many_lines, reason = "Event loop is inherently long")]
 pub async fn run(args: &Args) -> Result<()> {
     let load_result = Config::load()?;
     for warning in &load_result.warnings {
@@ -91,40 +92,14 @@ pub async fn run(args: &Args) -> Result<()> {
     // Detect terminal background for theme selection (must be before raw mode).
     // terminal_light::luma() sends OSC 11 query — safe only in cooked mode.
     crate::preview::highlight::init_theme();
-    let mut providers: Vec<Arc<dyn PreviewProvider>> = vec![
-        Arc::new(ImagePreviewProvider::new(picker)),
-        Arc::new(TextPreviewProvider::new()),
-        Arc::new(FallbackProvider::new()),
-    ];
-    for cmd in &config.preview.commands {
-        providers
-            .push(Arc::new(ExternalCmdProvider::new(cmd.clone(), config.preview.command_timeout)));
-    }
-    let preview_registry = PreviewRegistry::new(providers)?;
+    let preview_registry = build_preview_registry(picker, &config)?;
 
     let show_preview = config.display.show_preview;
 
     // Create watcher channel and instance.
     let (watcher_tx, mut watcher_rx) =
         tokio::sync::mpsc::unbounded_channel::<Vec<notify_debouncer_mini::DebouncedEvent>>();
-    let (fs_watcher, suppressed) = if config.watcher.enabled {
-        match FsWatcher::new(&config.watcher, watcher_tx) {
-            Ok(mut w) => {
-                let suppressed = w.suppressed();
-                if let Err(e) = w.watch(&root_path) {
-                    tracing::warn!(%e, "failed to watch root directory");
-                }
-                (Some(w), suppressed)
-            }
-            Err(e) => {
-                tracing::warn!(%e, "failed to create file system watcher");
-                (None, Arc::new(AtomicBool::new(false)))
-            }
-        }
-    } else {
-        drop(watcher_tx);
-        (None, Arc::new(AtomicBool::new(false)))
-    };
+    let (fs_watcher, suppressed) = setup_watcher(&config, watcher_tx, &root_path);
 
     // Start IPC server in daemon mode.
     let (ipc_server, mut ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
@@ -284,6 +259,48 @@ pub async fn run(args: &Args) -> Result<()> {
     Ok(())
 }
 
+/// Create the file system watcher and suppression flag.
+///
+/// Returns `(watcher, suppressed)`. If the watcher is disabled or fails
+/// to initialise, the channel sender is dropped and a dummy flag is returned.
+fn setup_watcher(
+    config: &Config,
+    watcher_tx: tokio::sync::mpsc::UnboundedSender<Vec<notify_debouncer_mini::DebouncedEvent>>,
+    root_path: &Path,
+) -> (Option<FsWatcher>, Arc<AtomicBool>) {
+    if !config.watcher.enabled {
+        drop(watcher_tx);
+        return (None, Arc::new(AtomicBool::new(false)));
+    }
+    match FsWatcher::new(&config.watcher, watcher_tx) {
+        Ok(mut w) => {
+            let suppressed = w.suppressed();
+            if let Err(e) = w.watch(root_path) {
+                tracing::warn!(%e, "failed to watch root directory");
+            }
+            (Some(w), suppressed)
+        }
+        Err(e) => {
+            tracing::warn!(%e, "failed to create file system watcher");
+            (None, Arc::new(AtomicBool::new(false)))
+        }
+    }
+}
+
+/// Build the preview provider registry from config.
+fn build_preview_registry(picker: Picker, config: &Config) -> Result<PreviewRegistry> {
+    let mut providers: Vec<Arc<dyn PreviewProvider>> = vec![
+        Arc::new(ImagePreviewProvider::new(picker)),
+        Arc::new(TextPreviewProvider::new()),
+        Arc::new(FallbackProvider::new()),
+    ];
+    for cmd in &config.preview.commands {
+        providers
+            .push(Arc::new(ExternalCmdProvider::new(cmd.clone(), config.preview.command_timeout)));
+    }
+    PreviewRegistry::new(providers)
+}
+
 /// Restore session state and schedule expired session cleanup.
 ///
 /// Returns `(selection, undo_history, restored)` where `restored` is true
@@ -391,7 +408,7 @@ fn shutdown(root_path: &Path, state: &AppState, args: &Args) {
 /// - `Lines`: one path per line
 /// - `Nul`: null-separated paths
 /// - `Json`: JSON array of strings
-#[allow(clippy::print_stdout)]
+#[expect(clippy::print_stdout, reason = "CLI output to stdout is intentional")]
 fn emit_paths(paths: &[PathBuf], format: crate::cli::EmitFormat) {
     use crate::cli::EmitFormat;
 

@@ -73,12 +73,6 @@ impl SelectionBuffer {
         self.mode = None;
     }
 
-    /// Whether the buffer is empty.
-    #[allow(dead_code, reason = "API completeness — will be used as selection buffer grows")]
-    pub fn is_empty(&self) -> bool {
-        self.paths.is_empty()
-    }
-
     /// Number of selected paths.
     pub fn count(&self) -> usize {
         self.paths.len()
@@ -87,12 +81,6 @@ impl SelectionBuffer {
     /// Get the current selection mode.
     pub const fn mode(&self) -> Option<&SelectionMode> {
         self.mode.as_ref()
-    }
-
-    /// Get the selected paths.
-    #[allow(dead_code, reason = "API completeness — direct access for future use")]
-    pub const fn paths(&self) -> &HashSet<PathBuf> {
-        &self.paths
     }
 
     /// Check if a specific path is selected.
@@ -155,7 +143,7 @@ mod tests {
     #[rstest]
     fn new_buffer_is_empty() {
         let buf = SelectionBuffer::new();
-        assert_that!(buf.is_empty(), eq(true));
+        assert_that!(buf.count(), eq(0));
         assert_that!(buf.count(), eq(0));
         assert_that!(buf.mode(), none());
     }
@@ -174,7 +162,7 @@ mod tests {
         let mut buf = SelectionBuffer::new();
         buf.toggle_mark(PathBuf::from("/a"));
         buf.toggle_mark(PathBuf::from("/a"));
-        assert_that!(buf.is_empty(), eq(true));
+        assert_that!(buf.count(), eq(0));
         assert_that!(buf.mode(), none());
     }
 
@@ -206,7 +194,7 @@ mod tests {
         let mut buf = SelectionBuffer::new();
         buf.set(vec![PathBuf::from("/a")], SelectionMode::Copy);
         buf.clear();
-        assert_that!(buf.is_empty(), eq(true));
+        assert_that!(buf.count(), eq(0));
         assert_that!(buf.mode(), none());
     }
 

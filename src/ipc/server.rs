@@ -5,6 +5,10 @@ use std::path::{
     PathBuf,
 };
 use std::sync::Arc;
+use std::sync::atomic::{
+    AtomicU64,
+    Ordering,
+};
 
 use serde_json::Value;
 use tokio::io::{
@@ -44,8 +48,12 @@ type SharedWriter = Arc<Mutex<OwnedWriteHalf>>;
 pub struct IpcServer {
     /// Path to the Unix socket.
     socket_path: PathBuf,
-    /// Writer for sending notifications to the most recently connected client.
-    notification_writer: Arc<Mutex<Option<SharedWriter>>>,
+    /// Writer for sending notifications to the most recently connected client,
+    /// tagged with a connection ID to prevent stale disconnect handlers from
+    /// clearing a newer client's writer.
+    notification_writer: Arc<Mutex<Option<(u64, SharedWriter)>>>,
+    /// Monotonically increasing connection counter.
+    next_connection_id: AtomicU64,
 }
 
 impl IpcServer {
@@ -77,11 +85,12 @@ impl IpcServer {
         let server = Arc::new(Self {
             socket_path,
             notification_writer,
+            next_connection_id: AtomicU64::new(0),
         });
 
-        let writer_ref = server.notification_writer.clone();
+        let server_ref = server.clone();
         tokio::spawn(async move {
-            accept_loop(listener, ipc_tx, writer_ref).await;
+            accept_loop(listener, ipc_tx, server_ref).await;
         });
 
         Ok(server)
@@ -98,7 +107,7 @@ impl IpcServer {
     pub async fn send_notification(&self, method: &str, params: Value) {
         let msg = JsonRpcMessage::notification(method, params);
         let guard = self.notification_writer.lock().await;
-        if let Some(writer) = guard.as_ref() {
+        if let Some((_id, writer)) = guard.as_ref() {
             write_message(writer, &msg).await;
         } else {
             debug!(method, "No client connected, dropping notification");
@@ -117,30 +126,31 @@ impl Drop for IpcServer {
 async fn accept_loop(
     listener: UnixListener,
     ipc_tx: UnboundedSender<IpcCommand>,
-    notification_writer: Arc<Mutex<Option<SharedWriter>>>,
+    server: Arc<IpcServer>,
 ) {
     loop {
         match listener.accept().await {
             Ok((stream, _addr)) => {
                 debug!("New IPC client connected");
 
+                let conn_id = server.next_connection_id.fetch_add(1, Ordering::Relaxed);
                 let (read_half, write_half) = stream.into_split();
                 let writer = Arc::new(Mutex::new(write_half));
 
-                // Store as the notification target
-                *notification_writer.lock().await = Some(writer.clone());
+                // Store as the notification target with connection ID.
+                *server.notification_writer.lock().await = Some((conn_id, writer.clone()));
 
                 let ipc_tx = ipc_tx.clone();
-                let nw = notification_writer.clone();
+                let nw = server.notification_writer.clone();
                 tokio::spawn(async move {
                     handle_connection(read_half, writer, ipc_tx).await;
-                    // On disconnect, clear notification writer if it's still ours
-                    // (a newer connection may have replaced it)
                     debug!("IPC client disconnected");
+                    // Only clear the notification writer if it still belongs to
+                    // this connection (a newer connection may have replaced it).
                     let mut guard = nw.lock().await;
-                    // We can't compare Arc pointers easily, so just clear it.
-                    // A new connection will set a fresh writer.
-                    *guard = None;
+                    if guard.as_ref().is_some_and(|(id, _)| *id == conn_id) {
+                        *guard = None;
+                    }
                 });
             }
             Err(e) => {

@@ -191,37 +191,22 @@ impl TreeState {
         Self { root, cursor: 0, options }
     }
 
-    /// Get a reference to the root node.
-    #[allow(dead_code)]
-    pub const fn root(&self) -> &TreeNode {
-        &self.root
-    }
-
-    /// Get a mutable reference to the root node.
-    #[allow(dead_code)]
-    pub const fn root_mut(&mut self) -> &mut TreeNode {
-        &mut self.root
-    }
-
     /// Get the current cursor position.
     pub const fn cursor(&self) -> usize {
         self.cursor
     }
 
     /// Get the current sort order.
-    #[allow(dead_code)]
     pub const fn sort_order(&self) -> SortOrder {
         self.options.sort_order
     }
 
     /// Get the current sort direction.
-    #[allow(dead_code)]
     pub const fn sort_direction(&self) -> SortDirection {
         self.options.sort_direction
     }
 
     /// Get whether directories come first.
-    #[allow(dead_code)]
     pub const fn directories_first(&self) -> bool {
         self.options.directories_first
     }
@@ -336,7 +321,11 @@ impl TreeState {
             result.push(VisibleNode { node: &self.root, depth: 0 });
         }
 
-        if let Some(children) = self.root.children.as_loaded() {
+        // When show_root is enabled, respect root's is_expanded flag.
+        // When show_root is disabled, always show root's children (root is implicit).
+        if (!self.options.show_root || self.root.is_expanded)
+            && let Some(children) = self.root.children.as_loaded()
+        {
             for child in children {
                 collect_visible(child, depth_offset, &mut result);
             }
@@ -354,11 +343,14 @@ impl TreeState {
                 .map_or(0, |children| children.iter().map(count_visible).sum())
         }
 
-        let children_count = self
-            .root
-            .children
-            .as_loaded()
-            .map_or(0, |children| children.iter().map(count_visible).sum());
+        let children_count = if !self.options.show_root || self.root.is_expanded {
+            self.root
+                .children
+                .as_loaded()
+                .map_or(0, |children| children.iter().map(count_visible).sum())
+        } else {
+            0
+        };
 
         if self.options.show_root { 1 + children_count } else { children_count }
     }
@@ -410,13 +402,12 @@ impl TreeState {
         let is_loaded = matches!(node.children, ChildrenState::Loaded(_));
 
         if is_expanded && is_loaded {
-            true
-        } else if !is_expanded && is_loaded {
-            node.children = ChildrenState::NotLoaded;
-            false
-        } else {
-            false
+            return true;
         }
+        if is_loaded {
+            node.children = ChildrenState::NotLoaded;
+        }
+        false
     }
 
     /// Prepare prefetching for child directories at the given path.
@@ -548,6 +539,13 @@ impl TreeState {
         let path = vnode.node.path.clone();
         let is_dir = vnode.node.is_dir;
         let is_expanded = vnode.node.is_expanded;
+        // Pre-compute parent index to avoid a second visible_nodes() traversal.
+        let parent_idx = vnode
+            .node
+            .path
+            .parent()
+            .and_then(|pp| visible.iter().position(|vn| vn.node.path == pp));
+        drop(visible);
 
         if is_dir
             && is_expanded
@@ -557,11 +555,8 @@ impl TreeState {
             return true;
         }
 
-        // Move to parent directory
-        if let Some(parent_path) = path.parent()
-            && let Some(idx) =
-                self.visible_nodes().iter().position(|vn| vn.node.path == parent_path)
-        {
+        // Move to parent directory.
+        if let Some(idx) = parent_idx {
             self.cursor = idx;
             return true;
         }
@@ -1002,6 +997,28 @@ mod tests {
             TreeOptions { show_root: true, ..TreeOptions::default() },
         );
         verify_that!(state.visible_node_count(), eq(2))?; // root + a.txt
+        Ok(())
+    }
+
+    #[rstest]
+    fn show_root_collapsed_hides_children() -> Result<()> {
+        let root = Path::new("/test/root");
+        let mut state = TreeState::new(
+            root_with_children(vec![file_node("a.txt", root), file_node("b.txt", root)]),
+            TreeOptions { show_root: true, ..TreeOptions::default() },
+        );
+        // Initially root is expanded: root + 2 children = 3
+        verify_that!(state.visible_node_count(), eq(3))?;
+        verify_that!(state.visible_nodes().len(), eq(3))?;
+
+        // Collapse root
+        state.root.is_expanded = false;
+
+        // Only root is visible, children are hidden
+        verify_that!(state.visible_node_count(), eq(1))?;
+        let visible = state.visible_nodes();
+        verify_that!(visible.len(), eq(1))?;
+        verify_that!(visible[0].node.name.as_str(), eq("root"))?;
         Ok(())
     }
 

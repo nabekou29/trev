@@ -122,7 +122,7 @@ mod tests {
         name: &'static str,
         priority: u32,
         handles: bool,
-        #[allow(clippy::type_complexity)]
+        #[expect(clippy::type_complexity, reason = "Test helper, readability is acceptable")]
         enabled_fn: Option<Box<dyn Fn(&[&str]) -> bool + Send + Sync>>,
     }
 

@@ -107,8 +107,8 @@ pub fn build_session_state(
         cursor_path,
         selection_paths,
         selection_mode: selection_mode.copied(),
-        undo_stack: undo_stack.to_vec(),
-        redo_stack: redo_stack.to_vec(),
+        undo_stack,
+        redo_stack,
     }
 }
 

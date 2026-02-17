@@ -1,7 +1,5 @@
 //! Terminal initialization and restoration helpers.
 
-use std::io;
-
 use ratatui::DefaultTerminal;
 
 /// Initialize the terminal for TUI rendering.
@@ -19,16 +17,3 @@ pub fn restore() {
     ratatui::restore();
 }
 
-/// Install a custom panic hook that restores the terminal before panicking.
-///
-/// This ensures the terminal is always restored even if the application panics.
-#[allow(dead_code)]
-pub fn install_panic_hook() {
-    let original_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |panic_info| {
-        // Best-effort terminal restoration — ignore errors.
-        let _ = crossterm::execute!(io::stderr(), crossterm::terminal::LeaveAlternateScreen);
-        let _ = crossterm::terminal::disable_raw_mode();
-        original_hook(panic_info);
-    }));
-}

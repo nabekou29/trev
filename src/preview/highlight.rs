@@ -72,12 +72,6 @@ pub fn init_theme() {
     let _ = *AUTO_THEME;
 }
 
-/// Get a reference to the global syntax set.
-#[allow(dead_code)]
-pub fn syntax_set() -> &'static SyntaxSet {
-    &SYNTAX_SET
-}
-
 /// Highlight source code and return ratatui `Line`s.
 ///
 /// Uses the syntax set to detect language by file extension,
@@ -85,7 +79,7 @@ pub fn syntax_set() -> &'static SyntaxSet {
 pub fn highlight_lines(code: &str, extension: &str) -> Vec<Line<'static>> {
     let ss = &*SYNTAX_SET;
     // Index is safe: EmbeddedLazyThemeSet always contains all EmbeddedThemeName variants.
-    #[allow(clippy::indexing_slicing)]
+    #[expect(clippy::indexing_slicing, reason = "EmbeddedLazyThemeSet always contains all EmbeddedThemeName variants")]
     let theme = &THEME_SET[*AUTO_THEME];
 
     let syntax = ss

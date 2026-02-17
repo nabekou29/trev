@@ -46,7 +46,7 @@ impl std::fmt::Debug for ImagePreviewProvider {
 }
 
 impl PreviewProvider for ImagePreviewProvider {
-    #[allow(clippy::unnecessary_literal_bound)]
+    #[expect(clippy::unnecessary_literal_bound, reason = "Trait requires &str return")]
     fn name(&self) -> &str {
         "Image"
     }
@@ -101,11 +101,12 @@ fn load_image(path: &Path) -> anyhow::Result<image::DynamicImage> {
 }
 
 /// Render an SVG file to a `DynamicImage` using resvg.
-#[allow(
+#[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
-    clippy::float_arithmetic
+    clippy::float_arithmetic,
+    reason = "SVG rendering requires floating point math and integer casts"
 )]
 fn load_svg(path: &Path) -> anyhow::Result<image::DynamicImage> {
     let svg_data = std::fs::read(path)?;

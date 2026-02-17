@@ -7,13 +7,13 @@ use std::path::{
     Path,
     PathBuf,
 };
-use std::sync::atomic::Ordering;
 
 use super::tree::refresh_directory;
 use crate::app::state::{
     AppContext,
     AppState,
 };
+use crate::watcher::SuppressGuard;
 use crate::file_op::executor::{
     FsOp,
     execute,
@@ -173,7 +173,7 @@ fn open_copy_menu(state: &mut AppState) {
 pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState, ctx: &AppContext) {
     use crate::input::ConfirmAction;
 
-    ctx.suppressed.store(true, Ordering::SeqCst);
+    let _guard = SuppressGuard::new(&ctx.suppressed);
     let mut affected_parents: HashSet<PathBuf> = HashSet::new();
     let mut undo_ops: Vec<UndoOp> = Vec::new();
     let crate::input::ConfirmState { paths, on_confirm, .. } = confirm;
@@ -201,7 +201,6 @@ pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState,
         ConfirmAction::CustomTrash => {
             if let Err(e) = crate::file_op::trash::ensure_trash_dir() {
                 tracing::error!(%e, "failed to create trash directory");
-                ctx.suppressed.store(false, Ordering::SeqCst);
                 return;
             }
             for path in paths {
@@ -247,8 +246,6 @@ pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState,
         refresh_directory(state, parent, ctx);
     }
 
-    ctx.suppressed.store(false, Ordering::SeqCst);
-
     // Status message based on delete mode.
     if is_system_trash {
         state.set_status(format!("Moved {delete_count} item(s) to trash"));
@@ -259,7 +256,7 @@ pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState,
 
 /// Execute file/directory creation.
 pub fn execute_create(parent_dir: &Path, name: &str, state: &mut AppState, ctx: &AppContext) {
-    ctx.suppressed.store(true, Ordering::SeqCst);
+    let _guard = SuppressGuard::new(&ctx.suppressed);
     let new_path = parent_dir.join(name);
 
     // Trailing "/" means create a directory.
@@ -273,7 +270,6 @@ pub fn execute_create(parent_dir: &Path, name: &str, state: &mut AppState, ctx: 
             let mkdir_op = FsOp::CreateDir { path: parent.to_path_buf() };
             if let Err(e) = execute(&mkdir_op) {
                 tracing::error!(%e, "failed to create parent directories");
-                ctx.suppressed.store(false, Ordering::SeqCst);
                 return;
             }
         }
@@ -282,7 +278,6 @@ pub fn execute_create(parent_dir: &Path, name: &str, state: &mut AppState, ctx: 
 
     if let Err(e) = execute(&op) {
         tracing::error!(%e, "failed to create file/directory");
-        ctx.suppressed.store(false, Ordering::SeqCst);
         return;
     }
 
@@ -293,15 +288,13 @@ pub fn execute_create(parent_dir: &Path, name: &str, state: &mut AppState, ctx: 
             .push(OpGroup { description: format!("Create {name}"), ops: vec![undo_op] });
     }
 
-    ctx.suppressed.store(false, Ordering::SeqCst);
-
     // Refresh the parent directory in the tree.
     refresh_directory(state, parent_dir, ctx);
 }
 
 /// Execute file/directory rename.
 pub fn execute_rename(target: &Path, new_name: &str, state: &mut AppState, ctx: &AppContext) {
-    ctx.suppressed.store(true, Ordering::SeqCst);
+    let _guard = SuppressGuard::new(&ctx.suppressed);
     let parent = target.parent().unwrap_or_else(|| Path::new(""));
     let new_path = parent.join(new_name);
 
@@ -309,7 +302,6 @@ pub fn execute_rename(target: &Path, new_name: &str, state: &mut AppState, ctx: 
 
     if let Err(e) = execute(&op) {
         tracing::error!(%e, "failed to rename");
-        ctx.suppressed.store(false, Ordering::SeqCst);
         return;
     }
 
@@ -319,8 +311,6 @@ pub fn execute_rename(target: &Path, new_name: &str, state: &mut AppState, ctx: 
             .undo_history
             .push(OpGroup { description: format!("Rename to {new_name}"), ops: vec![undo_op] });
     }
-
-    ctx.suppressed.store(false, Ordering::SeqCst);
 
     // Refresh the parent directory in the tree.
     refresh_directory(state, parent, ctx);
@@ -338,7 +328,7 @@ fn execute_paste(state: &mut AppState, ctx: &AppContext) {
         return;
     }
 
-    ctx.suppressed.store(true, Ordering::SeqCst);
+    let _guard = SuppressGuard::new(&ctx.suppressed);
 
     let Some(info) = state.tree_state.current_node_info() else {
         return;
@@ -408,8 +398,6 @@ fn execute_paste(state: &mut AppState, ctx: &AppContext) {
         });
     }
 
-    ctx.suppressed.store(false, Ordering::SeqCst);
-
     // Refresh destination directory.
     refresh_directory(state, &dst_dir, ctx);
 
@@ -445,16 +433,16 @@ fn execute_undo(state: &mut AppState, ctx: &AppContext) {
         }
     };
 
-    ctx.suppressed.store(true, Ordering::SeqCst);
-    for op in &reverse_ops {
-        if let Err(e) = execute(op) {
-            tracing::error!(%e, "undo operation failed");
-            ctx.suppressed.store(false, Ordering::SeqCst);
-            state.set_status(format!("Undo failed: {e}"));
-            return;
+    {
+        let _guard = SuppressGuard::new(&ctx.suppressed);
+        for op in &reverse_ops {
+            if let Err(e) = execute(op) {
+                tracing::error!(%e, "undo operation failed");
+                state.set_status(format!("Undo failed: {e}"));
+                return;
+            }
         }
     }
-    ctx.suppressed.store(false, Ordering::SeqCst);
 
     // Refresh affected directories.
     let parents = collect_affected_parents(&reverse_ops);
@@ -486,16 +474,16 @@ fn execute_redo(state: &mut AppState, ctx: &AppContext) {
         }
     };
 
-    ctx.suppressed.store(true, Ordering::SeqCst);
-    for op in &forward_ops {
-        if let Err(e) = execute(op) {
-            tracing::error!(%e, "redo operation failed");
-            ctx.suppressed.store(false, Ordering::SeqCst);
-            state.set_status(format!("Redo failed: {e}"));
-            return;
+    {
+        let _guard = SuppressGuard::new(&ctx.suppressed);
+        for op in &forward_ops {
+            if let Err(e) = execute(op) {
+                tracing::error!(%e, "redo operation failed");
+                state.set_status(format!("Redo failed: {e}"));
+                return;
+            }
         }
     }
-    ctx.suppressed.store(false, Ordering::SeqCst);
 
     // Refresh affected directories.
     let parents = collect_affected_parents(&forward_ops);

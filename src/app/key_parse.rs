@@ -114,61 +114,6 @@ pub fn parse_key_expanded(s: &str) -> Result<Vec<KeyBinding>, String> {
     Ok(vec![(code, modifiers)])
 }
 
-/// Format a key binding as a Vim-style string.
-#[allow(dead_code)]
-pub fn format_key(code: KeyCode, modifiers: KeyModifiers) -> String {
-    // Simple character without modifiers.
-    if let KeyCode::Char(c) = code
-        && (modifiers == KeyModifiers::NONE
-            || (modifiers == KeyModifiers::SHIFT && c.is_ascii_uppercase()))
-    {
-        return c.to_string();
-    }
-
-    // Build <...> notation.
-    let mut parts = String::from("<");
-    if modifiers.contains(KeyModifiers::CONTROL) {
-        parts.push_str("C-");
-    }
-    if modifiers.contains(KeyModifiers::ALT) {
-        parts.push_str("A-");
-    }
-    if modifiers.contains(KeyModifiers::SHIFT) {
-        parts.push_str("S-");
-    }
-
-    match code {
-        KeyCode::Char(' ') => parts.push_str("Space"),
-        KeyCode::Char(c) => parts.push(c),
-        KeyCode::Enter => parts.push_str("CR"),
-        KeyCode::Esc => parts.push_str("Esc"),
-        KeyCode::Backspace => parts.push_str("BS"),
-        KeyCode::Tab => parts.push_str("Tab"),
-        KeyCode::BackTab => parts.push_str("S-Tab"),
-        KeyCode::Delete => parts.push_str("Del"),
-        KeyCode::Insert => parts.push_str("Ins"),
-        KeyCode::Home => parts.push_str("Home"),
-        KeyCode::End => parts.push_str("End"),
-        KeyCode::PageUp => parts.push_str("PageUp"),
-        KeyCode::PageDown => parts.push_str("PageDown"),
-        KeyCode::Up => parts.push_str("Up"),
-        KeyCode::Down => parts.push_str("Down"),
-        KeyCode::Left => parts.push_str("Left"),
-        KeyCode::Right => parts.push_str("Right"),
-        KeyCode::F(n) => {
-            parts.push('F');
-            parts.push_str(&n.to_string());
-        }
-        _ => {
-            use std::fmt::Write;
-            let _ = write!(parts, "{code:?}");
-        }
-    }
-
-    parts.push('>');
-    parts
-}
-
 /// Parse a special key name (case-insensitive).
 fn parse_key_name(s: &str) -> Result<KeyCode, String> {
     match s.to_lowercase().as_str() {
@@ -341,19 +286,4 @@ mod tests {
         assert_that!(bindings.len(), eq(1));
     }
 
-    // --- format_key ---
-
-    #[rstest]
-    #[case(KeyCode::Char('a'), KeyModifiers::NONE, "a")]
-    #[case(KeyCode::Char('G'), KeyModifiers::SHIFT, "G")]
-    #[case(KeyCode::Char('a'), KeyModifiers::CONTROL, "<C-a>")]
-    #[case(KeyCode::Enter, KeyModifiers::NONE, "<CR>")]
-    #[case(KeyCode::F(1), KeyModifiers::ALT, "<A-F1>")]
-    fn format_key_display(
-        #[case] code: KeyCode,
-        #[case] mods: KeyModifiers,
-        #[case] expected: &str,
-    ) {
-        assert_that!(format_key(code, mods).as_str(), eq(expected));
-    }
 }

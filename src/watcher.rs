@@ -27,6 +27,28 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::config::WatcherConfig;
 
+/// RAII guard that sets a shared `AtomicBool` to `true` on creation
+/// and resets it to `false` on drop.
+///
+/// Used to suppress file system watcher events during self-initiated
+/// file operations (create, delete, rename, paste, undo, redo).
+#[derive(Debug)]
+pub struct SuppressGuard(Arc<AtomicBool>);
+
+impl SuppressGuard {
+    /// Activate suppression. The flag is set to `true` immediately.
+    pub fn new(flag: &Arc<AtomicBool>) -> Self {
+        flag.store(true, Ordering::SeqCst);
+        Self(Arc::clone(flag))
+    }
+}
+
+impl Drop for SuppressGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// File system change watcher with debouncing and self-operation suppression.
 pub struct FsWatcher {
     /// Debounced file watcher (kept alive for the watcher lifetime).

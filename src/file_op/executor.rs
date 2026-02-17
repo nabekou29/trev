@@ -54,22 +54,6 @@ pub enum FsOp {
     },
 }
 
-/// An irreversible file system operation (cannot be undone).
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IrreversibleOp {
-    /// Send to OS system trash.
-    SystemTrash {
-        /// Path to trash.
-        path: PathBuf,
-    },
-    /// Permanently delete.
-    PermanentDelete {
-        /// Path to delete.
-        path: PathBuf,
-    },
-}
-
 /// Execute a single reversible file system operation.
 pub fn execute(op: &FsOp) -> Result<()> {
     match op {
@@ -148,6 +132,12 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+/// OS error code for cross-device link (EXDEV).
+///
+/// `rename(2)` fails with EXDEV when source and destination are on
+/// different filesystems.  Value is 18 on both Linux and macOS.
+const EXDEV: i32 = 18;
+
 /// Move a file or directory, with cross-filesystem fallback.
 fn move_path(src: &Path, dst: &Path) -> Result<()> {
     // Try rename first (atomic on same filesystem).
@@ -155,8 +145,7 @@ fn move_path(src: &Path, dst: &Path) -> Result<()> {
         Ok(()) => Ok(()),
         Err(e) => {
             // Cross-filesystem: copy then remove.
-            // EXDEV = 18 on Linux/macOS (cross-device link).
-            if e.raw_os_error() == Some(18) {
+            if e.raw_os_error() == Some(EXDEV) {
                 copy_path(src, dst)?;
                 if src.is_dir() {
                     std::fs::remove_dir_all(src).with_context(|| {

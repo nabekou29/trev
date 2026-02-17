@@ -149,7 +149,7 @@ fn handle_notify_action(method: &str, state: &AppState, ctx: &AppContext) {
 /// - `{dir}` — directory path (self for dirs, parent for files)
 /// - `{name}` — file name (basename)
 /// - `{root}` — workspace root path
-#[allow(clippy::literal_string_with_formatting_args)]
+#[expect(clippy::literal_string_with_formatting_args, reason = "Uses {path}/{dir}/{name}/{root} as template placeholders, not format args")]
 fn expand_shell_template(
     template: &str,
     tree_state: &crate::state::tree::TreeState,

@@ -94,7 +94,6 @@ pub enum PreviewAction {
     /// Scroll preview content left.
     ScrollLeft,
     /// Scroll preview half a page down.
-    #[allow(dead_code)]
     HalfPageDown,
     /// Scroll preview half a page up.
     HalfPageUp,

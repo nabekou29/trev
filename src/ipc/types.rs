@@ -12,17 +12,11 @@ use tokio::sync::oneshot;
 /// JSON-RPC 2.0 error code: Parse error.
 pub const PARSE_ERROR: i64 = -32700;
 
-/// JSON-RPC 2.0 error code: Invalid request.
-pub const INVALID_REQUEST: i64 = -32600;
-
 /// JSON-RPC 2.0 error code: Method not found.
 pub const METHOD_NOT_FOUND: i64 = -32601;
 
 /// JSON-RPC 2.0 error code: Invalid params.
 pub const INVALID_PARAMS: i64 = -32602;
-
-/// JSON-RPC 2.0 error code: Internal error.
-pub const INTERNAL_ERROR: i64 = -32603;
 
 /// JSON-RPC 2.0 error object.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

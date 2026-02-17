@@ -83,7 +83,7 @@ async fn handle_ctl(
             .await?;
 
     // Print result for the user.
-    #[allow(clippy::print_stdout)]
+    #[expect(clippy::print_stdout, reason = "CLI output to stdout is intentional")]
     if let Some(result) = response.get("result") {
         println!("{result}");
     } else if let Some(error) = response.get("error") {
@@ -94,7 +94,7 @@ async fn handle_ctl(
 }
 
 /// List socket paths of running daemons.
-#[allow(clippy::print_stdout)]
+#[expect(clippy::print_stdout, reason = "CLI output to stdout is intentional")]
 fn handle_socket_path(workspace: Option<&str>) -> Result<()> {
     let runtime_dir = trev::ipc::paths::runtime_dir();
     if !runtime_dir.is_dir() {
@@ -128,7 +128,7 @@ fn handle_socket_path(workspace: Option<&str>) -> Result<()> {
 }
 
 /// Print JSON Schema for the configuration file to stdout.
-#[allow(clippy::print_stdout)]
+#[expect(clippy::print_stdout, reason = "CLI output to stdout is intentional")]
 fn handle_schema() -> Result<()> {
     let schema = trev::config::Config::generate_schema();
     let json = serde_json::to_string_pretty(&schema)?;

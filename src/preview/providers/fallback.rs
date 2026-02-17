@@ -25,7 +25,7 @@ impl FallbackProvider {
 }
 
 impl PreviewProvider for FallbackProvider {
-    #[allow(clippy::unnecessary_literal_bound)]
+    #[expect(clippy::unnecessary_literal_bound, reason = "Trait requires &str return")]
     fn name(&self) -> &str {
         "Fallback"
     }

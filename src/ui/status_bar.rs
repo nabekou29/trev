@@ -22,7 +22,7 @@ use crate::file_op::selection::SelectionMode;
 /// Render the status bar into the given area.
 ///
 /// Layout: `[indicators] [message or path] ... [position]`
-#[allow(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_possible_truncation, reason = "Terminal dimensions fit in u16")]
 pub fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let base_style = Style::default().bg(Color::DarkGray).fg(Color::White);
 

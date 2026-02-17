@@ -64,7 +64,6 @@ impl TreeBuilder {
     }
 
     /// Load immediate children of a directory (depth=1).
-    #[allow(clippy::unnecessary_wraps)]
     pub fn load_children(&self, dir_path: &Path) -> Result<Vec<TreeNode>> {
         let mut children = Vec::new();
 

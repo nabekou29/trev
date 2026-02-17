@@ -15,7 +15,7 @@ use crate::config::{
 /// Fast TUI file viewer with tree view and Neovim integration.
 #[derive(Debug, Parser)]
 #[command(name = "trev", version, about)]
-#[allow(clippy::struct_excessive_bools)]
+#[expect(clippy::struct_excessive_bools, reason = "CLI flags are naturally boolean")]
 pub struct Args {
     /// Directory to open.
     #[arg(default_value = ".")]
