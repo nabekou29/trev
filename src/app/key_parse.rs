@@ -86,6 +86,12 @@ fn parse_angle_bracket(inner: &str) -> Result<KeyBinding, String> {
     }
 
     let code = parse_key_name(remaining)?;
+
+    // S-Tab → BackTab (terminals send BackTab for Shift+Tab).
+    if code == KeyCode::Tab && modifiers.contains(KeyModifiers::SHIFT) {
+        return Ok((KeyCode::BackTab, modifiers));
+    }
+
     Ok((code, modifiers))
 }
 
@@ -138,6 +144,7 @@ pub fn format_key(code: KeyCode, modifiers: KeyModifiers) -> String {
         KeyCode::Esc => parts.push_str("Esc"),
         KeyCode::Backspace => parts.push_str("BS"),
         KeyCode::Tab => parts.push_str("Tab"),
+        KeyCode::BackTab => parts.push_str("S-Tab"),
         KeyCode::Delete => parts.push_str("Del"),
         KeyCode::Insert => parts.push_str("Ins"),
         KeyCode::Home => parts.push_str("Home"),

@@ -99,7 +99,9 @@ pub enum PreviewAction {
     /// Scroll preview half a page up.
     HalfPageUp,
     /// Cycle to the next available preview provider.
-    CycleProvider,
+    CycleNextProvider,
+    /// Cycle to the previous available preview provider.
+    CyclePrevProvider,
     /// Toggle preview panel visibility.
     TogglePreview,
 }
@@ -138,7 +140,8 @@ impl fmt::Display for PreviewAction {
             Self::ScrollLeft => "preview.scroll_left",
             Self::HalfPageDown => "preview.half_page_down",
             Self::HalfPageUp => "preview.half_page_up",
-            Self::CycleProvider => "preview.cycle_provider",
+            Self::CycleNextProvider => "preview.cycle_next_provider",
+            Self::CyclePrevProvider => "preview.cycle_prev_provider",
             Self::TogglePreview => "preview.toggle_preview",
         };
         f.write_str(s)
@@ -217,7 +220,8 @@ impl FromStr for PreviewAction {
             "preview.scroll_left" => Ok(Self::ScrollLeft),
             "preview.half_page_down" => Ok(Self::HalfPageDown),
             "preview.half_page_up" => Ok(Self::HalfPageUp),
-            "preview.cycle_provider" => Ok(Self::CycleProvider),
+            "preview.cycle_next_provider" => Ok(Self::CycleNextProvider),
+            "preview.cycle_prev_provider" => Ok(Self::CyclePrevProvider),
             "preview.toggle_preview" => Ok(Self::TogglePreview),
             _ => Err(format!("unknown preview action: {s}")),
         }
@@ -332,7 +336,8 @@ mod tests {
             PreviewAction::ScrollLeft,
             PreviewAction::HalfPageDown,
             PreviewAction::HalfPageUp,
-            PreviewAction::CycleProvider,
+            PreviewAction::CycleNextProvider,
+            PreviewAction::CyclePrevProvider,
             PreviewAction::TogglePreview,
         ];
         for action in actions {

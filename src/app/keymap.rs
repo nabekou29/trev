@@ -181,7 +181,8 @@ impl KeyMap {
         self.bind(KeyCode::Char('H'), KeyModifiers::NONE, Action::Preview(PreviewAction::ScrollLeft));
         self.bind(KeyCode::Char('U'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::HalfPageUp));
         self.bind(KeyCode::Char('U'), KeyModifiers::NONE, Action::Preview(PreviewAction::HalfPageUp));
-        self.bind(KeyCode::Tab, KeyModifiers::NONE, Action::Preview(PreviewAction::CycleProvider));
+        self.bind(KeyCode::Tab, KeyModifiers::NONE, Action::Preview(PreviewAction::CycleNextProvider));
+        self.bind(KeyCode::BackTab, KeyModifiers::SHIFT, Action::Preview(PreviewAction::CyclePrevProvider));
         self.bind(KeyCode::Char('P'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::TogglePreview));
         self.bind(KeyCode::Char('P'), KeyModifiers::NONE, Action::Preview(PreviewAction::TogglePreview));
     }

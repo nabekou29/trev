@@ -91,7 +91,8 @@ trev schema               # Print config JSON Schema
 | `L` | Scroll preview right |
 | `H` | Scroll preview left |
 | `U` | Half page up in preview |
-| `Tab` | Cycle preview provider |
+| `Tab` | Next preview provider |
+| `Shift+Tab` | Previous preview provider |
 | `P` | Toggle preview |
 
 ### Display
@@ -228,7 +229,7 @@ keybindings:
 
 **Shell command variables**: `{path}`, `{dir}`, `{name}`, `{root}`
 
-**Available actions**: `quit`, `tree.move_down`, `tree.move_up`, `tree.expand`, `tree.collapse`, `tree.toggle_expand`, `tree.jump_first`, `tree.jump_last`, `tree.half_page_down`, `tree.half_page_up`, `tree.expand_all`, `tree.collapse_all`, `tree.toggle_hidden`, `tree.toggle_ignored`, `preview.scroll_down`, `preview.scroll_up`, `preview.scroll_right`, `preview.scroll_left`, `preview.half_page_down`, `preview.half_page_up`, `preview.cycle_provider`, `preview.toggle_preview`, `file_op.yank`, `file_op.cut`, `file_op.paste`, `file_op.create_file`, `file_op.rename`, `file_op.delete`, `file_op.system_trash`, `file_op.undo`, `file_op.redo`, `file_op.toggle_mark`, `file_op.clear_selections`, `file_op.copy_menu`
+**Available actions**: `quit`, `tree.move_down`, `tree.move_up`, `tree.expand`, `tree.collapse`, `tree.toggle_expand`, `tree.jump_first`, `tree.jump_last`, `tree.half_page_down`, `tree.half_page_up`, `tree.expand_all`, `tree.collapse_all`, `tree.toggle_hidden`, `tree.toggle_ignored`, `preview.scroll_down`, `preview.scroll_up`, `preview.scroll_right`, `preview.scroll_left`, `preview.half_page_down`, `preview.half_page_up`, `preview.cycle_next_provider`, `preview.cycle_prev_provider`, `preview.toggle_preview`, `file_op.yank`, `file_op.cut`, `file_op.paste`, `file_op.create_file`, `file_op.rename`, `file_op.delete`, `file_op.system_trash`, `file_op.undo`, `file_op.redo`, `file_op.toggle_mark`, `file_op.clear_selections`, `file_op.copy_menu`
 
 ## Neovim Integration
 

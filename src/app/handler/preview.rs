@@ -46,8 +46,13 @@ pub fn handle_preview_action(
         PreviewAction::HalfPageUp => {
             state.preview_state.scroll_up(viewport_height / 2);
         }
-        PreviewAction::CycleProvider => {
-            if state.preview_state.cycle_provider() {
+        PreviewAction::CycleNextProvider => {
+            if state.preview_state.cycle_next_provider() {
+                reload_preview(state, ctx);
+            }
+        }
+        PreviewAction::CyclePrevProvider => {
+            if state.preview_state.cycle_prev_provider() {
                 reload_preview(state, ctx);
             }
         }
@@ -78,7 +83,7 @@ pub fn trigger_preview(state: &mut AppState, ctx: &AppContext) {
 
 /// Reload the current file with the (already-cycled) provider.
 ///
-/// Preserves the provider index set by `cycle_provider()`.
+/// Preserves the provider index set by `cycle_next_provider()`/`cycle_prev_provider()`.
 fn reload_preview(state: &mut AppState, ctx: &AppContext) {
     let Some((path, providers)) = resolve_preview_providers(state) else {
         return;

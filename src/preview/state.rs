@@ -112,12 +112,26 @@ impl PreviewState {
     /// Cycle to the next available provider (wrap-around).
     ///
     /// Returns `true` if the provider changed.
-    pub const fn cycle_provider(&mut self) -> bool {
+    pub const fn cycle_next_provider(&mut self) -> bool {
         if self.available_providers.len() <= 1 {
             return false;
         }
         self.active_provider_index =
             (self.active_provider_index + 1) % self.available_providers.len();
+        self.scroll_row = 0;
+        self.scroll_col = 0;
+        true
+    }
+
+    /// Cycle to the previous available provider (wrap-around).
+    ///
+    /// Returns `true` if the provider changed.
+    pub const fn cycle_prev_provider(&mut self) -> bool {
+        if self.available_providers.len() <= 1 {
+            return false;
+        }
+        let len = self.available_providers.len();
+        self.active_provider_index = (self.active_provider_index + len - 1) % len;
         self.scroll_row = 0;
         self.scroll_col = 0;
         true
@@ -199,9 +213,9 @@ mod tests {
         state.set_available_providers(vec!["Image".to_string(), "Text".to_string()]);
 
         assert_that!(state.active_provider_index, eq(0));
-        assert_that!(state.cycle_provider(), eq(true));
+        assert_that!(state.cycle_next_provider(), eq(true));
         assert_that!(state.active_provider_index, eq(1));
-        assert_that!(state.cycle_provider(), eq(true));
+        assert_that!(state.cycle_next_provider(), eq(true));
         assert_that!(state.active_provider_index, eq(0));
     }
 
@@ -210,7 +224,28 @@ mod tests {
         let mut state = PreviewState::new();
         state.set_available_providers(vec!["Text".to_string()]);
 
-        assert_that!(state.cycle_provider(), eq(false));
+        assert_that!(state.cycle_next_provider(), eq(false));
+        assert_that!(state.active_provider_index, eq(0));
+    }
+
+    #[rstest]
+    fn cycle_prev_provider_wraps_around() {
+        let mut state = PreviewState::new();
+        state.set_available_providers(vec!["Image".to_string(), "Text".to_string()]);
+
+        assert_that!(state.active_provider_index, eq(0));
+        assert_that!(state.cycle_prev_provider(), eq(true));
+        assert_that!(state.active_provider_index, eq(1));
+        assert_that!(state.cycle_prev_provider(), eq(true));
+        assert_that!(state.active_provider_index, eq(0));
+    }
+
+    #[rstest]
+    fn cycle_prev_provider_single_provider_no_change() {
+        let mut state = PreviewState::new();
+        state.set_available_providers(vec!["Text".to_string()]);
+
+        assert_that!(state.cycle_prev_provider(), eq(false));
         assert_that!(state.active_provider_index, eq(0));
     }
 
@@ -220,7 +255,7 @@ mod tests {
         state.set_available_providers(vec!["Image".to_string(), "Text".to_string()]);
 
         assert_that!(state.active_provider_name(), some(eq("Image")));
-        state.cycle_provider();
+        state.cycle_next_provider();
         assert_that!(state.active_provider_name(), some(eq("Text")));
     }
 }
