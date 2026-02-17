@@ -160,11 +160,37 @@ fn handle_expand_all(state: &mut AppState, ctx: &AppContext) {
 }
 
 /// Handle collapse-all: collapse the subtree under cursor.
+///
+/// If the cursor is on a file or a collapsed directory, collapses the parent
+/// directory instead. Moves the cursor to the collapsed directory afterwards.
 fn handle_collapse_all(state: &mut AppState) {
-    let Some(dir_path) = state.tree_state.cursor_dir_path() else {
+    let Some(info) = state.tree_state.current_node_info() else {
         return;
     };
+
+    // Determine which directory to collapse:
+    // - Expanded directory → collapse it directly
+    // - File or collapsed directory → collapse the parent
+    let is_expanded_dir = info.is_dir
+        && state
+            .tree_state
+            .visible_nodes()
+            .get(state.tree_state.cursor())
+            .is_some_and(|vn| vn.node.is_expanded);
+
+    let dir_path = if is_expanded_dir {
+        info.path
+    } else {
+        let Some(parent) = info.path.parent() else {
+            return;
+        };
+        parent.to_path_buf()
+    };
+
     let collapsed = state.tree_state.collapse_subtree(&dir_path);
+
+    // Move cursor to the collapsed directory.
+    state.tree_state.move_cursor_to_path(&dir_path);
 
     // Unwatch collapsed directories.
     for path in &collapsed {
