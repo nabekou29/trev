@@ -356,6 +356,10 @@ impl TreeState {
         crate::tree::sort::sort_children(&mut children, order, direction, dirs_first);
 
         if let Some(node) = self.find_node_mut(path) {
+            // Preserve expansion state and loaded children from old nodes.
+            if let Some(old_children) = node.children.as_loaded_mut() {
+                transfer_expansion_state(old_children, &mut children);
+            }
             node.children = ChildrenState::Loaded(children);
             if auto_expand {
                 node.is_expanded = true;
@@ -758,6 +762,21 @@ fn collapse_subtree_recursive(node: &mut TreeNode, collapsed: &mut Vec<PathBuf>)
     }
 }
 
+/// Transfer expansion state from old children to new children.
+///
+/// For each new directory node that also existed in the old list (matched by path),
+/// copies `is_expanded` and `children` from the old node to preserve the user's
+/// expand/collapse state across directory refreshes (e.g., after file deletion).
+fn transfer_expansion_state(old_children: &mut Vec<TreeNode>, new_children: &mut [TreeNode]) {
+    for new_child in new_children.iter_mut().filter(|c| c.is_dir) {
+        if let Some(old_idx) = old_children.iter().position(|old| old.path == new_child.path) {
+            let old_child = old_children.swap_remove(old_idx);
+            new_child.is_expanded = old_child.is_expanded;
+            new_child.children = old_child.children;
+        }
+    }
+}
+
 /// Recursively search for a node by path.
 fn find_node_recursive<'a>(node: &'a mut TreeNode, path: &Path) -> Option<&'a mut TreeNode> {
     node.children.as_loaded_mut()?.iter_mut().find_map(|child| {
@@ -957,6 +976,50 @@ mod tests {
         // subdir + 2 children
         verify_that!(visible.len(), eq(3))?;
         verify_that!(visible[0].node.name.as_str(), eq("subdir"))?;
+        Ok(())
+    }
+
+    #[rstest]
+    fn set_children_preserves_expansion_state_of_existing_dirs() -> Result<()> {
+        let root = Path::new("/test/root");
+        let parent_path = root.join("parent");
+
+        // Build parent with an expanded subdirectory containing a loaded child.
+        let inner_path = parent_path.join("inner");
+        let mut inner = dir_node("inner", &parent_path, vec![file_node("deep.txt", &inner_path)]);
+        inner.is_expanded = true;
+
+        let mut parent = dir_node(
+            "parent",
+            root,
+            vec![inner, file_node("old_file.txt", &parent_path)],
+        );
+        parent.is_expanded = true;
+
+        let mut state = state_with_children(vec![parent]);
+        // Before: parent, inner, deep.txt, old_file.txt = 4 visible.
+        verify_that!(state.visible_node_count(), eq(4))?;
+
+        // Simulate refresh: new children list (old_file deleted, inner still exists).
+        let new_inner = TreeNode {
+            name: "inner".to_string(),
+            path: parent_path.join("inner"),
+            is_dir: true,
+            is_symlink: false,
+            size: 0,
+            modified: None,
+            children: ChildrenState::NotLoaded,
+            is_expanded: false,
+        };
+        state.set_children(&parent_path, vec![new_inner], true);
+
+        // inner should still be expanded with its loaded children preserved.
+        let visible = state.visible_nodes();
+        // parent, inner, deep.txt = 3 (old_file.txt removed).
+        verify_that!(visible.len(), eq(3))?;
+        verify_that!(visible[1].node.name.as_str(), eq("inner"))?;
+        verify_that!(visible[1].node.is_expanded, eq(true))?;
+        verify_that!(visible[2].node.name.as_str(), eq("deep.txt"))?;
         Ok(())
     }
 
