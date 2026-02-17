@@ -86,6 +86,7 @@ mod tests {
         LoadContext {
             max_lines: 1000,
             max_bytes: 10 * 1024 * 1024,
+
             cancel_token: CancellationToken::new(),
         }
     }

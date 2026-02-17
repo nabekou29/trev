@@ -161,9 +161,8 @@ mod tests {
     use googletest::prelude::*;
     use rstest::*;
 
-    use crate::config::Priority;
-
     use super::*;
+    use crate::config::Priority;
 
     fn make_echo_provider() -> ExternalCmdProvider {
         ExternalCmdProvider::new(
@@ -283,6 +282,7 @@ mod tests {
         let ctx = LoadContext {
             max_lines: 1000,
             max_bytes: 10_000_000,
+
             cancel_token: tokio_util::sync::CancellationToken::new(),
         };
 
@@ -296,6 +296,7 @@ mod tests {
         let ctx = LoadContext {
             max_lines: 1000,
             max_bytes: 10_000_000,
+
             cancel_token: tokio_util::sync::CancellationToken::new(),
         };
         ctx.cancel_token.cancel();

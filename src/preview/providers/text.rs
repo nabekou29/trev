@@ -132,6 +132,7 @@ mod tests {
         LoadContext {
             max_lines: 1000,
             max_bytes: 10 * 1024 * 1024,
+
             cancel_token: CancellationToken::new(),
         }
     }
@@ -243,6 +244,7 @@ mod tests {
         let ctx = LoadContext {
             max_lines: 10,
             max_bytes: 10 * 1024 * 1024,
+
             cancel_token: CancellationToken::new(),
         };
 
@@ -271,6 +273,7 @@ mod tests {
         let ctx = LoadContext {
             max_lines: 10000,
             max_bytes: 200, // very small byte limit
+
             cancel_token: CancellationToken::new(),
         };
 
@@ -293,6 +296,7 @@ mod tests {
         let ctx = LoadContext {
             max_lines: 1000,
             max_bytes: 10 * 1024 * 1024,
+
             cancel_token: CancellationToken::new(),
         };
         ctx.cancel_token.cancel();
