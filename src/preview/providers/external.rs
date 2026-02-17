@@ -308,6 +308,6 @@ mod tests {
     #[rstest]
     fn priority_uses_config_value() {
         let provider = make_echo_provider();
-        assert_that!(provider.priority(), eq(Priority::HIGH.value()));
+        assert_that!(provider.priority(), eq(Priority::MID.value()));
     }
 }

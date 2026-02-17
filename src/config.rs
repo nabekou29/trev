@@ -247,7 +247,7 @@ pub struct ExternalCommand {
     /// Whether this command handles directories.
     #[serde(default)]
     pub directories: bool,
-    /// Priority for ordering (lower = higher priority, default: 0).
+    /// Priority for ordering (lower = higher priority, default: 100).
     ///
     /// Accepts a number or a named constant: `high` (0), `mid` (100), `low` (1000).
     #[serde(default)]
@@ -262,16 +262,16 @@ pub struct ExternalCommand {
 /// Preview provider priority.
 ///
 /// Can be specified as a raw number or a named constant in YAML:
-/// - `high`: 0 (default for external commands)
-/// - `mid`: 100 (same as built-in providers like Image, Text)
+/// - `high`: 0
+/// - `mid`: 100 (default)
 /// - `low`: 1000 (same as fallback provider)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Priority(pub u32);
 
 impl Priority {
-    /// High priority (default for external commands).
+    /// High priority.
     pub const HIGH: Self = Self(0);
-    /// Medium priority (built-in providers like Image, Text).
+    /// Medium priority (default).
     pub const MID: Self = Self(100);
     /// Low priority (fallback provider).
     pub const LOW: Self = Self(1000);
@@ -284,7 +284,7 @@ impl Priority {
 
 impl Default for Priority {
     fn default() -> Self {
-        Self::HIGH
+        Self::MID
     }
 }
 
@@ -338,7 +338,7 @@ impl JsonSchema for Priority {
     fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "description": "Priority for ordering (lower = higher priority). Number or named constant: high (0), mid (100), low (1000)",
-            "default": 0,
+            "default": 100,
             "anyOf": [
                 { "type": "integer", "minimum": 0 },
                 { "type": "string", "enum": ["high", "mid", "low"] }
