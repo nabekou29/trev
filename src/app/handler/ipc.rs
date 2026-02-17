@@ -46,8 +46,7 @@ mod tests {
     use crate::preview::providers::fallback::FallbackProvider;
     use crate::preview::state::PreviewState;
     use crate::state::tree::{
-        SortDirection,
-        SortOrder,
+        TreeOptions,
         TreeState,
     };
     use crate::tree::builder::TreeBuilder;
@@ -56,12 +55,7 @@ mod tests {
     fn test_state(root: &std::path::Path) -> AppState {
         let builder = TreeBuilder::new(true, true);
         let root_node = builder.build(root).unwrap();
-        let tree_state = TreeState::new(
-            root_node,
-            SortOrder::default(),
-            SortDirection::default(),
-            true,
-        );
+        let tree_state = TreeState::new(root_node, TreeOptions::default());
         let registry = PreviewRegistry::new(vec![
             Arc::new(FallbackProvider::new()),
         ])

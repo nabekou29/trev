@@ -192,7 +192,13 @@ fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
         return;
     };
 
-    let mut new_tree = TreeState::new(root, order, direction, dirs_first);
+    let options = crate::state::tree::TreeOptions {
+        sort_order: order,
+        sort_direction: direction,
+        directories_first: dirs_first,
+        show_root: state.tree_state.show_root(),
+    };
+    let mut new_tree = TreeState::new(root, options);
 
     // Re-expand directories (shortest paths first so parents load before children).
     let mut sorted_expanded = expanded;

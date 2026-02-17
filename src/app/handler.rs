@@ -185,9 +185,8 @@ mod tests {
 
     use crate::state::tree::{
         ChildrenState,
-        SortDirection,
-        SortOrder,
         TreeNode,
+        TreeOptions,
         TreeState,
     };
 
@@ -214,7 +213,7 @@ mod tests {
             is_expanded: true,
         };
         let mut state =
-            TreeState::new(root_node, SortOrder::default(), SortDirection::default(), true);
+            TreeState::new(root_node, TreeOptions::default());
         state.move_cursor_to(0);
         state
     }
@@ -242,7 +241,7 @@ mod tests {
             is_expanded: true,
         };
         let mut state =
-            TreeState::new(root_node, SortOrder::default(), SortDirection::default(), true);
+            TreeState::new(root_node, TreeOptions::default());
         state.move_cursor_to(0);
         state
     }

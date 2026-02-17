@@ -118,6 +118,30 @@ pub struct NodeInfo {
     pub modified: Option<SystemTime>,
 }
 
+/// Configuration options for tree display and sorting.
+#[derive(Debug, Clone, Copy)]
+pub struct TreeOptions {
+    /// Current sort order.
+    pub sort_order: SortOrder,
+    /// Current sort direction.
+    pub sort_direction: SortDirection,
+    /// Whether directories should appear before files.
+    pub directories_first: bool,
+    /// Whether the root directory itself is shown as a tree node.
+    pub show_root: bool,
+}
+
+impl Default for TreeOptions {
+    fn default() -> Self {
+        Self {
+            sort_order: SortOrder::default(),
+            sort_direction: SortDirection::default(),
+            directories_first: true,
+            show_root: false,
+        }
+    }
+}
+
 /// Tree state: manages the root node, cursor, and sort settings.
 #[derive(Debug)]
 pub struct TreeState {
@@ -125,12 +149,8 @@ pub struct TreeState {
     root: TreeNode,
     /// Cursor position (index into visible nodes).
     cursor: usize,
-    /// Current sort order.
-    sort_order: SortOrder,
-    /// Current sort direction.
-    sort_direction: SortDirection,
-    /// Whether directories should appear before files.
-    directories_first: bool,
+    /// Display and sort options.
+    options: TreeOptions,
 }
 
 impl TreeNode {
@@ -166,14 +186,9 @@ impl ChildrenState {
 }
 
 impl TreeState {
-    /// Create a new tree state from a root node and sort settings.
-    pub const fn new(
-        root: TreeNode,
-        sort_order: SortOrder,
-        sort_direction: SortDirection,
-        directories_first: bool,
-    ) -> Self {
-        Self { root, cursor: 0, sort_order, sort_direction, directories_first }
+    /// Create a new tree state from a root node and options.
+    pub const fn new(root: TreeNode, options: TreeOptions) -> Self {
+        Self { root, cursor: 0, options }
     }
 
     /// Get a reference to the root node.
@@ -196,19 +211,24 @@ impl TreeState {
     /// Get the current sort order.
     #[allow(dead_code)]
     pub const fn sort_order(&self) -> SortOrder {
-        self.sort_order
+        self.options.sort_order
     }
 
     /// Get the current sort direction.
     #[allow(dead_code)]
     pub const fn sort_direction(&self) -> SortDirection {
-        self.sort_direction
+        self.options.sort_direction
     }
 
     /// Get whether directories come first.
     #[allow(dead_code)]
     pub const fn directories_first(&self) -> bool {
-        self.directories_first
+        self.options.directories_first
+    }
+
+    /// Get whether the root directory is shown as a tree node.
+    pub const fn show_root(&self) -> bool {
+        self.options.show_root
     }
 
     /// Get the root directory path.
@@ -307,11 +327,18 @@ impl TreeState {
     /// Generate the flattened list of visible nodes by DFS walk.
     ///
     /// Only includes nodes that are in expanded + `Loaded` directories.
+    /// When `show_root` is true, the root directory itself appears as the first node.
     pub fn visible_nodes(&self) -> Vec<VisibleNode<'_>> {
         let mut result = Vec::new();
+        let depth_offset = usize::from(self.options.show_root);
+
+        if self.options.show_root {
+            result.push(VisibleNode { node: &self.root, depth: 0 });
+        }
+
         if let Some(children) = self.root.children.as_loaded() {
             for child in children {
-                collect_visible(child, 0, &mut result);
+                collect_visible(child, depth_offset, &mut result);
             }
         }
         result
@@ -327,10 +354,13 @@ impl TreeState {
                 .map_or(0, |children| children.iter().map(count_visible).sum())
         }
 
-        self.root
+        let children_count = self
+            .root
             .children
             .as_loaded()
-            .map_or(0, |children| children.iter().map(count_visible).sum())
+            .map_or(0, |children| children.iter().map(count_visible).sum());
+
+        if self.options.show_root { 1 + children_count } else { children_count }
     }
 
     /// Find the node at the given path in the tree (mutable).
@@ -349,9 +379,9 @@ impl TreeState {
     /// When `auto_expand` is true, the directory is automatically expanded (user-initiated loads).
     /// When false, the current `is_expanded` state is preserved (prefetch loads).
     pub fn set_children(&mut self, path: &Path, mut children: Vec<TreeNode>, auto_expand: bool) {
-        let order = self.sort_order;
-        let direction = self.sort_direction;
-        let dirs_first = self.directories_first;
+        let order = self.options.sort_order;
+        let direction = self.options.sort_direction;
+        let dirs_first = self.options.directories_first;
 
         crate::tree::sort::sort_children(&mut children, order, direction, dirs_first);
 
@@ -652,9 +682,9 @@ impl TreeState {
         direction: SortDirection,
         directories_first: bool,
     ) {
-        self.sort_order = order;
-        self.sort_direction = direction;
-        self.directories_first = directories_first;
+        self.options.sort_order = order;
+        self.options.sort_direction = direction;
+        self.options.directories_first = directories_first;
         crate::tree::sort::apply_sort_recursive(
             &mut self.root,
             order,
@@ -842,7 +872,7 @@ mod tests {
 
     /// Helper: create a default `TreeState` from children.
     fn state_with_children(children: Vec<TreeNode>) -> TreeState {
-        TreeState::new(root_with_children(children), SortOrder::Name, SortDirection::Asc, true)
+        TreeState::new(root_with_children(children), TreeOptions::default())
     }
 
     // --- NodeInfo ---
@@ -939,6 +969,39 @@ mod tests {
         let visible = state.visible_nodes();
         verify_that!(visible.len(), eq(1))?;
         verify_that!(visible[0].node.name.as_str(), eq("empty_dir"))?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // show_root
+    // =========================================================================
+
+    #[rstest]
+    fn visible_nodes_with_show_root_includes_root_at_depth_zero() -> Result<()> {
+        let root = Path::new("/test/root");
+        let state = TreeState::new(
+            root_with_children(vec![file_node("a.txt", root), file_node("b.txt", root)]),
+            TreeOptions { show_root: true, ..TreeOptions::default() },
+        );
+        let visible = state.visible_nodes();
+        // root + 2 children = 3
+        verify_that!(visible.len(), eq(3))?;
+        verify_that!(visible[0].node.name.as_str(), eq("root"))?;
+        verify_that!(visible[0].depth, eq(0))?;
+        verify_that!(visible[1].node.name.as_str(), eq("a.txt"))?;
+        verify_that!(visible[1].depth, eq(1))?;
+        verify_that!(visible[2].depth, eq(1))?;
+        Ok(())
+    }
+
+    #[rstest]
+    fn visible_node_count_with_show_root() -> Result<()> {
+        let root = Path::new("/test/root");
+        let state = TreeState::new(
+            root_with_children(vec![file_node("a.txt", root)]),
+            TreeOptions { show_root: true, ..TreeOptions::default() },
+        );
+        verify_that!(state.visible_node_count(), eq(2))?; // root + a.txt
         Ok(())
     }
 
@@ -1347,7 +1410,7 @@ mod tests {
         let builder = crate::tree::builder::TreeBuilder::new(false, false);
         let root = builder.build(dir.path()).unwrap();
 
-        let mut state = TreeState::new(root, SortOrder::Name, SortDirection::Asc, true);
+        let mut state = TreeState::new(root, TreeOptions::default());
         state.apply_sort(SortOrder::Name, SortDirection::Asc, true);
 
         let visible = state.visible_nodes();
@@ -1378,7 +1441,7 @@ mod tests {
         let builder = crate::tree::builder::TreeBuilder::new(false, false);
         let root = builder.build(dir.path()).unwrap();
 
-        let mut state = TreeState::new(root, SortOrder::Name, SortDirection::Asc, true);
+        let mut state = TreeState::new(root, TreeOptions::default());
         state.apply_sort(SortOrder::Name, SortDirection::Asc, true);
 
         // Initially: subdir (dirs first), file1.txt

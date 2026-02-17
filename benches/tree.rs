@@ -9,9 +9,8 @@ use criterion::{
 };
 use trev::state::tree::{
     ChildrenState,
-    SortDirection,
-    SortOrder,
     TreeNode,
+    TreeOptions,
     TreeState,
 };
 use trev::tree::builder::TreeBuilder;
@@ -56,7 +55,7 @@ fn state_with_children(children: Vec<TreeNode>) -> TreeState {
         children: ChildrenState::Loaded(children),
         is_expanded: true,
     };
-    TreeState::new(root, SortOrder::Name, SortDirection::Asc, true)
+    TreeState::new(root, TreeOptions::default())
 }
 
 fn bench_visible_nodes_10k_flat(c: &mut Criterion) {

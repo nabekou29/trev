@@ -65,20 +65,21 @@ pub async fn run(args: &Args) -> Result<()> {
     // Resolve the root path.
     let root_path = std::fs::canonicalize(&args.path)?;
 
-    // Map config sort settings to tree state types.
-    let sort_order = config.sort.order.into();
-    let sort_direction = config.sort.direction.into();
-    let directories_first = config.sort.directories_first;
-
     // Build the initial tree (depth 1).
     let show_hidden = config.display.show_hidden;
     let show_ignored = config.display.show_ignored;
     let builder = TreeBuilder::new(show_hidden, show_ignored);
     let root = builder.build(&root_path)?;
 
-    // Create tree state with sort settings.
-    let mut tree_state = TreeState::new(root, sort_order, sort_direction, directories_first);
-    tree_state.apply_sort(sort_order, sort_direction, directories_first);
+    // Create tree state with sort/display options.
+    let tree_options = crate::state::tree::TreeOptions {
+        sort_order: config.sort.order.into(),
+        sort_direction: config.sort.direction.into(),
+        directories_first: config.sort.directories_first,
+        show_root: config.display.show_root,
+    };
+    let mut tree_state = TreeState::new(root, tree_options);
+    tree_state.apply_sort(tree_options.sort_order, tree_options.sort_direction, tree_options.directories_first);
 
     // Detect terminal graphics protocol (must be before terminal init/raw mode).
     // Falls back to halfblocks if detection fails.

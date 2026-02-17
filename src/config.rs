@@ -180,6 +180,7 @@ pub struct SortConfig {
 /// Display configuration.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
+#[expect(clippy::struct_excessive_bools, reason = "DisplayConfig aggregates independent display flags")]
 pub struct DisplayConfig {
     /// Show hidden files.
     pub show_hidden: bool,
@@ -187,6 +188,8 @@ pub struct DisplayConfig {
     pub show_ignored: bool,
     /// Show preview panel.
     pub show_preview: bool,
+    /// Show root directory as a tree node.
+    pub show_root: bool,
 }
 
 /// Sort order variants.
@@ -439,7 +442,7 @@ impl Default for SortConfig {
 
 impl Default for DisplayConfig {
     fn default() -> Self {
-        Self { show_hidden: false, show_ignored: false, show_preview: true }
+        Self { show_hidden: false, show_ignored: false, show_preview: true, show_root: false }
     }
 }
 
@@ -510,6 +513,9 @@ impl Config {
         }
         if args.no_directories_first {
             self.sort.directories_first = false;
+        }
+        if args.show_root {
+            self.display.show_root = true;
         }
     }
 
