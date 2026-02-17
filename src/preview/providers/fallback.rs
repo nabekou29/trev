@@ -31,7 +31,7 @@ impl PreviewProvider for FallbackProvider {
     }
 
     fn priority(&self) -> u32 {
-        100
+        crate::config::Priority::LOW.value()
     }
 
     fn can_handle(&self, _path: &Path, _is_dir: bool) -> bool {

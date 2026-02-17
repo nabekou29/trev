@@ -241,12 +241,109 @@ pub struct ExternalCommand {
     #[serde(default)]
     pub name: Option<String>,
     /// File extensions this command applies to.
+    #[serde(default)]
     pub extensions: Vec<String>,
+    /// Whether this command handles directories.
+    #[serde(default)]
+    pub directories: bool,
+    /// Priority for ordering (lower = higher priority, default: 0).
+    ///
+    /// Accepts a number or a named constant: `high` (0), `mid` (100), `low` (1000).
+    #[serde(default)]
+    pub priority: Priority,
     /// Command name (must be in `$PATH`).
     pub command: String,
     /// Command arguments.
     #[serde(default)]
     pub args: Vec<String>,
+}
+
+/// Preview provider priority.
+///
+/// Can be specified as a raw number or a named constant in YAML:
+/// - `high`: 0 (default for external commands)
+/// - `mid`: 100 (same as built-in providers like Image, Text)
+/// - `low`: 1000 (same as fallback provider)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Priority(pub u32);
+
+impl Priority {
+    /// High priority (default for external commands).
+    pub const HIGH: Self = Self(0);
+    /// Medium priority (built-in providers like Image, Text).
+    pub const MID: Self = Self(100);
+    /// Low priority (fallback provider).
+    pub const LOW: Self = Self(1000);
+
+    /// Get the numeric priority value.
+    pub const fn value(self) -> u32 {
+        self.0
+    }
+}
+
+impl Default for Priority {
+    fn default() -> Self {
+        Self::HIGH
+    }
+}
+
+impl Serialize for Priority {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.value().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Priority {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de;
+
+        /// Visitor for deserializing `Priority` from a number or named constant.
+        struct PriorityVisitor;
+
+        impl de::Visitor<'_> for PriorityVisitor {
+            type Value = Priority;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a number or a named constant (high, mid, low)")
+            }
+
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Priority, E> {
+                u32::try_from(v).map(Priority).map_err(de::Error::custom)
+            }
+
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Priority, E> {
+                u32::try_from(v).map(Priority).map_err(de::Error::custom)
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Priority, E> {
+                match v {
+                    "high" => Ok(Priority::HIGH),
+                    "mid" => Ok(Priority::MID),
+                    "low" => Ok(Priority::LOW),
+                    _ => Err(de::Error::unknown_variant(v, &["high", "mid", "low"])),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(PriorityVisitor)
+    }
+}
+
+impl JsonSchema for Priority {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Priority".into()
+    }
+
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Priority for ordering (lower = higher priority). Number or named constant: high (0), mid (100), low (1000)",
+            "default": 0,
+            "anyOf": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "string", "enum": ["high", "mid", "low"] }
+            ]
+        })
+    }
 }
 
 impl ExternalCommand {
@@ -322,7 +419,7 @@ impl Default for PreviewConfig {
         Self {
             max_lines: 1000,
             max_bytes: 10 * 1024 * 1024, // 10 MB
-            cache_size: 10,
+            cache_size: 50,
             commands: Vec::new(),
             command_timeout: 3,
         }
@@ -680,6 +777,8 @@ display:
         let cmd = ExternalCommand {
             name: Some("Pretty JSON".to_string()),
             extensions: vec!["json".to_string()],
+            directories: false,
+            priority: Priority::default(),
             command: "jq".to_string(),
             args: vec![".".to_string()],
         };
@@ -691,6 +790,8 @@ display:
         let cmd = ExternalCommand {
             name: None,
             extensions: vec!["md".to_string()],
+            directories: false,
+            priority: Priority::default(),
             command: "glow".to_string(),
             args: vec![],
         };

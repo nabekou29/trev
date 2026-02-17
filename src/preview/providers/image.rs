@@ -52,7 +52,7 @@ impl PreviewProvider for ImagePreviewProvider {
     }
 
     fn priority(&self) -> u32 {
-        20
+        crate::config::Priority::MID.value()
     }
 
     fn can_handle(&self, path: &Path, is_dir: bool) -> bool {
@@ -182,8 +182,8 @@ mod tests {
     }
 
     #[rstest]
-    fn priority_is_higher_than_text() {
+    fn priority_is_builtin() {
         let provider = make_provider();
-        assert_that!(provider.priority(), lt(30)); // Text is 30
+        assert_that!(provider.priority(), eq(crate::config::Priority::MID.value()));
     }
 }

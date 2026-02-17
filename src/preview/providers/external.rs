@@ -55,19 +55,21 @@ impl PreviewProvider for ExternalCmdProvider {
     }
 
     fn priority(&self) -> u32 {
-        10
+        self.command.priority.value()
     }
 
     fn can_handle(&self, path: &Path, is_dir: bool) -> bool {
-        if is_dir {
+        if !Self::command_exists(&self.command.command) {
             return false;
+        }
+        if is_dir {
+            return self.command.directories;
         }
         let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
             return false;
         };
         let ext_lower = ext.to_ascii_lowercase();
         self.command.extensions.iter().any(|e| e.to_ascii_lowercase() == ext_lower)
-            && Self::command_exists(&self.command.command)
     }
 
     fn load(&self, path: &Path, ctx: &LoadContext) -> anyhow::Result<PreviewContent> {
@@ -82,6 +84,7 @@ impl PreviewProvider for ExternalCmdProvider {
         }
         cmd.arg(path);
         cmd.env("TERM", "xterm-256color");
+        cmd.stdin(std::process::Stdio::null());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
@@ -158,6 +161,8 @@ mod tests {
     use googletest::prelude::*;
     use rstest::*;
 
+    use crate::config::Priority;
+
     use super::*;
 
     fn make_echo_provider() -> ExternalCmdProvider {
@@ -165,6 +170,8 @@ mod tests {
             ExternalCommand {
                 name: None,
                 extensions: vec!["csv".to_string(), "tsv".to_string()],
+                directories: false,
+                priority: Priority::default(),
                 command: "cat".to_string(),
                 args: vec![],
             },
@@ -177,6 +184,8 @@ mod tests {
             ExternalCommand {
                 name: None,
                 extensions: vec!["xyz".to_string()],
+                directories: false,
+                priority: Priority::default(),
                 command: "nonexistent_command_12345".to_string(),
                 args: vec![],
             },
@@ -192,6 +201,8 @@ mod tests {
             ExternalCommand {
                 name: Some("Pretty JSON".to_string()),
                 extensions: vec!["json".to_string()],
+                directories: false,
+                priority: Priority::default(),
                 command: "jq".to_string(),
                 args: vec![".".to_string()],
             },
@@ -244,6 +255,22 @@ mod tests {
         assert_that!(provider.can_handle(&PathBuf::from("Makefile"), false), eq(false));
     }
 
+    #[rstest]
+    fn can_handle_directory_when_directories_enabled() {
+        let provider = ExternalCmdProvider::new(
+            ExternalCommand {
+                name: Some("dust".to_string()),
+                extensions: vec![],
+                directories: true,
+                priority: Priority::default(),
+                command: "ls".to_string(),
+                args: vec![],
+            },
+            3,
+        );
+        assert_that!(provider.can_handle(&PathBuf::from("/some/dir"), true), eq(true));
+    }
+
     // --- load tests ---
 
     #[rstest]
@@ -278,8 +305,8 @@ mod tests {
     }
 
     #[rstest]
-    fn priority_is_highest() {
+    fn priority_uses_config_value() {
         let provider = make_echo_provider();
-        assert_that!(provider.priority(), eq(10));
+        assert_that!(provider.priority(), eq(Priority::HIGH.value()));
     }
 }

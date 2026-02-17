@@ -35,7 +35,7 @@ impl PreviewProvider for TextPreviewProvider {
     }
 
     fn priority(&self) -> u32 {
-        30
+        crate::config::Priority::MID.value()
     }
 
     fn can_handle(&self, path: &Path, is_dir: bool) -> bool {

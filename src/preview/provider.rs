@@ -155,7 +155,7 @@ mod tests {
     fn make_fallback_provider() -> Arc<dyn PreviewProvider> {
         Arc::new(TestProvider {
             name: "Fallback",
-            priority: 100,
+            priority: 1000,
             handles: true,
             enabled_fn: Some(Box::new(|available: &[&str]| available.len() <= 1)),
         })
