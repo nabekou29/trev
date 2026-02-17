@@ -13,4 +13,4 @@ mise run bench     # Run Criterion benchmarks
 
 ## Documentation
 
-- [ROADMAP.md](/ROADMAP.md) - Planned features and progress
+- [README.md](/README.md) - Usage, keybindings, configuration, Neovim integration
