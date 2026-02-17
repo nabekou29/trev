@@ -10,6 +10,7 @@ use crate::app::state::{
     AppState,
     PreviewLoadResult,
 };
+use crate::preview::cache::CacheKey;
 use crate::preview::content::PreviewContent;
 use crate::preview::provider::{
     LoadContext,
@@ -61,13 +62,18 @@ pub fn handle_preview_action(
 
 /// Trigger preview for a new file (cursor change).
 ///
-/// Resets provider index, resolves providers, and spawns async load.
+/// Checks the cache first; on hit, displays immediately without async load.
+/// On miss, spawns an async load task. Also prefetches adjacent nodes.
 pub fn trigger_preview(state: &mut AppState, ctx: &AppContext) {
     let Some((path, providers)) = resolve_preview_providers(state) else {
         return;
     };
     state.preview_state.request_preview(path.clone());
-    spawn_preview_for(state, &path, &providers, ctx);
+
+    if !try_load_from_cache(state, &path, &providers) {
+        spawn_preview_for(state, &path, &providers, ctx, false);
+    }
+    prefetch_adjacent(state, ctx);
 }
 
 /// Reload the current file with the (already-cycled) provider.
@@ -78,7 +84,36 @@ fn reload_preview(state: &mut AppState, ctx: &AppContext) {
         return;
     };
     state.preview_state.reload_preview(path.clone());
-    spawn_preview_for(state, &path, &providers, ctx);
+
+    if try_load_from_cache(state, &path, &providers) {
+        return;
+    }
+    spawn_preview_for(state, &path, &providers, ctx, false);
+}
+
+/// Try to load preview from cache. Returns `true` if cache hit.
+fn try_load_from_cache(
+    state: &mut AppState,
+    path: &std::path::Path,
+    providers: &[Arc<dyn PreviewProvider>],
+) -> bool {
+    let active_index = state.preview_state.active_provider_index;
+    let Some(provider) = providers.get(active_index) else {
+        return false;
+    };
+    let provider_name = provider.name().to_string();
+    let key = CacheKey { path: path.to_path_buf(), provider_name };
+    let Some(cached) = state.preview_cache.get(&key) else {
+        tracing::debug!(path = %path.display(), "preview cache miss");
+        return false;
+    };
+    let Some(content) = cached.try_clone() else {
+        tracing::debug!(path = %path.display(), "preview cache hit but not cloneable");
+        return false;
+    };
+    tracing::debug!(path = %path.display(), "preview cache hit");
+    state.preview_state.set_content(content);
+    true
 }
 
 /// Resolve available providers for the current node.
@@ -109,6 +144,7 @@ fn spawn_preview_for(
     path: &std::path::Path,
     providers: &[Arc<dyn PreviewProvider>],
     ctx: &AppContext,
+    prefetch: bool,
 ) {
     let active_index = state.preview_state.active_provider_index;
     let Some(provider) = providers.get(active_index) else {
@@ -125,7 +161,43 @@ fn spawn_preview_for(
         max_lines: ctx.preview_config.max_lines,
         max_bytes: ctx.preview_config.max_bytes,
         cancel_token: state.preview_state.cancel_token.clone(),
+        prefetch,
     });
+}
+
+/// Prefetch preview content for adjacent nodes (cursor ± 1).
+///
+/// Only prefetches file nodes that are not already cached.
+fn prefetch_adjacent(state: &mut AppState, ctx: &AppContext) {
+    let cursor = state.tree_state.cursor();
+    let visible = state.tree_state.visible_nodes();
+
+    let indices = [cursor.wrapping_sub(1), cursor + 1];
+    for &idx in &indices {
+        let Some(vn) = visible.get(idx) else { continue };
+        let path = &vn.node.path;
+        let providers = state.preview_registry.resolve(path, vn.node.is_dir);
+        let Some(provider) = providers.first() else { continue };
+        let key =
+            CacheKey { path: path.clone(), provider_name: provider.name().to_string() };
+        if state.preview_cache.get(&key).is_some() {
+            tracing::debug!(path = %path.display(), "prefetch skipped (already cached)");
+            continue;
+        }
+        tracing::debug!(path = %path.display(), "prefetch spawning");
+        let provider = Arc::clone(provider);
+        let provider_name = provider.name().to_string();
+        spawn_preview_load(PreviewLoadParams {
+            tx: ctx.preview_tx.clone(),
+            path: path.clone(),
+            provider,
+            provider_name,
+            max_lines: ctx.preview_config.max_lines,
+            max_bytes: ctx.preview_config.max_bytes,
+            cancel_token: state.preview_state.cancel_token.clone(),
+            prefetch: true,
+        });
+    }
 }
 
 /// Parameters for spawning a preview load task.
@@ -144,12 +216,22 @@ struct PreviewLoadParams {
     max_bytes: u64,
     /// Cancellation token for aborting the load.
     cancel_token: tokio_util::sync::CancellationToken,
+    /// Whether this is a background prefetch (not for immediate display).
+    prefetch: bool,
 }
 
 /// Spawn a blocking task to load preview content.
 fn spawn_preview_load(params: PreviewLoadParams) {
-    let PreviewLoadParams { tx, path, provider, provider_name, max_lines, max_bytes, cancel_token } =
-        params;
+    let PreviewLoadParams {
+        tx,
+        path,
+        provider,
+        provider_name,
+        max_lines,
+        max_bytes,
+        cancel_token,
+        prefetch,
+    } = params;
     tokio::spawn(async move {
         let load_path = path.clone();
         let token = cancel_token.clone();
@@ -169,6 +251,8 @@ fn spawn_preview_load(params: PreviewLoadParams) {
         };
 
         // Ignore send error (receiver dropped = app shutting down).
-        let _ = tx.send(PreviewLoadResult { path, provider_name, content }).await;
+        let _ = tx
+            .send(PreviewLoadResult { path, provider_name, content, prefetch })
+            .await;
     });
 }

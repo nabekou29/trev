@@ -262,14 +262,7 @@ pub async fn run(args: &Args) -> Result<()> {
         }
 
         // Receive async preview load results.
-        while let Ok(result) = preview_rx.try_recv() {
-            // Only apply if the path still matches current preview request.
-            let is_current =
-                state.preview_state.current_path.as_deref().is_some_and(|p| p == result.path);
-            if is_current {
-                state.preview_state.set_content(result.content);
-            }
-        }
+        process_preview_results(&mut preview_rx, &mut state);
 
         // Trigger preview when cursor changes.
         let current_cursor = state.tree_state.cursor();
@@ -475,6 +468,42 @@ fn start_ipc_if_daemon(
     (server, ipc_rx)
 }
 
+/// Process async preview load results: cache and display.
+fn process_preview_results(
+    preview_rx: &mut tokio::sync::mpsc::Receiver<PreviewLoadResult>,
+    state: &mut AppState,
+) {
+    while let Ok(result) = preview_rx.try_recv() {
+        let is_prefetch = result.prefetch;
+        // Store in cache (skip non-cloneable Image content).
+        if let Some(cloned) = result.content.try_clone() {
+            let key = crate::preview::cache::CacheKey {
+                path: result.path.clone(),
+                provider_name: result.provider_name.clone(),
+            };
+            tracing::debug!(
+                path = %result.path.display(),
+                provider = %result.provider_name,
+                prefetch = is_prefetch,
+                "preview result cached",
+            );
+            state.preview_cache.put(key, cloned);
+        }
+
+        // Prefetch results are cache-only — don't update display.
+        if is_prefetch {
+            continue;
+        }
+
+        // Only apply if the path still matches current preview request.
+        let is_current =
+            state.preview_state.current_path.as_deref().is_some_and(|p| p == result.path);
+        if is_current {
+            state.preview_state.set_content(result.content);
+        }
+    }
+}
+
 /// Process pending file system watcher events and refresh affected directories.
 fn process_watcher_events(
     watcher_rx: &mut tokio::sync::mpsc::UnboundedReceiver<
@@ -484,6 +513,12 @@ fn process_watcher_events(
     ctx: &AppContext,
 ) {
     while let Ok(events) = watcher_rx.try_recv() {
+        // Invalidate preview cache for changed files.
+        for event in &events {
+            tracing::debug!(path = %event.path.display(), "preview cache invalidated (fs change)");
+            state.preview_cache.invalidate_path(&event.path);
+        }
+
         let affected_dirs: HashSet<PathBuf> = events
             .iter()
             .filter_map(|event| event.path.parent().map(Path::to_path_buf))

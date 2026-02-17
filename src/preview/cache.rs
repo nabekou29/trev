@@ -1,6 +1,9 @@
 //! LRU cache for preview content.
 
-use std::path::PathBuf;
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use lru::LruCache;
 
@@ -28,8 +31,8 @@ pub struct PreviewCache {
 impl PreviewCache {
     /// Create a new cache with the given capacity.
     pub fn new(capacity: usize) -> Self {
-        // 10 is always non-zero, so this is compile-time safe.
-        const DEFAULT_CAP: std::num::NonZeroUsize = match std::num::NonZeroUsize::new(10) {
+        // 50 is always non-zero, so this is compile-time safe.
+        const DEFAULT_CAP: std::num::NonZeroUsize = match std::num::NonZeroUsize::new(50) {
             Some(v) => v,
             None => unreachable!(),
         };
@@ -49,6 +52,19 @@ impl PreviewCache {
     /// Evicts the least-recently-used entry if at capacity.
     pub fn put(&mut self, key: CacheKey, content: PreviewContent) {
         self.cache.put(key, content);
+    }
+
+    /// Remove all cache entries for the given file path (any provider).
+    pub fn invalidate_path(&mut self, path: &Path) {
+        let keys: Vec<CacheKey> = self
+            .cache
+            .iter()
+            .filter(|(k, _)| k.path == path)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for key in keys {
+            self.cache.pop(&key);
+        }
     }
 }
 
@@ -94,6 +110,35 @@ mod tests {
         cache.put(key_c, PreviewContent::Empty);
 
         assert_that!(cache.get(&key_a).is_none(), eq(true));
+    }
+
+    #[rstest]
+    fn invalidate_path_removes_all_providers() {
+        let mut cache = PreviewCache::new(10);
+        let key_text = make_key("/file.rs", "text");
+        let key_ext = make_key("/file.rs", "external");
+        let key_other = make_key("/other.rs", "text");
+
+        cache.put(key_text.clone(), PreviewContent::Empty);
+        cache.put(key_ext.clone(), PreviewContent::Empty);
+        cache.put(key_other.clone(), PreviewContent::Empty);
+
+        cache.invalidate_path(Path::new("/file.rs"));
+
+        assert_that!(cache.get(&key_text).is_none(), eq(true));
+        assert_that!(cache.get(&key_ext).is_none(), eq(true));
+        assert_that!(cache.get(&key_other).is_some(), eq(true));
+    }
+
+    #[rstest]
+    fn invalidate_path_noop_for_missing() {
+        let mut cache = PreviewCache::new(10);
+        let key = make_key("/file.rs", "text");
+        cache.put(key.clone(), PreviewContent::Empty);
+
+        cache.invalidate_path(Path::new("/nonexistent"));
+
+        assert_that!(cache.get(&key).is_some(), eq(true));
     }
 
     #[rstest]

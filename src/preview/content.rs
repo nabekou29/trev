@@ -58,6 +58,36 @@ pub enum PreviewContent {
     Empty,
 }
 
+impl PreviewContent {
+    /// Try to clone this content.
+    ///
+    /// Returns `None` for `Image` (which contains a non-cloneable protocol).
+    /// All other variants are cloned successfully.
+    pub fn try_clone(&self) -> Option<Self> {
+        match self {
+            Self::HighlightedText { lines, language, truncated } => {
+                Some(Self::HighlightedText {
+                    lines: lines.clone(),
+                    language: language.clone(),
+                    truncated: *truncated,
+                })
+            }
+            Self::PlainText { lines, truncated } => {
+                Some(Self::PlainText { lines: lines.clone(), truncated: *truncated })
+            }
+            Self::AnsiText { text } => Some(Self::AnsiText { text: text.clone() }),
+            Self::Image { .. } => None,
+            Self::Binary { size } => Some(Self::Binary { size: *size }),
+            Self::Directory { entry_count, total_size } => {
+                Some(Self::Directory { entry_count: *entry_count, total_size: *total_size })
+            }
+            Self::Loading => Some(Self::Loading),
+            Self::Error { message } => Some(Self::Error { message: message.clone() }),
+            Self::Empty => Some(Self::Empty),
+        }
+    }
+}
+
 impl std::fmt::Debug for PreviewContent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
