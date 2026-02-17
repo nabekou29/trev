@@ -1,6 +1,6 @@
 //! Key notation parser for configuration keybindings.
 //!
-//! Parses human-readable key notations like `"ctrl+a"`, `"shift+enter"`, `"G"`
+//! Parses Vim-style key notations like `"<C-a>"`, `"<S-CR>"`, `"G"`
 //! into crossterm `KeyCode` / `KeyModifiers` pairs.
 
 use crossterm::event::{
@@ -15,28 +15,60 @@ pub type KeyBinding = (KeyCode, KeyModifiers);
 ///
 /// Supports formats:
 /// - Single character: `"a"`, `"G"`, `"1"`, `"/"`
-/// - Modifier + key: `"ctrl+a"`, `"alt+j"`, `"shift+enter"`
-/// - Special keys: `"enter"`, `"space"`, `"tab"`, `"esc"`, `"backspace"`
-/// - Arrow keys: `"up"`, `"down"`, `"left"`, `"right"`
-/// - Function keys: `"f1"` through `"f12"`
+/// - Angle-bracket notation: `"<C-a>"`, `"<A-j>"`, `"<S-CR>"`
+/// - Combined modifiers: `"<C-S-a>"`
+/// - Special keys: `"<CR>"`, `"<Space>"`, `"<Tab>"`, `"<Esc>"`, `"<BS>"`
+/// - Arrow keys: `"<Up>"`, `"<Down>"`, `"<Left>"`, `"<Right>"`
+/// - Function keys: `"<F1>"` through `"<F12>"`
+///
+/// Modifier prefixes (inside `<...>`):
+/// - `C-` — Control
+/// - `A-` or `M-` — Alt (Meta)
+/// - `S-` — Shift
 pub fn parse_key(s: &str) -> Result<KeyBinding, String> {
     let s = s.trim();
     if s.is_empty() {
         return Err("empty key notation".to_string());
     }
 
-    let mut modifiers = KeyModifiers::NONE;
-    let mut remaining = s;
+    // <...> notation.
+    if let Some(inner) = s.strip_prefix('<').and_then(|r| r.strip_suffix('>')) {
+        if inner.is_empty() {
+            return Err("empty angle-bracket notation".to_string());
+        }
+        return parse_angle_bracket(inner);
+    }
 
-    // Parse modifier prefixes (ctrl+, alt+, shift+).
+    // Single character.
+    if s.len() == 1 {
+        let c = s.chars().next().ok_or("empty key")?;
+        let mut modifiers = KeyModifiers::NONE;
+        if c.is_ascii_uppercase() {
+            modifiers |= KeyModifiers::SHIFT;
+        }
+        return Ok((KeyCode::Char(c), modifiers));
+    }
+
+    Err(format!("unknown key notation: {s}"))
+}
+
+/// Parse the content inside angle brackets `<...>`.
+fn parse_angle_bracket(inner: &str) -> Result<KeyBinding, String> {
+    let mut modifiers = KeyModifiers::NONE;
+    let mut remaining = inner;
+
+    // Parse modifier prefixes: C-, A-/M-, S-.
     loop {
-        if let Some(rest) = remaining.strip_prefix("ctrl+") {
+        if let Some(rest) = remaining.strip_prefix("C-") {
             modifiers |= KeyModifiers::CONTROL;
             remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix("alt+") {
+        } else if let Some(rest) = remaining
+            .strip_prefix("A-")
+            .or_else(|| remaining.strip_prefix("M-"))
+        {
             modifiers |= KeyModifiers::ALT;
             remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix("shift+") {
+        } else if let Some(rest) = remaining.strip_prefix("S-") {
             modifiers |= KeyModifiers::SHIFT;
             remaining = rest;
         } else {
@@ -44,15 +76,16 @@ pub fn parse_key(s: &str) -> Result<KeyBinding, String> {
         }
     }
 
-    let code = parse_key_code(remaining)?;
-
-    // Uppercase single character implies SHIFT.
-    if let KeyCode::Char(c) = code
-        && c.is_ascii_uppercase()
-    {
-        modifiers |= KeyModifiers::SHIFT;
+    // Single character after modifiers.
+    if remaining.len() == 1 {
+        let c = remaining.chars().next().ok_or("empty key")?;
+        if c.is_ascii_uppercase() && !modifiers.contains(KeyModifiers::SHIFT) {
+            modifiers |= KeyModifiers::SHIFT;
+        }
+        return Ok((KeyCode::Char(c), modifiers));
     }
 
+    let code = parse_key_name(remaining)?;
     Ok((code, modifiers))
 }
 
@@ -75,62 +108,70 @@ pub fn parse_key_expanded(s: &str) -> Result<Vec<KeyBinding>, String> {
     Ok(vec![(code, modifiers)])
 }
 
-/// Format a key binding as a human-readable string (for error messages).
+/// Format a key binding as a Vim-style string.
 #[allow(dead_code)]
 pub fn format_key(code: KeyCode, modifiers: KeyModifiers) -> String {
-    let mut parts = Vec::new();
+    // Simple character without modifiers.
+    if let KeyCode::Char(c) = code
+        && (modifiers == KeyModifiers::NONE
+            || (modifiers == KeyModifiers::SHIFT && c.is_ascii_uppercase()))
+    {
+        return c.to_string();
+    }
 
+    // Build <...> notation.
+    let mut parts = String::from("<");
     if modifiers.contains(KeyModifiers::CONTROL) {
-        parts.push("ctrl".to_string());
+        parts.push_str("C-");
     }
     if modifiers.contains(KeyModifiers::ALT) {
-        parts.push("alt".to_string());
+        parts.push_str("A-");
     }
     if modifiers.contains(KeyModifiers::SHIFT) {
-        parts.push("shift".to_string());
+        parts.push_str("S-");
     }
 
-    let key_str = match code {
-        KeyCode::Char(c) => c.to_string(),
-        KeyCode::Enter => "enter".to_string(),
-        KeyCode::Esc => "esc".to_string(),
-        KeyCode::Backspace => "backspace".to_string(),
-        KeyCode::Tab => "tab".to_string(),
-        KeyCode::Delete => "delete".to_string(),
-        KeyCode::Insert => "insert".to_string(),
-        KeyCode::Home => "home".to_string(),
-        KeyCode::End => "end".to_string(),
-        KeyCode::PageUp => "pageup".to_string(),
-        KeyCode::PageDown => "pagedown".to_string(),
-        KeyCode::Up => "up".to_string(),
-        KeyCode::Down => "down".to_string(),
-        KeyCode::Left => "left".to_string(),
-        KeyCode::Right => "right".to_string(),
-        KeyCode::F(n) => format!("f{n}"),
-        _ => format!("{code:?}"),
-    };
+    match code {
+        KeyCode::Char(' ') => parts.push_str("Space"),
+        KeyCode::Char(c) => parts.push(c),
+        KeyCode::Enter => parts.push_str("CR"),
+        KeyCode::Esc => parts.push_str("Esc"),
+        KeyCode::Backspace => parts.push_str("BS"),
+        KeyCode::Tab => parts.push_str("Tab"),
+        KeyCode::Delete => parts.push_str("Del"),
+        KeyCode::Insert => parts.push_str("Ins"),
+        KeyCode::Home => parts.push_str("Home"),
+        KeyCode::End => parts.push_str("End"),
+        KeyCode::PageUp => parts.push_str("PageUp"),
+        KeyCode::PageDown => parts.push_str("PageDown"),
+        KeyCode::Up => parts.push_str("Up"),
+        KeyCode::Down => parts.push_str("Down"),
+        KeyCode::Left => parts.push_str("Left"),
+        KeyCode::Right => parts.push_str("Right"),
+        KeyCode::F(n) => {
+            parts.push('F');
+            parts.push_str(&n.to_string());
+        }
+        _ => {
+            use std::fmt::Write;
+            let _ = write!(parts, "{code:?}");
+        }
+    }
 
-    parts.push(key_str);
-    parts.join("+")
+    parts.push('>');
+    parts
 }
 
-/// Parse a bare key code name (no modifiers).
-fn parse_key_code(s: &str) -> Result<KeyCode, String> {
-    // Single character.
-    if s.len() == 1 {
-        let c = s.chars().next().ok_or("empty key")?;
-        return Ok(KeyCode::Char(c));
-    }
-
-    // Special keys (case-insensitive).
+/// Parse a special key name (case-insensitive).
+fn parse_key_name(s: &str) -> Result<KeyCode, String> {
     match s.to_lowercase().as_str() {
-        "enter" | "return" | "cr" => Ok(KeyCode::Enter),
+        "cr" | "enter" | "return" => Ok(KeyCode::Enter),
         "space" => Ok(KeyCode::Char(' ')),
         "tab" => Ok(KeyCode::Tab),
         "esc" | "escape" => Ok(KeyCode::Esc),
-        "backspace" | "bs" => Ok(KeyCode::Backspace),
-        "delete" | "del" => Ok(KeyCode::Delete),
-        "insert" | "ins" => Ok(KeyCode::Insert),
+        "bs" | "backspace" => Ok(KeyCode::Backspace),
+        "del" | "delete" => Ok(KeyCode::Delete),
+        "ins" | "insert" => Ok(KeyCode::Insert),
         "home" => Ok(KeyCode::Home),
         "end" => Ok(KeyCode::End),
         "pageup" | "pgup" => Ok(KeyCode::PageUp),
@@ -195,13 +236,28 @@ mod tests {
         assert_eq!(mods, expected_mods);
     }
 
-    // --- parse_key: modifier + key ---
+    // --- parse_key: angle-bracket modifier + key ---
 
     #[rstest]
-    #[case("ctrl+a", KeyCode::Char('a'), KeyModifiers::CONTROL)]
-    #[case("alt+j", KeyCode::Char('j'), KeyModifiers::ALT)]
-    #[case("ctrl+shift+a", KeyCode::Char('a'), KeyModifiers::CONTROL | KeyModifiers::SHIFT)]
+    #[case("<C-a>", KeyCode::Char('a'), KeyModifiers::CONTROL)]
+    #[case("<A-j>", KeyCode::Char('j'), KeyModifiers::ALT)]
+    #[case("<M-j>", KeyCode::Char('j'), KeyModifiers::ALT)]
+    #[case("<C-S-a>", KeyCode::Char('a'), KeyModifiers::CONTROL | KeyModifiers::SHIFT)]
     fn parse_modifier_key(
+        #[case] input: &str,
+        #[case] expected_code: KeyCode,
+        #[case] expected_mods: KeyModifiers,
+    ) {
+        let (code, mods) = parse_key(input).unwrap();
+        assert_eq!(code, expected_code);
+        assert_eq!(mods, expected_mods);
+    }
+
+    // --- parse_key: uppercase in angle brackets implies SHIFT ---
+
+    #[rstest]
+    #[case("<C-G>", KeyCode::Char('G'), KeyModifiers::CONTROL | KeyModifiers::SHIFT)]
+    fn parse_angle_uppercase_implies_shift(
         #[case] input: &str,
         #[case] expected_code: KeyCode,
         #[case] expected_mods: KeyModifiers,
@@ -214,17 +270,17 @@ mod tests {
     // --- parse_key: special keys ---
 
     #[rstest]
-    #[case("enter", KeyCode::Enter, KeyModifiers::NONE)]
-    #[case("space", KeyCode::Char(' '), KeyModifiers::NONE)]
-    #[case("tab", KeyCode::Tab, KeyModifiers::NONE)]
-    #[case("esc", KeyCode::Esc, KeyModifiers::NONE)]
-    #[case("backspace", KeyCode::Backspace, KeyModifiers::NONE)]
-    #[case("up", KeyCode::Up, KeyModifiers::NONE)]
-    #[case("down", KeyCode::Down, KeyModifiers::NONE)]
-    #[case("left", KeyCode::Left, KeyModifiers::NONE)]
-    #[case("right", KeyCode::Right, KeyModifiers::NONE)]
-    #[case("f1", KeyCode::F(1), KeyModifiers::NONE)]
-    #[case("f12", KeyCode::F(12), KeyModifiers::NONE)]
+    #[case("<CR>", KeyCode::Enter, KeyModifiers::NONE)]
+    #[case("<Space>", KeyCode::Char(' '), KeyModifiers::NONE)]
+    #[case("<Tab>", KeyCode::Tab, KeyModifiers::NONE)]
+    #[case("<Esc>", KeyCode::Esc, KeyModifiers::NONE)]
+    #[case("<BS>", KeyCode::Backspace, KeyModifiers::NONE)]
+    #[case("<Up>", KeyCode::Up, KeyModifiers::NONE)]
+    #[case("<Down>", KeyCode::Down, KeyModifiers::NONE)]
+    #[case("<Left>", KeyCode::Left, KeyModifiers::NONE)]
+    #[case("<Right>", KeyCode::Right, KeyModifiers::NONE)]
+    #[case("<F1>", KeyCode::F(1), KeyModifiers::NONE)]
+    #[case("<F12>", KeyCode::F(12), KeyModifiers::NONE)]
     fn parse_special_keys(
         #[case] input: &str,
         #[case] expected_code: KeyCode,
@@ -239,7 +295,7 @@ mod tests {
 
     #[rstest]
     fn parse_ctrl_enter() {
-        let (code, mods) = parse_key("ctrl+enter").unwrap();
+        let (code, mods) = parse_key("<C-CR>").unwrap();
         assert_eq!(code, KeyCode::Enter);
         assert_eq!(mods, KeyModifiers::CONTROL);
     }
@@ -248,7 +304,8 @@ mod tests {
 
     #[rstest]
     #[case("")]
-    #[case("ctrl+")]
+    #[case("<>")]
+    #[case("<C->")]
     #[case("nonexistent")]
     fn parse_key_error(#[case] input: &str) {
         assert!(parse_key(input).is_err());
@@ -273,7 +330,7 @@ mod tests {
 
     #[rstest]
     fn expanded_special_key_produces_one_binding() {
-        let bindings = parse_key_expanded("enter").unwrap();
+        let bindings = parse_key_expanded("<CR>").unwrap();
         assert_that!(bindings.len(), eq(1));
     }
 
@@ -281,9 +338,10 @@ mod tests {
 
     #[rstest]
     #[case(KeyCode::Char('a'), KeyModifiers::NONE, "a")]
-    #[case(KeyCode::Char('a'), KeyModifiers::CONTROL, "ctrl+a")]
-    #[case(KeyCode::Enter, KeyModifiers::NONE, "enter")]
-    #[case(KeyCode::F(1), KeyModifiers::ALT, "alt+f1")]
+    #[case(KeyCode::Char('G'), KeyModifiers::SHIFT, "G")]
+    #[case(KeyCode::Char('a'), KeyModifiers::CONTROL, "<C-a>")]
+    #[case(KeyCode::Enter, KeyModifiers::NONE, "<CR>")]
+    #[case(KeyCode::F(1), KeyModifiers::ALT, "<A-F1>")]
     fn format_key_display(
         #[case] code: KeyCode,
         #[case] mods: KeyModifiers,

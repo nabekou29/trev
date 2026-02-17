@@ -83,7 +83,7 @@ pub struct DaemonBindings {
 /// A single keybinding entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyBindingEntry {
-    /// Key notation (e.g. `"j"`, `"ctrl+a"`, `"G"`).
+    /// Key notation (e.g. `"j"`, `"<C-a>"`, `"G"`, `"<CR>"`).
     pub key: String,
     /// Built-in action name (e.g. `"tree.move_down"`, `"quit"`).
     #[serde(default)]
@@ -113,7 +113,7 @@ impl JsonSchema for KeyBindingEntry {
             "properties": {
                 "key": {
                     "type": "string",
-                    "description": "Key notation (e.g. \"j\", \"ctrl+a\", \"G\")"
+                    "description": "Key notation (e.g. \"j\", \"<C-a>\", \"G\", \"<CR>\")"
                 },
                 "action": {
                     "anyOf": [
@@ -868,16 +868,16 @@ keybindings:
         run: "open {path}"
   file:
     bindings:
-      - key: enter
+      - key: "<CR>"
         notify: open_file
   directory:
     bindings:
-      - key: enter
+      - key: "<CR>"
         action: tree.toggle_expand
   daemon:
     universal:
       bindings:
-        - key: ctrl+q
+        - key: "<C-q>"
           notify: quit_request
 "#,
         )
@@ -900,17 +900,17 @@ keybindings:
 
         // File binding.
         assert_that!(kb.file.bindings.len(), eq(1));
-        assert_that!(kb.file.bindings[0].key.as_str(), eq("enter"));
+        assert_that!(kb.file.bindings[0].key.as_str(), eq("<CR>"));
         assert_that!(kb.file.bindings[0].notify.as_deref(), some(eq("open_file")));
 
         // Directory binding.
         assert_that!(kb.directory.bindings.len(), eq(1));
-        assert_that!(kb.directory.bindings[0].key.as_str(), eq("enter"));
+        assert_that!(kb.directory.bindings[0].key.as_str(), eq("<CR>"));
         assert_that!(kb.directory.bindings[0].action.as_deref(), some(eq("tree.toggle_expand")));
 
         // Daemon universal binding.
         assert_that!(kb.daemon.universal.bindings.len(), eq(1));
-        assert_that!(kb.daemon.universal.bindings[0].key.as_str(), eq("ctrl+q"));
+        assert_that!(kb.daemon.universal.bindings[0].key.as_str(), eq("<C-q>"));
         assert_that!(kb.daemon.universal.bindings[0].notify.as_deref(), some(eq("quit_request")));
 
         assert!(result.warnings.is_empty());
@@ -922,17 +922,17 @@ keybindings:
         let path = tmp.path().join("config.yml");
         std::fs::write(
             &path,
-            r"
+            r#"
 keybindings:
   file:
     disable_default: true
     bindings:
-      - key: enter
+      - key: "<CR>"
         notify: open_file
   daemon:
     file:
       disable_default: true
-",
+"#,
         )
         .unwrap();
 

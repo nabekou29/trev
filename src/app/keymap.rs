@@ -540,11 +540,11 @@ mod tests {
     fn from_config_directory_section_binding() {
         let config = KeybindingConfig {
             directory: ContextBindings {
-                bindings: vec![entry("enter", "tree.toggle_expand")],
+                bindings: vec![entry("<CR>", "tree.toggle_expand")],
                 ..Default::default()
             },
             file: ContextBindings {
-                bindings: vec![entry("enter", "quit")],
+                bindings: vec![entry("<CR>", "quit")],
                 ..Default::default()
             },
             ..KeybindingConfig::default()
@@ -616,7 +616,7 @@ mod tests {
         let config = KeybindingConfig {
             universal: ContextBindings {
                 bindings: vec![KeyBindingEntry {
-                    key: "ctrl+o".to_string(),
+                    key: "<C-o>".to_string(),
                     action: None,
                     run: None,
                     notify: Some("open_file".to_string()),
@@ -687,12 +687,12 @@ mod tests {
         let config = KeybindingConfig {
             disable_default: true,
             file: ContextBindings {
-                bindings: vec![entry("enter", "tree.expand")],
+                bindings: vec![entry("<CR>", "tree.expand")],
                 ..Default::default()
             },
             daemon: DaemonBindings {
                 file: ContextBindings {
-                    bindings: vec![entry("enter", "quit")],
+                    bindings: vec![entry("<CR>", "quit")],
                     ..Default::default()
                 },
                 ..Default::default()
@@ -717,7 +717,7 @@ mod tests {
             disable_default: true,
             daemon: DaemonBindings {
                 directory: ContextBindings {
-                    bindings: vec![entry("enter", "tree.toggle_expand")],
+                    bindings: vec![entry("<CR>", "tree.toggle_expand")],
                     ..Default::default()
                 },
                 ..Default::default()
