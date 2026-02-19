@@ -33,3 +33,10 @@ src/
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
+
+## Active Technologies
+- Rust 2024 edition, nightly-2026-01-24 + ratatui 0.30, crossterm 0.29, tokio (full), ignore 0.4 (014-git-integration)
+- N/A (git status はインメモリで保持、永続化不要) (014-git-integration)
+
+## Recent Changes
+- 014-git-integration: Added Rust 2024 edition, nightly-2026-01-24 + ratatui 0.30, crossterm 0.29, tokio (full), ignore 0.4

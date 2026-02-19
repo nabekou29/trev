@@ -50,94 +50,94 @@ trev schema               # Print config JSON Schema
 
 ### CLI Options
 
-| Option | Description |
-|---|---|
-| `-a, --show-hidden` | Show hidden files |
-| `--show-ignored` | Show gitignored files |
-| `--no-preview` | Disable preview panel |
-| `--sort-order <ORDER>` | name, size, mtime, type, extension |
-| `--sort-direction <DIR>` | asc, desc |
-| `--no-directories-first` | Do not sort directories before files |
-| `--no-icons` | Disable file icons |
-| `--daemon` | Run as daemon (IPC server) |
-| `--emit` | Emit selected path(s) to stdout on exit |
-| `--emit-format <FMT>` | lines (default), nul, json |
-| `--action <ACTION>` | edit, split, vsplit, tabedit |
-| `--restore / --no-restore` | Session state restore control |
-| `--reveal <PATH>` | Reveal a specific path on startup |
+| Option                     | Description                             |
+| -------------------------- | --------------------------------------- |
+| `-a, --show-hidden`        | Show hidden files                       |
+| `--show-ignored`           | Show gitignored files                   |
+| `--no-preview`             | Disable preview panel                   |
+| `--sort-order <ORDER>`     | name, size, mtime, type, extension      |
+| `--sort-direction <DIR>`   | asc, desc                               |
+| `--no-directories-first`   | Do not sort directories before files    |
+| `--no-icons`               | Disable file icons                      |
+| `--daemon`                 | Run as daemon (IPC server)              |
+| `--emit`                   | Emit selected path(s) to stdout on exit |
+| `--emit-format <FMT>`      | lines (default), nul, json              |
+| `--action <ACTION>`        | edit, split, vsplit, tabedit            |
+| `--restore / --no-restore` | Session state restore control           |
+| `--reveal <PATH>`          | Reveal a specific path on startup       |
 
 ## Default Keybindings
 
 ### Navigation
 
-| Key | Action |
-|---|---|
-| `j` / `Down` | Move down |
-| `k` / `Up` | Move up |
-| `l` / `Right` | Expand |
-| `h` / `Left` | Collapse |
-| `Enter` | Toggle expand |
-| `g` | Jump to first |
-| `G` | Jump to last |
-| `Ctrl+d` | Half page down |
-| `Ctrl+u` | Half page up |
+| Key           | Action         |
+| ------------- | -------------- |
+| `j` / `Down`  | Move down      |
+| `k` / `Up`    | Move up        |
+| `l` / `Right` | Expand         |
+| `h` / `Left`  | Collapse       |
+| `Enter`       | Toggle expand  |
+| `g`           | Jump to first  |
+| `G`           | Jump to last   |
+| `Ctrl+d`      | Half page down |
+| `Ctrl+u`      | Half page up   |
 
 ### Preview
 
-| Key | Action |
-|---|---|
-| `J` | Scroll preview down |
-| `K` | Scroll preview up |
-| `L` | Scroll preview right |
-| `H` | Scroll preview left |
-| `U` | Half page up in preview |
-| `Tab` | Next preview provider |
+| Key         | Action                    |
+| ----------- | ------------------------- |
+| `J`         | Scroll preview down       |
+| `K`         | Scroll preview up         |
+| `L`         | Scroll preview right      |
+| `H`         | Scroll preview left       |
+| `U`         | Half page up in preview   |
+| `Tab`       | Next preview provider     |
 | `Shift+Tab` | Previous preview provider |
-| `P` | Toggle preview |
+| `P`         | Toggle preview            |
 
 ### Display
 
-| Key | Action |
-|---|---|
-| `E` | Expand all |
-| `W` | Collapse all |
-| `.` | Toggle hidden files |
-| `I` | Toggle ignored files |
-| `S` | Cycle sort order |
+| Key | Action                |
+| --- | --------------------- |
+| `E` | Expand all            |
+| `W` | Collapse all          |
+| `.` | Toggle hidden files   |
+| `I` | Toggle ignored files  |
+| `S` | Cycle sort order      |
 | `s` | Toggle sort direction |
 
 ### File Operations
 
-| Key | Action |
-|---|---|
-| `Space` | Toggle mark |
-| `a` | Create file |
-| `A` | Create directory |
-| `r` | Rename |
-| `y` | Yank (copy) |
-| `x` | Cut |
-| `p` | Paste |
-| `d` | Delete |
-| `D` | Move to system trash |
-| `u` | Undo |
-| `Ctrl+r` | Redo |
-| `Esc` | Clear selections |
-| `c` | Copy menu |
+| Key      | Action               |
+| -------- | -------------------- |
+| `Space`  | Toggle mark          |
+| `a`      | Create file          |
+| `A`      | Create directory     |
+| `r`      | Rename               |
+| `y`      | Yank (copy)          |
+| `x`      | Cut                  |
+| `p`      | Paste                |
+| `d`      | Delete               |
+| `D`      | Move to system trash |
+| `u`      | Undo                 |
+| `Ctrl+r` | Redo                 |
+| `Esc`    | Clear selections     |
+| `c`      | Copy menu            |
 
 ### Copy Menu (`c`)
 
-| Key | Action |
-|---|---|
-| `y` | Copy absolute path |
-| `r` | Copy relative path |
-| `c` | Copy file content |
+| Key | Action              |
+| --- | ------------------- |
+| `y` | Copy absolute path  |
+| `r` | Copy relative path  |
+| `c` | Copy file content   |
 | `t` | Copy directory tree |
 
 ### Search
 
-| Key | Action |
-|---|---|
-| `/` | Fuzzy search |
+| Key   | Action        |
+| ----- | ------------- |
+| `/`   | Fuzzy search  |
 | `Esc` | Cancel search |
 
 ## Configuration
@@ -154,8 +154,8 @@ trev schema > ~/.config/trev/config.schema.json
 
 ```yaml
 sort:
-  order: name           # name | size | mtime | type | extension
-  direction: asc        # asc | desc
+  order: name # name | size | mtime | type | extension
+  direction: asc # asc | desc
   directories_first: true
 
 display:
@@ -165,13 +165,13 @@ display:
 
 preview:
   max_lines: 1000
-  max_bytes: 10485760   # 10 MB
+  max_bytes: 10485760 # 10 MB
   cache_size: 50
-  command_timeout: 3    # seconds
+  command_timeout: 3 # seconds
   commands:
     - name: "Pretty JSON"
       extensions: [json]
-      priority: high      # high (0) | mid (100) | low (1000) | <number>
+      priority: high # high (0) | mid (100) | low (1000) | <number>
       command: jq
       args: ["."]
     - name: "Markdown"
@@ -184,7 +184,7 @@ preview:
       args: ["-r"]
 
 file_operations:
-  delete_mode: permanent    # permanent | custom_trash
+  delete_mode: permanent # permanent | custom_trash
   undo_stack_size: 100
 
 session:
@@ -211,11 +211,11 @@ keybindings:
       - key: "q"
         action: quit
       - key: "o"
-        run: "open {path}"       # Shell command with variables
+        run: "open {path}" # Shell command with variables
   file:
     bindings:
       - key: "<CR>"
-        notify: open_file        # IPC notification (daemon mode)
+        notify: open_file # IPC notification (daemon mode)
   directory:
     bindings:
       - key: "<CR>"
@@ -255,13 +255,13 @@ Add the plugin directory to your Neovim config (e.g. with lazy.nvim):
 
 ### Commands
 
-| Command | Description |
-|---|---|
-| `:TrevToggle` | Toggle side panel |
-| `:TrevToggle float` | Open floating picker |
-| `:TrevOpen` | Open side panel |
-| `:TrevClose` | Close side panel |
-| `:TrevReveal [path]` | Reveal file in tree |
+| Command              | Description          |
+| -------------------- | -------------------- |
+| `:TrevToggle`        | Toggle side panel    |
+| `:TrevToggle float`  | Open floating picker |
+| `:TrevOpen`          | Open side panel      |
+| `:TrevClose`         | Close side panel     |
+| `:TrevReveal [path]` | Reveal file in tree  |
 
 ### Daemon Mode
 
