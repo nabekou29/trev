@@ -2,11 +2,16 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::sync::{
+    Arc,
+    RwLock,
+};
 use std::time::Duration;
 
 use ansi_to_tui::IntoText;
 
 use crate::config::ExternalCommand;
+use crate::git::GitState;
 use crate::preview::content::PreviewContent;
 use crate::preview::provider::{
     LoadContext,
@@ -29,13 +34,19 @@ pub struct ExternalCmdProvider {
     command: ExternalCommand,
     /// Timeout for the command.
     timeout: Duration,
+    /// Shared git repository state for `git_status` condition filtering.
+    git_state: Arc<RwLock<Option<GitState>>>,
 }
 
 impl ExternalCmdProvider {
     /// Create a new external command provider for a single command.
-    pub fn new(command: ExternalCommand, timeout_secs: u64) -> Self {
+    pub fn new(
+        command: ExternalCommand,
+        timeout_secs: u64,
+        git_state: Arc<RwLock<Option<GitState>>>,
+    ) -> Self {
         let name = command.display_name().to_string();
-        Self { name, command, timeout: Duration::from_secs(timeout_secs) }
+        Self { name, command, timeout: Duration::from_secs(timeout_secs), git_state }
     }
 
     /// Check if a command exists in PATH.
@@ -62,14 +73,46 @@ impl PreviewProvider for ExternalCmdProvider {
         if !Self::command_exists(&self.command.command) {
             return false;
         }
-        if is_dir {
-            return self.command.directories;
-        }
-        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
-            return false;
+
+        // Check extension / directory match first.
+        let ext_match = if is_dir {
+            self.command.directories
+        } else {
+            path.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|ext| {
+                    let ext_lower = ext.to_ascii_lowercase();
+                    self.command.extensions.iter().any(|e| e.to_ascii_lowercase() == ext_lower)
+                })
         };
-        let ext_lower = ext.to_ascii_lowercase();
-        self.command.extensions.iter().any(|e| e.to_ascii_lowercase() == ext_lower)
+        if !ext_match {
+            return false;
+        }
+
+        // Check git_status condition (empty = no filter, always matches).
+        if !self.command.git_status.is_empty() {
+            let matches = self
+                .git_state
+                .read()
+                .ok()
+                .as_ref()
+                .and_then(|guard| guard.as_ref())
+                .and_then(|gs| {
+                    if is_dir {
+                        gs.dir_status(path)
+                    } else {
+                        gs.file_status(path).copied()
+                    }
+                })
+                .is_some_and(|status| {
+                    self.command.git_status.iter().any(|s| s == status.config_name())
+                });
+            if !matches {
+                return false;
+            }
+        }
+
+        true
     }
 
     fn load(&self, path: &Path, ctx: &LoadContext) -> anyhow::Result<PreviewContent> {
@@ -163,6 +206,10 @@ mod tests {
 
     use super::*;
     use crate::config::Priority;
+    /// Shared empty git state for providers that don't need git filtering.
+    fn no_git() -> Arc<RwLock<Option<GitState>>> {
+        Arc::new(RwLock::new(None))
+    }
 
     fn make_echo_provider() -> ExternalCmdProvider {
         ExternalCmdProvider::new(
@@ -173,8 +220,10 @@ mod tests {
                 priority: Priority::default(),
                 command: "cat".to_string(),
                 args: vec![],
+                git_status: vec![],
             },
             3,
+            no_git(),
         )
     }
 
@@ -187,8 +236,10 @@ mod tests {
                 priority: Priority::default(),
                 command: "nonexistent_command_12345".to_string(),
                 args: vec![],
+                git_status: vec![],
             },
             3,
+            no_git(),
         )
     }
 
@@ -204,8 +255,10 @@ mod tests {
                 priority: Priority::default(),
                 command: "jq".to_string(),
                 args: vec![".".to_string()],
+                git_status: vec![],
             },
             3,
+            no_git(),
         );
         assert_that!(provider.name(), eq("Pretty JSON"));
     }
@@ -264,10 +317,124 @@ mod tests {
                 priority: Priority::default(),
                 command: "ls".to_string(),
                 args: vec![],
+                git_status: vec![],
             },
             3,
+            no_git(),
         );
         assert_that!(provider.can_handle(&PathBuf::from("/some/dir"), true), eq(true));
+    }
+
+    // --- T031: can_handle with git_status condition ---
+
+    #[rstest]
+    fn can_handle_git_status_matches() {
+        let git_state = Arc::new(RwLock::new(Some(GitState::from_porcelain(
+            " M src/main.rs\n",
+            Path::new("/repo"),
+        ))));
+        let provider = ExternalCmdProvider::new(
+            ExternalCommand {
+                name: None,
+                extensions: vec!["rs".to_string()],
+                directories: false,
+                priority: Priority::default(),
+                command: "cat".to_string(),
+                args: vec![],
+                git_status: vec!["modified".to_string()],
+            },
+            3,
+            git_state,
+        );
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false),
+            eq(true)
+        );
+    }
+
+    #[rstest]
+    fn can_handle_git_status_no_match() {
+        let git_state = Arc::new(RwLock::new(Some(GitState::from_porcelain(
+            "?? src/main.rs\n",
+            Path::new("/repo"),
+        ))));
+        let provider = ExternalCmdProvider::new(
+            ExternalCommand {
+                name: None,
+                extensions: vec!["rs".to_string()],
+                directories: false,
+                priority: Priority::default(),
+                command: "cat".to_string(),
+                args: vec![],
+                git_status: vec!["modified".to_string()],
+            },
+            3,
+            git_state,
+        );
+        // File is untracked, not modified — should not match.
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false),
+            eq(false)
+        );
+    }
+
+    #[rstest]
+    fn can_handle_git_status_no_condition_always_matches() {
+        // Empty git_status = no filter, always matches if extension matches.
+        let provider = make_echo_provider();
+        assert_that!(provider.can_handle(&PathBuf::from("data.csv"), false), eq(true));
+    }
+
+    #[rstest]
+    fn can_handle_git_status_file_has_no_status() {
+        // File exists but has no git status — should not match when filter is set.
+        let git_state = Arc::new(RwLock::new(Some(GitState::from_porcelain(
+            "",
+            Path::new("/repo"),
+        ))));
+        let provider = ExternalCmdProvider::new(
+            ExternalCommand {
+                name: None,
+                extensions: vec!["rs".to_string()],
+                directories: false,
+                priority: Priority::default(),
+                command: "cat".to_string(),
+                args: vec![],
+                git_status: vec!["modified".to_string()],
+            },
+            3,
+            git_state,
+        );
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/clean.rs"), false),
+            eq(false)
+        );
+    }
+
+    #[rstest]
+    fn can_handle_git_status_multiple_statuses() {
+        let git_state = Arc::new(RwLock::new(Some(GitState::from_porcelain(
+            "A  src/new.rs\n",
+            Path::new("/repo"),
+        ))));
+        let provider = ExternalCmdProvider::new(
+            ExternalCommand {
+                name: None,
+                extensions: vec!["rs".to_string()],
+                directories: false,
+                priority: Priority::default(),
+                command: "cat".to_string(),
+                args: vec![],
+                git_status: vec!["modified".to_string(), "added".to_string()],
+            },
+            3,
+            git_state,
+        );
+        // File is "added" which is in the filter list.
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/new.rs"), false),
+            eq(true)
+        );
     }
 
     // --- load tests ---

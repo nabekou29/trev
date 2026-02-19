@@ -10,7 +10,10 @@ use std::path::{
     Path,
     PathBuf,
 };
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    RwLock,
+};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
@@ -32,6 +35,11 @@ pub use state::*;
 
 use crate::cli::Args;
 use crate::config::Config;
+use crate::git::{
+    GitState,
+    GitStatusResult,
+};
+
 use crate::ipc::types::IpcCommand;
 use crate::file_op::selection::SelectionBuffer;
 use crate::file_op::undo::UndoHistory;
@@ -92,7 +100,8 @@ pub async fn run(args: &Args) -> Result<()> {
     // Detect terminal background for theme selection (must be before raw mode).
     // terminal_light::luma() sends OSC 11 query — safe only in cooked mode.
     crate::preview::highlight::init_theme();
-    let preview_registry = build_preview_registry(picker, &config)?;
+    let git_state: Arc<RwLock<Option<GitState>>> = Arc::new(RwLock::new(None));
+    let preview_registry = build_preview_registry(picker, &config, &git_state)?;
 
     let show_preview = config.display.show_preview;
 
@@ -128,6 +137,7 @@ pub async fn run(args: &Args) -> Result<()> {
         status_message: None,
         processing: false,
         emit_paths: if args.emit { Some(Vec::new()) } else { None },
+        git_state: Arc::clone(&git_state),
     };
 
     // Set up async children load channel.
@@ -135,6 +145,11 @@ pub async fn run(args: &Args) -> Result<()> {
 
     // Set up async preview load channel.
     let (preview_tx, mut preview_rx) = tokio::sync::mpsc::channel::<PreviewLoadResult>(16);
+
+    // Set up async git status channel.
+    let (git_tx, mut git_rx) = tokio::sync::mpsc::channel::<GitStatusResult>(4);
+
+    let git_enabled = config.git.enabled;
 
     // Create immutable runtime context.
     let ctx = AppContext {
@@ -146,6 +161,9 @@ pub async fn run(args: &Args) -> Result<()> {
         suppressed,
         ipc_server,
         editor_action: args.action.into(),
+        git_tx,
+        git_enabled,
+        root_path: root_path.clone(),
     };
 
     // Prefetch root's child directories for instant first expansion.
@@ -156,6 +174,11 @@ pub async fn run(args: &Args) -> Result<()> {
         state.show_hidden,
         state.show_ignored,
     );
+
+    // Trigger initial git status fetch.
+    if ctx.git_enabled {
+        trigger_git_status(&ctx);
+    }
 
     // Trigger initial preview for the currently selected file.
     trigger_preview(&mut state, &ctx);
@@ -233,6 +256,14 @@ pub async fn run(args: &Args) -> Result<()> {
             handle_ipc_command(cmd, &mut state);
         }
 
+        // Receive async git status results.
+        while let Ok(result) = git_rx.try_recv() {
+            if let Ok(mut guard) = state.git_state.write() {
+                *guard = result.state;
+            }
+            tracing::debug!("git status updated");
+        }
+
         // Receive async preview load results.
         process_preview_results(&mut preview_rx, &mut state);
 
@@ -288,15 +319,22 @@ fn setup_watcher(
 }
 
 /// Build the preview provider registry from config.
-fn build_preview_registry(picker: Picker, config: &Config) -> Result<PreviewRegistry> {
+fn build_preview_registry(
+    picker: Picker,
+    config: &Config,
+    git_state: &Arc<RwLock<Option<GitState>>>,
+) -> Result<PreviewRegistry> {
     let mut providers: Vec<Arc<dyn PreviewProvider>> = vec![
         Arc::new(ImagePreviewProvider::new(picker)),
         Arc::new(TextPreviewProvider::new()),
         Arc::new(FallbackProvider::new()),
     ];
     for cmd in &config.preview.commands {
-        providers
-            .push(Arc::new(ExternalCmdProvider::new(cmd.clone(), config.preview.command_timeout)));
+        providers.push(Arc::new(ExternalCmdProvider::new(
+            cmd.clone(),
+            config.preview.command_timeout,
+            Arc::clone(git_state),
+        )));
     }
     PreviewRegistry::new(providers)
 }
@@ -518,6 +556,47 @@ fn process_preview_results(
     }
 }
 
+/// Trigger an async git status fetch in the background.
+///
+/// Runs `git status --porcelain=v1` via `spawn_blocking` and sends the
+/// result through the `git_tx` channel.
+pub fn trigger_git_status(ctx: &AppContext) {
+    let tx = ctx.git_tx.clone();
+    let root = ctx.root_path.clone();
+    tokio::task::spawn_blocking(move || {
+        let result = fetch_git_status(&root);
+        // Channel may be closed during shutdown — ignore errors.
+        let _ = tx.blocking_send(result);
+    });
+}
+
+/// Synchronously run `git status --porcelain=v1` and parse the output.
+fn fetch_git_status(root: &Path) -> GitStatusResult {
+    let output = std::process::Command::new("git")
+        .args(["status", "--porcelain=v1"])
+        .current_dir(root)
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let state = GitState::from_porcelain(&stdout, root);
+            GitStatusResult { state: Some(state) }
+        }
+        Ok(out) => {
+            tracing::debug!(
+                stderr = %String::from_utf8_lossy(&out.stderr).trim(),
+                "git status returned non-zero exit code"
+            );
+            GitStatusResult { state: None }
+        }
+        Err(e) => {
+            tracing::debug!(%e, "git command not available");
+            GitStatusResult { state: None }
+        }
+    }
+}
+
 /// Process pending file system watcher events and refresh affected directories.
 fn process_watcher_events(
     watcher_rx: &mut tokio::sync::mpsc::UnboundedReceiver<
@@ -542,6 +621,11 @@ fn process_watcher_events(
             if state.tree_state.handle_fs_change(dir) {
                 refresh_directory(state, dir, ctx);
             }
+        }
+
+        // Re-fetch git status when files change.
+        if ctx.git_enabled {
+            trigger_git_status(ctx);
         }
     }
 }

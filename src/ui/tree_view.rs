@@ -15,8 +15,12 @@ use ratatui::widgets::Paragraph;
 
 use crate::app::AppState;
 use crate::file_op::selection::SelectionMode;
+use crate::git::GitFileStatus;
 use crate::input::AppMode;
 use crate::state::tree::ChildrenState;
+
+/// Width reserved for the right-side metadata area (git status indicator).
+const METADATA_WIDTH: usize = 2;
 
 /// Render the tree view into the given area.
 pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
@@ -24,6 +28,7 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let offset = state.scroll.offset();
     let height = area.height as usize;
     let cursor = state.tree_state.cursor();
+    let area_width = area.width as usize;
 
     let mut lines: Vec<Line<'_>> = Vec::with_capacity(height);
 
@@ -105,16 +110,25 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             ""
         };
 
-        let name_style = if vnode.node.is_dir {
-            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
+        // Resolve git status (used for both filename color and right-side indicator).
+        let git_status = resolve_git_status(state, &vnode.node.path, vnode.node.is_dir);
+
+        let name_style = resolve_name_style(vnode.node.is_dir, git_status);
 
         spans.push(Span::styled(name.clone(), name_style));
 
         if !dir_suffix.is_empty() {
             spans.push(Span::styled(dir_suffix, Style::default().fg(Color::DarkGray)));
+        }
+        if let Some(status) = git_status {
+            // Calculate current left-side content width.
+            let left_width: usize = spans.iter().map(Span::width).sum();
+            let total_needed = left_width + METADATA_WIDTH;
+            if area_width > total_needed {
+                let padding = area_width - total_needed;
+                spans.push(Span::raw(" ".repeat(padding)));
+            }
+            spans.push(git_status_indicator(status));
         }
 
         let line = Line::from(spans);
@@ -135,6 +149,52 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     if let AppMode::Input(ref input) = state.mode {
         render_input_overlay(frame, area, cursor, offset, height, input);
     }
+}
+
+/// Resolve the display style for a filename.
+///
+/// Priority (highest wins): git status color → default color.
+/// Future: glob pattern color will slot in between.
+fn resolve_name_style(is_dir: bool, git_status: Option<GitFileStatus>) -> Style {
+    let base = if is_dir {
+        Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+
+    if is_dir {
+        base
+    } else {
+        git_status.map_or(base, |status| base.fg(status.color()))
+    }
+}
+
+/// Resolve the git status for a node (file or directory).
+fn resolve_git_status(
+    state: &AppState,
+    path: &std::path::Path,
+    is_dir: bool,
+) -> Option<GitFileStatus> {
+    let guard = state.git_state.read().ok()?;
+    let git_state = guard.as_ref()?;
+    let result = if is_dir {
+        git_state.dir_status(path)
+    } else {
+        git_state.file_status(path).copied()
+    };
+    drop(guard);
+    result
+}
+
+/// Create a styled `Span` for a git file status indicator.
+fn git_status_indicator(status: GitFileStatus) -> Span<'static> {
+    let ch = status.char();
+    let color = status.color();
+    let mut style = Style::default().fg(color);
+    if matches!(status, GitFileStatus::Conflicted) {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    Span::styled(format!("{ch} "), style)
 }
 
 /// Render the inline input overlay below the cursor row.
@@ -190,4 +250,41 @@ fn parse_hex_color(hex: &str) -> Color {
     };
 
     Color::Rgb(r, g, b)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+mod tests {
+    use googletest::prelude::*;
+    use rstest::*;
+
+    use super::*;
+
+    // --- T012: git_status_indicator ---
+
+    #[rstest]
+    #[case(GitFileStatus::Modified, 'M', Color::Yellow)]
+    #[case(GitFileStatus::Staged, 'M', Color::Green)]
+    #[case(GitFileStatus::Added, 'A', Color::Green)]
+    #[case(GitFileStatus::Deleted, 'D', Color::Red)]
+    #[case(GitFileStatus::Renamed, 'R', Color::Blue)]
+    #[case(GitFileStatus::Untracked, '?', Color::Magenta)]
+    #[case(GitFileStatus::Conflicted, '!', Color::Red)]
+    fn git_status_indicator_returns_correct_char_and_color(
+        #[case] status: GitFileStatus,
+        #[case] expected_char: char,
+        #[case] expected_color: Color,
+    ) {
+        let span = git_status_indicator(status);
+        let content = span.content.to_string();
+        assert_that!(content.trim().len(), eq(1));
+        assert!(content.starts_with(expected_char));
+        assert_that!(span.style.fg, some(eq(expected_color)));
+    }
+
+    #[rstest]
+    fn git_status_indicator_conflicted_is_bold() {
+        let span = git_status_indicator(GitFileStatus::Conflicted);
+        assert!(span.style.add_modifier.contains(Modifier::BOLD));
+    }
 }

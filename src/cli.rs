@@ -77,6 +77,10 @@ pub struct Args {
     #[arg(long, conflicts_with = "restore")]
     pub no_restore: bool,
 
+    /// Disable git integration.
+    #[arg(long)]
+    pub no_git: bool,
+
     /// Reveal a specific path on startup.
     #[arg(long)]
     pub reveal: Option<PathBuf>,
@@ -184,6 +188,7 @@ impl Default for Args {
             sort_direction: None,
             no_directories_first: false,
             no_icons: false,
+            no_git: false,
             restore: false,
             no_restore: false,
             daemon: false,
@@ -193,5 +198,28 @@ impl Default for Args {
             reveal: None,
             command: None,
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+mod tests {
+    use googletest::prelude::*;
+    use rstest::*;
+
+    use super::*;
+
+    // --- T036: --no-git CLI flag parsing ---
+
+    #[rstest]
+    fn no_git_flag_defaults_to_false() {
+        let args = Args::default();
+        assert_that!(args.no_git, eq(false));
+    }
+
+    #[rstest]
+    fn no_git_flag_parsed_from_cli() {
+        let args = Args::try_parse_from(["trev", "--no-git", "."]).unwrap();
+        assert_that!(args.no_git, eq(true));
     }
 }

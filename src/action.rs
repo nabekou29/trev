@@ -80,6 +80,8 @@ pub enum TreeAction {
     ToggleHidden,
     /// Toggle gitignored file visibility.
     ToggleIgnored,
+    /// Refresh tree structure and git status.
+    Refresh,
 }
 
 /// Actions for the preview panel.
@@ -125,6 +127,7 @@ impl fmt::Display for TreeAction {
             Self::CollapseAll => "tree.collapse_all",
             Self::ToggleHidden => "tree.toggle_hidden",
             Self::ToggleIgnored => "tree.toggle_ignored",
+            Self::Refresh => "tree.refresh",
         };
         f.write_str(s)
     }
@@ -203,6 +206,7 @@ impl FromStr for TreeAction {
             "tree.collapse_all" => Ok(Self::CollapseAll),
             "tree.toggle_hidden" => Ok(Self::ToggleHidden),
             "tree.toggle_ignored" => Ok(Self::ToggleIgnored),
+            "tree.refresh" => Ok(Self::Refresh),
             _ => Err(format!("unknown tree action: {s}")),
         }
     }
@@ -318,6 +322,7 @@ mod tests {
             TreeAction::CollapseAll,
             TreeAction::ToggleHidden,
             TreeAction::ToggleIgnored,
+            TreeAction::Refresh,
         ];
         for action in actions {
             let s = action.to_string();

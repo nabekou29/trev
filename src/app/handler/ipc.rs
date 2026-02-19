@@ -80,6 +80,7 @@ mod tests {
             status_message: None,
             processing: false,
             emit_paths: None,
+            git_state: Arc::new(std::sync::RwLock::new(None)),
         }
     }
 

@@ -15,6 +15,10 @@ use crate::config::{
 };
 use crate::file_op::selection::SelectionBuffer;
 use crate::file_op::undo::UndoHistory;
+use crate::git::{
+    GitState,
+    GitStatusResult,
+};
 use crate::input::AppMode;
 use crate::preview::cache::PreviewCache;
 use crate::preview::content::PreviewContent;
@@ -67,6 +71,11 @@ pub struct AppState {
     /// Emit mode: accumulated file paths for stdout output on exit.
     /// `Some(vec)` when `--emit` is active, `None` otherwise.
     pub emit_paths: Option<Vec<PathBuf>>,
+    /// Git repository status (None when git is disabled or outside a repo).
+    ///
+    /// Shared via `Arc<RwLock<…>>` so `ExternalCmdProvider` instances can read
+    /// the current status in `can_handle()` without borrowing `AppState`.
+    pub git_state: Arc<std::sync::RwLock<Option<GitState>>>,
 }
 
 impl AppState {
@@ -175,6 +184,12 @@ pub struct AppContext {
     pub ipc_server: Option<Arc<crate::ipc::server::IpcServer>>,
     /// Default editor action for opening files (from `--action` flag).
     pub editor_action: crate::ipc::types::EditorAction,
+    /// Sender for async git status results.
+    pub git_tx: tokio::sync::mpsc::Sender<GitStatusResult>,
+    /// Whether git integration is enabled.
+    pub git_enabled: bool,
+    /// Absolute path to the workspace root (for git operations).
+    pub root_path: PathBuf,
 }
 
 /// Result of an async directory children load operation.

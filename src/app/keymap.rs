@@ -196,6 +196,8 @@ impl KeyMap {
         self.bind(KeyCode::Char('.'), KeyModifiers::NONE, Action::Tree(TreeAction::ToggleHidden));
         self.bind(KeyCode::Char('I'), KeyModifiers::SHIFT, Action::Tree(TreeAction::ToggleIgnored));
         self.bind(KeyCode::Char('I'), KeyModifiers::NONE, Action::Tree(TreeAction::ToggleIgnored));
+        self.bind(KeyCode::Char('R'), KeyModifiers::SHIFT, Action::Tree(TreeAction::Refresh));
+        self.bind(KeyCode::Char('R'), KeyModifiers::NONE, Action::Tree(TreeAction::Refresh));
     }
 
     /// Default file operation bindings.

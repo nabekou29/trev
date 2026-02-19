@@ -35,6 +35,8 @@ pub struct Config {
     pub watcher: WatcherConfig,
     /// Keybinding customization.
     pub keybindings: KeybindingConfig,
+    /// Git integration settings.
+    pub git: GitConfig,
 }
 
 /// Keybinding configuration with context-based sections.
@@ -126,7 +128,7 @@ impl JsonSchema for KeyBindingEntry {
                                 "tree.jump_first", "tree.jump_last",
                                 "tree.half_page_down", "tree.half_page_up",
                                 "tree.expand_all", "tree.collapse_all",
-                                "tree.toggle_hidden", "tree.toggle_ignored",
+                                "tree.toggle_hidden", "tree.toggle_ignored", "tree.refresh",
                                 "preview.scroll_down", "preview.scroll_up",
                                 "preview.scroll_right", "preview.scroll_left",
                                 "preview.half_page_down", "preview.half_page_up",
@@ -260,6 +262,12 @@ pub struct ExternalCommand {
     /// Command arguments.
     #[serde(default)]
     pub args: Vec<String>,
+    /// Git status condition: only apply when file has one of these statuses.
+    ///
+    /// Values: `modified`, `staged`, `added`, `deleted`, `renamed`, `untracked`, `conflicted`.
+    /// Empty means no git status filtering.
+    #[serde(default)]
+    pub git_status: Vec<String>,
 }
 
 /// Preview provider priority.
@@ -446,6 +454,20 @@ impl Default for DisplayConfig {
     }
 }
 
+/// Git integration configuration.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct GitConfig {
+    /// Whether Git integration is enabled.
+    pub enabled: bool,
+}
+
+impl Default for GitConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Result of loading configuration.
 ///
 /// Contains the parsed config and any warnings (e.g. unknown keys).
@@ -516,6 +538,9 @@ impl Config {
         }
         if args.show_root {
             self.display.show_root = true;
+        }
+        if args.no_git {
+            self.git.enabled = false;
         }
     }
 
@@ -777,6 +802,28 @@ display:
         assert_that!(config.display.show_preview, eq(false));
     }
 
+    // --- T037: apply_cli_overrides with --no-git ---
+
+    #[rstest]
+    fn cli_override_no_git_disables_git() {
+        let mut config = Config::default();
+        assert_that!(config.git.enabled, eq(true));
+
+        let args = Args { no_git: true, ..Args::default() };
+        config.apply_cli_overrides(&args);
+
+        assert_that!(config.git.enabled, eq(false));
+    }
+
+    #[rstest]
+    fn cli_override_no_git_not_set_preserves_enabled() {
+        let mut config = Config::default();
+        let args = Args::default();
+        config.apply_cli_overrides(&args);
+
+        assert_that!(config.git.enabled, eq(true));
+    }
+
     // --- ExternalCommand display_name ---
 
     #[rstest]
@@ -788,6 +835,7 @@ display:
             priority: Priority::default(),
             command: "jq".to_string(),
             args: vec![".".to_string()],
+            git_status: vec![],
         };
         assert_that!(cmd.display_name(), eq("Pretty JSON"));
     }
@@ -801,6 +849,7 @@ display:
             priority: Priority::default(),
             command: "glow".to_string(),
             args: vec![],
+            git_status: vec![],
         };
         assert_that!(cmd.display_name(), eq("glow"));
     }
@@ -983,7 +1032,7 @@ keybindings:
         let json = serde_json::to_value(&schema).unwrap();
         let props = json["properties"].as_object().unwrap();
 
-        for key in ["sort", "display", "preview", "file_operations", "session", "watcher", "keybindings"] {
+        for key in ["sort", "display", "preview", "file_operations", "session", "watcher", "keybindings", "git"] {
             assert!(props.contains_key(key), "missing top-level property: {key}");
         }
     }
@@ -1022,5 +1071,88 @@ keybindings:
         for section in ["disable_default", "universal", "file", "directory", "daemon"] {
             assert!(json_str.contains(section), "keybindings missing section: {section}");
         }
+    }
+
+    // --- T011: GitConfig defaults and deserialization ---
+
+    #[rstest]
+    fn git_config_defaults_to_enabled() {
+        let config = GitConfig::default();
+        assert_that!(config.enabled, eq(true));
+    }
+
+    #[rstest]
+    fn git_config_from_yaml_enabled() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "git:\n  enabled: true\n").unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        assert_that!(result.config.git.enabled, eq(true));
+    }
+
+    #[rstest]
+    fn git_config_from_yaml_disabled() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "git:\n  enabled: false\n").unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        assert_that!(result.config.git.enabled, eq(false));
+    }
+
+    // --- T030: ExternalCommand deserialization with git_status ---
+
+    #[rstest]
+    fn external_command_git_status_from_yaml() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(
+            &path,
+            r"
+preview:
+  commands:
+    - command: diff-so-fancy
+      extensions: [rs, py]
+      git_status: [modified, staged_modified]
+",
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        let cmd = &result.config.preview.commands[0];
+        assert_that!(cmd.git_status.len(), eq(2));
+        assert_that!(cmd.git_status[0].as_str(), eq("modified"));
+        assert_that!(cmd.git_status[1].as_str(), eq("staged_modified"));
+    }
+
+    #[rstest]
+    fn external_command_git_status_defaults_to_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(
+            &path,
+            r"
+preview:
+  commands:
+    - command: cat
+      extensions: [txt]
+",
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        let cmd = &result.config.preview.commands[0];
+        assert!(cmd.git_status.is_empty());
+    }
+
+    #[rstest]
+    fn git_config_defaults_when_section_missing() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "").unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        assert_that!(result.config.git.enabled, eq(true));
     }
 }

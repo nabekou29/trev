@@ -16,6 +16,7 @@ pub mod app;
 pub mod cli;
 pub mod config;
 pub mod file_op;
+pub mod git;
 pub mod input;
 pub mod ipc;
 pub mod preview;

@@ -127,6 +127,14 @@ pub fn handle_tree_action(
             let label = if state.show_ignored { "shown" } else { "hidden" };
             state.set_status(format!("Ignored files: {label}"));
         }
+        TreeAction::Refresh => {
+            rebuild_tree(state, ctx);
+            // Re-fetch git status.
+            if ctx.git_enabled {
+                crate::app::trigger_git_status(ctx);
+            }
+            state.set_status("Refreshed");
+        }
     }
 }
 
