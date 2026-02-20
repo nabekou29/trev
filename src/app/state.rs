@@ -61,7 +61,7 @@ pub struct AppState {
     /// Whether to show gitignored files.
     pub show_ignored: bool,
     /// Current viewport height (tree area rows).
-    pub viewport_height: u16,
+    pub viewport_height: usize,
     /// Scroll state for the tree view.
     pub scroll: ScrollState,
     /// Temporary status message displayed in the status bar.

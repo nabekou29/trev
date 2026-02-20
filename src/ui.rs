@@ -64,13 +64,13 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
             return;
         };
 
-        state.viewport_height = tree_area.height;
+        state.viewport_height = tree_area.height as usize;
 
         tree_view::render_tree(frame, tree_area, state);
         preview_view::render_preview(frame, preview_area, &mut state.preview_state, is_narrow);
     } else {
         // Full width tree when preview is disabled.
-        state.viewport_height = main_area.height;
+        state.viewport_height = main_area.height as usize;
 
         tree_view::render_tree(frame, main_area, state);
     }

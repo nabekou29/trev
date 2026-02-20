@@ -104,10 +104,10 @@ pub fn handle_tree_action(
             state.tree_state.jump_to_last();
         }
         TreeAction::HalfPageDown => {
-            state.tree_state.half_page_down(state.viewport_height as usize);
+            state.tree_state.half_page_down(state.viewport_height);
         }
         TreeAction::HalfPageUp => {
-            state.tree_state.half_page_up(state.viewport_height as usize);
+            state.tree_state.half_page_up(state.viewport_height);
         }
         TreeAction::ExpandAll => {
             handle_expand_all(state, ctx);
