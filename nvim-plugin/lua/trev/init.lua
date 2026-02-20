@@ -219,6 +219,8 @@ function M._handle_message(line)
 
   if method == "open_file" then
     M._handle_open_file(params)
+  elseif method == "close" then
+    M._handle_close()
   elseif method == "external_command" then
     M._handle_external_command(params)
   elseif config.handlers[method] then
@@ -251,6 +253,15 @@ function M._handle_open_file(params)
   end
 
   vim.cmd(action .. " " .. escape_path(path))
+end
+
+--- Handle close notification: close the trev panel or float.
+function M._handle_close()
+  local prev_win = state.prev_win
+  M._close_instance()
+  if prev_win and vim.api.nvim_win_is_valid(prev_win) then
+    vim.api.nvim_set_current_win(prev_win)
+  end
 end
 
 --- Handle external_command notification: dispatch to user handler.

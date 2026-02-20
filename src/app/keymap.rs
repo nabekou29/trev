@@ -238,13 +238,15 @@ impl KeyMap {
 
     /// Default daemon-mode keybindings.
     fn load_default_daemon(&mut self) {
+        let daemon = BTreeSet::from([KeyContext::Daemon]);
+        let daemon_file = BTreeSet::from([KeyContext::Daemon, KeyContext::File]);
+
+        // q in daemon mode: notify the editor to close the panel/float
+        // (overrides universal quit so the plugin can handle cleanup properly).
+        self.bind_when(KeyCode::Char('q'), KeyModifiers::NONE, daemon, Action::Notify("close".to_string()));
+
         // Enter on a file in daemon mode: send open_file notification to the editor.
-        self.bind_when(
-            KeyCode::Enter,
-            KeyModifiers::NONE,
-            BTreeSet::from([KeyContext::Daemon, KeyContext::File]),
-            Action::Notify("open_file".to_string()),
-        );
+        self.bind_when(KeyCode::Enter, KeyModifiers::NONE, daemon_file, Action::Notify("open_file".to_string()));
     }
 }
 
