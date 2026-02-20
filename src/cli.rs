@@ -85,6 +85,10 @@ pub struct Args {
     #[arg(long)]
     pub reveal: Option<PathBuf>,
 
+    /// Enable performance profiling (outputs Chrome Trace JSON).
+    #[arg(long)]
+    pub profile: bool,
+
     /// Subcommand.
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -196,6 +200,7 @@ impl Default for Args {
             emit_format: EmitFormat::default(),
             action: OpenAction::default(),
             reveal: None,
+            profile: false,
             command: None,
         }
     }

@@ -79,22 +79,28 @@ struct EventReceivers {
 /// tree construction, session restore, reveal, preview/watcher/IPC setup,
 /// and terminal initialization with scroll pre-centering.
 fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatui::DefaultTerminal)> {
-    let load_result = Config::load()?;
-    for warning in &load_result.warnings {
-        tracing::warn!("{warning}");
-    }
-    let mut config = load_result.config;
-    config.apply_cli_overrides(args);
-    tracing::info!(?args, "starting trev");
+    let _span = tracing::info_span!("init_app").entered();
 
-    // Resolve the root path.
-    let root_path = std::fs::canonicalize(&args.path)?;
+    let (config, root_path) = {
+        let _span = tracing::info_span!("config_load").entered();
+        let load_result = Config::load()?;
+        for warning in &load_result.warnings {
+            tracing::warn!("{warning}");
+        }
+        let mut config = load_result.config;
+        config.apply_cli_overrides(args);
+        tracing::info!(?args, "starting trev");
+        let root_path = std::fs::canonicalize(&args.path)?;
+        (config, root_path)
+    };
 
-    // Build the initial tree (depth 1).
-    let show_hidden = config.display.show_hidden;
-    let show_ignored = config.display.show_ignored;
-    let builder = TreeBuilder::new(show_hidden, show_ignored);
-    let root = builder.build(&root_path)?;
+    let (show_hidden, show_ignored) = (config.display.show_hidden, config.display.show_ignored);
+    let (builder, root) = {
+        let _span = tracing::info_span!("tree_build").entered();
+        let builder = TreeBuilder::new(show_hidden, show_ignored);
+        let root = builder.build(&root_path)?;
+        (builder, root)
+    };
 
     // Create tree state with sort/display options.
     let tree_options = crate::state::tree::TreeOptions {
@@ -106,19 +112,7 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
     let mut tree_state = TreeState::new(root, tree_options);
     tree_state.apply_sort(tree_options.sort_order, tree_options.sort_direction, tree_options.directories_first);
 
-    // Detect terminal graphics protocol (must be before terminal init/raw mode).
-    // Falls back to halfblocks if detection fails.
-    // IMPORTANT: must run before init_theme() — init_theme sends an OSC 11 query
-    // whose response would pollute stdin and corrupt Picker's font-size detection.
-    let picker =
-        Picker::from_query_stdio().unwrap_or_else(|_| ImagePreviewProvider::fallback_picker());
-
-    // Detect terminal background for theme selection (must be before raw mode).
-    // terminal_light::luma() sends OSC 11 query — safe only in cooked mode.
-    crate::preview::highlight::init_theme();
-    let git_state: Arc<RwLock<Option<GitState>>> = Arc::new(RwLock::new(None));
-    let preview_registry = build_preview_registry(picker, &config, &git_state)?;
-
+    let (git_state, preview_registry) = detect_terminal_and_build_registry(&config)?;
     let show_preview = config.display.show_preview;
 
     // Create watcher channel and instance.
@@ -130,18 +124,23 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
     let (ipc_server, ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
 
     // Restore session and clean up expired sessions.
-    let (selection, undo_history, session_restored) =
-        restore_session_if_needed(args, &config, &root_path, builder, &mut tree_state);
+    let (selection, undo_history, session_restored) = {
+        let _span = tracing::info_span!("session_restore").entered();
+        restore_session_if_needed(args, &config, &root_path, builder, &mut tree_state)
+    };
 
     // Reveal a specific path on startup (--reveal flag).
-    let reveal_succeeded = args.reveal.as_ref().is_some_and(|reveal| {
-        let builder = TreeBuilder::new(show_hidden, show_ignored);
-        let found = tree_state.reveal_path(reveal, builder);
-        if !found {
-            tracing::warn!(path = %reveal.display(), "failed to reveal path on startup");
-        }
-        found
-    });
+    let reveal_succeeded = {
+        let _span = tracing::info_span!("reveal").entered();
+        args.reveal.as_ref().is_some_and(|reveal| {
+            let builder = TreeBuilder::new(show_hidden, show_ignored);
+            let found = tree_state.reveal_path(reveal, builder);
+            if !found {
+                tracing::warn!(path = %reveal.display(), "failed to reveal path on startup");
+            }
+            found
+        })
+    };
 
     // Create app state.
     let mut state = AppState {
@@ -188,24 +187,12 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
         root_path: root_path.clone(),
     };
 
-    // Prefetch root's child directories for instant first expansion.
-    trigger_prefetch(
-        &mut state.tree_state,
-        &root_path,
-        &ctx,
-        state.show_hidden,
-        state.show_ignored,
-    );
+    trigger_initial_loads(&mut state, &ctx, &root_path);
 
-    // Trigger initial git status fetch.
-    if ctx.git_enabled {
-        trigger_git_status(&ctx);
-    }
-
-    // Trigger initial preview for the currently selected file.
-    trigger_preview(&mut state, &ctx);
-
-    let terminal = setup_terminal(&mut state, session_restored || reveal_succeeded);
+    let terminal = {
+        let _span = tracing::info_span!("terminal_setup").entered();
+        setup_terminal(&mut state, session_restored || reveal_succeeded)
+    };
 
     let channels = EventReceivers {
         children: children_rx,
@@ -244,6 +231,36 @@ fn setup_terminal(state: &mut AppState, needs_center: bool) -> ratatui::DefaultT
     terminal
 }
 
+/// Detect terminal graphics protocol and theme, then build preview registry.
+///
+/// Must be called before entering raw mode. Picker detection must happen before
+/// theme detection (OSC 11 query would corrupt Picker's font-size detection).
+fn detect_terminal_and_build_registry(
+    config: &Config,
+) -> Result<(Arc<RwLock<Option<GitState>>>, PreviewRegistry)> {
+    let picker =
+        Picker::from_query_stdio().unwrap_or_else(|_| ImagePreviewProvider::fallback_picker());
+    crate::preview::highlight::init_theme();
+    let git_state: Arc<RwLock<Option<GitState>>> = Arc::new(RwLock::new(None));
+    let preview_registry = build_preview_registry(picker, config, &git_state)?;
+    Ok((git_state, preview_registry))
+}
+
+/// Trigger initial async operations: prefetch, git status, preview.
+fn trigger_initial_loads(state: &mut AppState, ctx: &AppContext, root_path: &Path) {
+    trigger_prefetch(
+        &mut state.tree_state,
+        root_path,
+        ctx,
+        state.show_hidden,
+        state.show_ignored,
+    );
+    if ctx.git_enabled {
+        trigger_git_status(ctx);
+    }
+    trigger_preview(state, ctx);
+}
+
 /// Run the application.
 #[expect(clippy::unused_async, reason = "Called from tokio async context")]
 pub async fn run(args: &Args) -> Result<()> {
@@ -253,49 +270,61 @@ pub async fn run(args: &Args) -> Result<()> {
 
     // Main event loop.
     loop {
+        let _frame_span = tracing::info_span!("frame").entered();
+
         // Clear expired status messages.
         state.clear_expired_status();
 
         // Draw UI.
-        terminal.draw(|frame| {
-            crate::ui::render(frame, &mut state);
-        })?;
+        {
+            let _span = tracing::info_span!("draw").entered();
+            terminal.draw(|frame| {
+                crate::ui::render(frame, &mut state);
+            })?;
+        }
 
         // Poll for events (50ms timeout for responsive async result handling).
         if crossterm::event::poll(Duration::from_millis(50))?
             && let Event::Key(key) = crossterm::event::read()?
         {
+            let _span = tracing::info_span!("key_event").entered();
             handle_key_event(key, &mut state, &ctx);
         }
 
         // Receive async children load results.
-        while let Ok(result) = channels.children.try_recv() {
-            match result.children {
-                Ok(children) => {
-                    let loaded_path = result.path.clone();
-                    let is_prefetch = result.prefetch;
-                    state.tree_state.set_children(&result.path, children, !is_prefetch);
+        {
+            let _span = tracing::info_span!("process_children").entered();
+            while let Ok(result) = channels.children.try_recv() {
+                match result.children {
+                    Ok(children) => {
+                        let loaded_path = result.path.clone();
+                        let is_prefetch = result.prefetch;
+                        state.tree_state.set_children(&result.path, children, !is_prefetch);
 
-                    // Prefetch child directories one level ahead (user-initiated loads only).
-                    if !is_prefetch {
-                        trigger_prefetch(
-                            &mut state.tree_state,
-                            &loaded_path,
-                            &ctx,
-                            state.show_hidden,
-                            state.show_ignored,
-                        );
+                        // Prefetch child directories one level ahead (user-initiated loads only).
+                        if !is_prefetch {
+                            trigger_prefetch(
+                                &mut state.tree_state,
+                                &loaded_path,
+                                &ctx,
+                                state.show_hidden,
+                                state.show_ignored,
+                            );
+                        }
                     }
-                }
-                Err(err) => {
-                    tracing::warn!(?result.path, %err, "failed to load children");
-                    state.tree_state.set_children_error(&result.path);
+                    Err(err) => {
+                        tracing::warn!(?result.path, %err, "failed to load children");
+                        state.tree_state.set_children_error(&result.path);
+                    }
                 }
             }
         }
 
         // Receive watcher events (file system changes in watched directories).
-        process_watcher_events(&mut channels.watcher, &mut state, &ctx);
+        {
+            let _span = tracing::info_span!("process_watcher").entered();
+            process_watcher_events(&mut channels.watcher, &mut state, &ctx);
+        }
 
         // Receive IPC commands.
         while let Ok(cmd) = channels.ipc.try_recv() {
@@ -311,7 +340,10 @@ pub async fn run(args: &Args) -> Result<()> {
         }
 
         // Receive async preview load results.
-        process_preview_results(&mut channels.preview, &mut state);
+        {
+            let _span = tracing::info_span!("process_preview").entered();
+            process_preview_results(&mut channels.preview, &mut state);
+        }
 
         // Trigger preview when cursor changes.
         let current_cursor = state.tree_state.cursor();

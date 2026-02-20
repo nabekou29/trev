@@ -7,6 +7,9 @@ use anyhow::{
     Result,
     bail,
 };
+use tracing_subscriber::Layer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -19,16 +22,39 @@ async fn main() -> Result<()> {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
 
+    // Chrome trace guard must live until program exit to flush trace data.
+    let mut chrome_guard: Option<tracing_chrome::FlushGuard> = None;
+    let mut profile_path: Option<PathBuf> = None;
+
     if is_tui_mode {
         let log_dir = dirs::state_dir()
             .or_else(dirs::data_dir)
             .unwrap_or_else(|| PathBuf::from("/tmp"))
             .join("trev");
-        let file_appender = tracing_appender::rolling::daily(log_dir, "trev.log");
-        tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
+
+        let file_appender = tracing_appender::rolling::daily(&log_dir, "trev.log");
+        let fmt_layer = tracing_subscriber::fmt::layer()
             .with_writer(file_appender)
             .with_ansi(false)
+            .with_filter(env_filter);
+
+        let chrome_layer = if args.profile {
+            let output = log_dir.join("profile.json");
+            let (layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
+                .trace_style(tracing_chrome::TraceStyle::Async)
+                .file(output.clone())
+                .include_args(true)
+                .build();
+            chrome_guard = Some(guard);
+            profile_path = Some(output);
+            Some(layer.with_filter(tracing_subscriber::filter::LevelFilter::INFO))
+        } else {
+            None
+        };
+
+        tracing_subscriber::registry()
+            .with(fmt_layer)
+            .with(chrome_layer)
             .init();
     } else {
         tracing_subscriber::fmt()
@@ -55,7 +81,21 @@ async fn main() -> Result<()> {
         None => {}
     }
 
-    trev::app::run(&args).await
+    trev::app::run(&args).await?;
+
+    // Flush profile data and notify user of the output path.
+    drop(chrome_guard);
+    if let Some(path) = &profile_path {
+        notify_profile_path(path);
+    }
+
+    Ok(())
+}
+
+/// Print profile output path to stderr after terminal restore.
+#[expect(clippy::print_stderr, reason = "post-exit user notification")]
+fn notify_profile_path(path: &std::path::Path) {
+    eprintln!("[trev] profile written to {}", path.display());
 }
 
 /// Handle `trev ctl` subcommands by connecting to a running daemon.
