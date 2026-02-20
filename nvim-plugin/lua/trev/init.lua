@@ -3,53 +3,93 @@
 --- via JSON-RPC 2.0 over Unix Domain Socket.
 local M = {}
 
+---------------------------------------------------------------------------
+-- Types
+---------------------------------------------------------------------------
+
+--- @class trev.Adapter
+--- @field open_panel fun(self, cmd: string[], opts: trev.AdapterOpts): trev.AdapterHandle|nil
+--- @field open_float fun(self, cmd: string[], opts: trev.AdapterOpts): trev.AdapterHandle|nil
+--- @field close fun(self, handle: trev.AdapterHandle)
+--- @field is_visible fun(self, handle: trev.AdapterHandle): boolean
+--- @field focus fun(self, handle: trev.AdapterHandle)
+
+--- @class trev.AdapterOpts
+--- @field width? number
+--- @field on_exit fun(exit_code: number)
+--- @field on_ready fun(handle: trev.AdapterHandle)
+
+--- @class trev.AdapterHandle
+--- @field buf number|nil
+--- @field win number|nil
+--- @field pid number|nil
+--- @field job_id number|nil
+
 --- @class trev.Config
 --- @field trev_path string Path to trev binary
 --- @field width number Side panel width (columns)
 --- @field auto_reveal boolean Auto-reveal on BufEnter
 --- @field action string Default editor action (edit/split/vsplit/tabedit)
+--- @field adapter "auto"|"native"|"snacks"|"toggleterm" Terminal backend
 --- @field handlers table<string, function> Notification handlers
 
 --- @type trev.Config
 local config = {
-  trev_path = "trev",
-  width = 30,
-  auto_reveal = true,
-  action = "edit",
-  handlers = {},
+    trev_path = "trev",
+    width = 30,
+    auto_reveal = true,
+    action = "edit",
+    adapter = "auto",
+    handlers = {},
 }
 
---- Plugin state.
+---------------------------------------------------------------------------
+-- State
+---------------------------------------------------------------------------
+
 --- @class trev.State
+--- @field handle trev.AdapterHandle|nil adapter handle
+--- @field mode string|nil "panel" | "float" | nil
+--- @field prev_win number|nil window before float opened
 --- @field pipe userdata|nil vim.uv pipe handle
---- @field pid number|nil trev daemon process ID
---- @field job_id number|nil terminal job ID
---- @field buf number|nil terminal buffer number
---- @field win number|nil terminal window number
 --- @field socket_path string|nil path to UDS socket
 --- @field read_buf string partial read buffer for line framing
 --- @field request_id number next JSON-RPC request ID
 --- @field pending table<number, function> pending request callbacks
---- @field mode string|nil "panel" | "float" | nil
---- @field prev_win number|nil window before float opened
 
 --- @type trev.State
 local state = {
-  pipe = nil,
-  pid = nil,
-  job_id = nil,
-  buf = nil,
-  win = nil,
-  socket_path = nil,
-  read_buf = "",
-  request_id = 1,
-  pending = {},
-  mode = nil,
-  prev_win = nil,
+    handle = nil,
+    mode = nil,
+    prev_win = nil,
+    pipe = nil,
+    socket_path = nil,
+    read_buf = "",
+    request_id = 1,
+    pending = {},
 }
+
+--- @type trev.Adapter|nil
+local adapter = nil
 
 --- @type number|nil
 local augroup = nil
+
+---------------------------------------------------------------------------
+-- State helpers
+---------------------------------------------------------------------------
+
+--- Get the current buffer number from the adapter handle.
+--- @return number|nil
+local function get_buf()
+    return state.handle and state.handle.buf
+end
+
+--- Get the current window number from the adapter handle.
+--- @return number|nil
+local function get_win()
+    return state.handle and state.handle.win
+end
 
 ---------------------------------------------------------------------------
 -- Helpers
@@ -59,18 +99,18 @@ local augroup = nil
 --- @param path string
 --- @return string
 local function escape_path(path)
-  return vim.fn.fnameescape(path)
+    return vim.fn.fnameescape(path)
 end
 
 --- Check if a buffer is a "special" buffer that should not trigger auto-reveal.
 --- @param bufnr number
 --- @return boolean
 local function is_special_buffer(bufnr)
-  local bt = vim.bo[bufnr].buftype
-  if bt == "terminal" or bt == "quickfix" or bt == "help" or bt == "nofile" or bt == "prompt" then
-    return true
-  end
-  return false
+    local bt = vim.bo[bufnr].buftype
+    if bt == "terminal" or bt == "quickfix" or bt == "help" or bt == "nofile" or bt == "prompt" then
+        return true
+    end
+    return false
 end
 
 ---------------------------------------------------------------------------
@@ -81,90 +121,90 @@ end
 --- @param socket string path to UDS
 --- @param on_connect function|nil callback on successful connection
 local function ipc_connect(socket, on_connect)
-  if state.pipe then
-    return
-  end
-
-  local pipe = vim.uv.new_pipe(false)
-  if not pipe then
-    vim.notify("[trev] failed to create pipe", vim.log.levels.ERROR)
-    return
-  end
-
-  pipe:connect(socket, function(err)
-    if err then
-      vim.notify("[trev] connect error: " .. err, vim.log.levels.ERROR)
-      pipe:close()
-      return
+    if state.pipe then
+        return
     end
 
-    state.pipe = pipe
-    state.socket_path = socket
-    state.read_buf = ""
-
-    pipe:read_start(function(read_err, data)
-      if read_err then
-        vim.notify("[trev] read error: " .. read_err, vim.log.levels.WARN)
-        M._disconnect()
+    local pipe = vim.uv.new_pipe(false)
+    if not pipe then
+        vim.notify("[trev] failed to create pipe", vim.log.levels.ERROR)
         return
-      end
+    end
 
-      if not data then
-        -- EOF — daemon disconnected.
-        M._disconnect()
-        return
-      end
+    pipe:connect(socket, function(err)
+        if err then
+            vim.notify("[trev] connect error: " .. err, vim.log.levels.ERROR)
+            pipe:close()
+            return
+        end
 
-      -- Line-buffered JSON parsing.
-      state.read_buf = state.read_buf .. data
-      while true do
-        local nl = state.read_buf:find("\n")
-        if not nl then
-          break
+        state.pipe = pipe
+        state.socket_path = socket
+        state.read_buf = ""
+
+        pipe:read_start(function(read_err, data)
+            if read_err then
+                vim.notify("[trev] read error: " .. read_err, vim.log.levels.WARN)
+                M._disconnect()
+                return
+            end
+
+            if not data then
+                -- EOF — daemon disconnected.
+                M._disconnect()
+                return
+            end
+
+            -- Line-buffered JSON parsing.
+            state.read_buf = state.read_buf .. data
+            while true do
+                local nl = state.read_buf:find("\n")
+                if not nl then
+                    break
+                end
+                local line = state.read_buf:sub(1, nl - 1)
+                state.read_buf = state.read_buf:sub(nl + 1)
+                if #line > 0 then
+                    vim.schedule(function()
+                        M._handle_message(line)
+                    end)
+                end
+            end
+        end)
+
+        if on_connect then
+            vim.schedule(on_connect)
         end
-        local line = state.read_buf:sub(1, nl - 1)
-        state.read_buf = state.read_buf:sub(nl + 1)
-        if #line > 0 then
-          vim.schedule(function()
-            M._handle_message(line)
-          end)
-        end
-      end
     end)
-
-    if on_connect then
-      vim.schedule(on_connect)
-    end
-  end)
 end
 
 --- Disconnect the JSON-RPC pipe.
 function M._disconnect()
-  if state.pipe then
-    if not state.pipe:is_closing() then
-      state.pipe:read_stop()
-      state.pipe:close()
+    if state.pipe then
+        if not state.pipe:is_closing() then
+            state.pipe:read_stop()
+            state.pipe:close()
+        end
+        state.pipe = nil
     end
-    state.pipe = nil
-  end
-  state.socket_path = nil
-  state.read_buf = ""
-  state.pending = {}
+    state.socket_path = nil
+    state.read_buf = ""
+    state.pending = {}
 end
 
 --- Send a JSON-RPC notification (no response expected).
 --- @param method string
 --- @param params table|nil
 function M._send_notification(method, params)
-  if not state.pipe then
-    return
-  end
-  local msg = vim.json.encode({
-    jsonrpc = "2.0",
-    method = method,
-    params = params,
-  }) .. "\n"
-  state.pipe:write(msg)
+    if not state.pipe then
+        return
+    end
+    local msg = vim.json.encode({
+        jsonrpc = "2.0",
+        method = method,
+        params = params,
+    }) .. "\n"
+    state.pipe:write(msg)
 end
 
 --- Send a JSON-RPC request (expects a response).
@@ -172,368 +212,351 @@ end
 --- @param params table|nil
 --- @param callback function|nil called with (result, error)
 function M._send_request(method, params, callback)
-  if not state.pipe then
-    if callback then
-      callback(nil, "not connected")
+    if not state.pipe then
+        if callback then
+            callback(nil, "not connected")
+        end
+        return
     end
-    return
-  end
 
-  local id = state.request_id
-  state.request_id = state.request_id + 1
+    local id = state.request_id
+    state.request_id = state.request_id + 1
 
-  if callback then
-    state.pending[id] = callback
-  end
+    if callback then
+        state.pending[id] = callback
+    end
 
-  local msg = vim.json.encode({
-    jsonrpc = "2.0",
-    method = method,
-    params = params,
-    id = id,
-  }) .. "\n"
-  state.pipe:write(msg)
+    local msg = vim.json.encode({
+        jsonrpc = "2.0",
+        method = method,
+        params = params,
+        id = id,
+    }) .. "\n"
+    state.pipe:write(msg)
 end
+
+---------------------------------------------------------------------------
+-- Message handling
+---------------------------------------------------------------------------
 
 --- Handle an incoming JSON-RPC message (notification or response).
 --- @param line string raw JSON line
 function M._handle_message(line)
-  local ok, msg = pcall(vim.json.decode, line)
-  if not ok or type(msg) ~= "table" then
-    return
-  end
-
-  -- Response to a pending request.
-  if msg.id ~= nil then
-    local cb = state.pending[msg.id]
-    if cb then
-      state.pending[msg.id] = nil
-      cb(msg.result, msg.error)
+    local ok, msg = pcall(vim.json.decode, line)
+    if not ok or type(msg) ~= "table" then
+        return
     end
-    return
-  end
 
-  -- Notification from daemon.
-  local method = msg.method
-  local params = msg.params or {}
+    -- Response to a pending request.
+    if msg.id ~= nil then
+        local cb = state.pending[msg.id]
+        if cb then
+            state.pending[msg.id] = nil
+            cb(msg.result, msg.error)
+        end
+        return
+    end
 
-  if method == "open_file" then
-    M._handle_open_file(params)
-  elseif method == "close" then
-    M._handle_close()
-  elseif method == "external_command" then
-    M._handle_external_command(params)
-  elseif config.handlers[method] then
-    config.handlers[method](params)
-  end
+    -- Notification from daemon.
+    local method = msg.method
+    local params = msg.params or {}
+
+    if method == "open_file" then
+        M._handle_open_file(params)
+    elseif method == "close" then
+        M._handle_close()
+    elseif method == "external_command" then
+        M._handle_external_command(params)
+    elseif config.handlers[method] then
+        config.handlers[method](params)
+    end
+end
+
+--- Close the trev instance and restore focus to the previous window.
+function M._close_and_restore()
+    local prev_win = state.prev_win
+    M._close_instance()
+    if prev_win and vim.api.nvim_win_is_valid(prev_win) then
+        vim.api.nvim_set_current_win(prev_win)
+    end
 end
 
 --- Handle open_file notification: open a file in Neovim.
 --- @param params table {action: string, path: string}
 function M._handle_open_file(params)
-  local path = params.path
-  local action = params.action or config.action
-  if not path then
-    return
-  end
-
-  if state.mode == "float" then
-    -- Float mode: close the float, focus the previous window.
-    local prev_win = state.prev_win
-    M._close_instance()
-    if prev_win and vim.api.nvim_win_is_valid(prev_win) then
-      vim.api.nvim_set_current_win(prev_win)
+    local path = params.path
+    local action = params.action or config.action
+    if not path then
+        return
     end
-  else
-    -- Panel mode: focus the editor window (not the trev panel).
-    local target_win = M._find_editor_window()
-    if target_win then
-      vim.api.nvim_set_current_win(target_win)
-    end
-  end
 
-  vim.cmd(action .. " " .. escape_path(path))
+    if state.mode == "float" then
+        M._close_and_restore()
+    else
+        -- Panel mode: focus the editor window (not the trev panel).
+        local target_win = M._find_editor_window()
+        if target_win then
+            vim.api.nvim_set_current_win(target_win)
+        end
+    end
+
+    vim.cmd(action .. " " .. escape_path(path))
 end
 
 --- Handle close notification: close the trev panel or float.
 function M._handle_close()
-  local prev_win = state.prev_win
-  M._close_instance()
-  if prev_win and vim.api.nvim_win_is_valid(prev_win) then
-    vim.api.nvim_set_current_win(prev_win)
-  end
+    M._close_and_restore()
 end
 
 --- Handle external_command notification: dispatch to user handler.
 --- @param params table {command: string}
 function M._handle_external_command(params)
-  local command = params.command
-  if not command then
-    return
-  end
-  local handler = config.handlers[command]
-  if handler then
-    handler()
-  end
+    local command = params.command
+    if not command then
+        return
+    end
+    local handler = config.handlers[command]
+    if handler then
+        handler()
+    end
 end
 
 --- Get the absolute path of the current editor buffer (or nil).
 --- @return string|nil
 function M._current_editor_path()
-  local bufnr = vim.api.nvim_get_current_buf()
-  if is_special_buffer(bufnr) then
-    return nil
-  end
-  local name = vim.api.nvim_buf_get_name(bufnr)
-  if name == "" then
-    return nil
-  end
-  return vim.fn.fnamemodify(name, ":p")
+    local bufnr = vim.api.nvim_get_current_buf()
+    if is_special_buffer(bufnr) then
+        return nil
+    end
+    local name = vim.api.nvim_buf_get_name(bufnr)
+    if name == "" then
+        return nil
+    end
+    return vim.fn.fnamemodify(name, ":p")
 end
 
 --- Find an editor window (not the trev side panel).
 --- @return number|nil window ID
 function M._find_editor_window()
-  local current = vim.api.nvim_get_current_win()
-  if current ~= state.win then
-    return current
-  end
-  -- Find the first non-trev window.
-  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    if win ~= state.win then
-      return win
+    local trev_win = get_win()
+    local current = vim.api.nvim_get_current_win()
+    if current ~= trev_win then
+        return current
     end
-  end
-  return nil
+    -- Find the first non-trev window.
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        if win ~= trev_win then
+            return win
+        end
+    end
+    return nil
 end
 
 ---------------------------------------------------------------------------
 -- Socket discovery
 ---------------------------------------------------------------------------
 
---- Build the expected socket path for a given pid and workspace dir.
+--- Build the expected socket path for a given pid.
 --- @param pid number
---- @param workspace string
 --- @return string|nil
-local function find_socket_for_pid(pid, workspace)
-  -- Socket is at $XDG_RUNTIME_DIR/trev/<key>-<pid>.sock or $TMPDIR/trev/<key>-<pid>.sock
-  local runtime_dir = vim.env.XDG_RUNTIME_DIR
-  local base
-  if runtime_dir and runtime_dir ~= "" then
-    base = runtime_dir
-  else
-    base = vim.fn.getenv("TMPDIR")
-    if not base or base == vim.NIL or base == "" then
-      base = "/tmp"
+local function find_socket_for_pid(pid)
+    local runtime_dir = vim.env.XDG_RUNTIME_DIR
+    local base
+    if runtime_dir and runtime_dir ~= "" then
+        base = runtime_dir
+    else
+        base = vim.fn.getenv("TMPDIR")
+        if not base or base == vim.NIL or base == "" then
+            base = "/tmp"
+        end
     end
-  end
-  local trev_dir = base .. "/trev"
-  local pattern = trev_dir .. "/*-" .. pid .. ".sock"
-  local matches = vim.fn.glob(pattern, false, true)
-  if #matches > 0 then
-    return matches[1]
-  end
+    local trev_dir = base .. "/trev"
+    local pattern = trev_dir .. "/*-" .. pid .. ".sock"
+    local matches = vim.fn.glob(pattern, false, true)
+    if #matches > 0 then
+        return matches[1]
+    end
 
-  -- Wait briefly and retry (daemon may not have created socket yet).
-  vim.wait(500, function()
-    matches = vim.fn.glob(pattern, false, true)
-    return #matches > 0
-  end, 50)
-  if #matches > 0 then
-    return matches[1]
-  end
+    -- Wait briefly and retry (daemon may not have created socket yet).
+    vim.wait(500, function()
+        matches = vim.fn.glob(pattern, false, true)
+        return #matches > 0
+    end, 50)
+    if #matches > 0 then
+        return matches[1]
+    end
 
-  return nil
+    return nil
 end
 
 ---------------------------------------------------------------------------
--- Common daemon startup
+-- Command builder & IPC connect
 ---------------------------------------------------------------------------
 
---- Start trev daemon in a given window/buffer and connect IPC.
---- @param win number window ID
---- @param mode string "panel" | "float"
+--- Build the trev daemon command array.
 --- @param reveal string|nil file path to reveal on startup
-local function start_daemon(win, mode, reveal)
-  local workspace = vim.fn.getcwd()
-  local cmd = {
-    config.trev_path,
-    "--daemon",
-    workspace,
-  }
-
-  -- Reveal the specified file on startup.
-  if reveal and reveal ~= "" then
-    table.insert(cmd, "--reveal")
-    table.insert(cmd, reveal)
-  end
-
-  -- Start the terminal.
-  local job_id = vim.fn.termopen(cmd, {
-    on_exit = function(_, exit_code, _)
-      vim.schedule(function()
-        M._on_daemon_exit(exit_code)
-      end)
-    end,
-  })
-
-  if job_id <= 0 then
-    vim.notify("[trev] failed to start trev daemon", vim.log.levels.ERROR)
-    vim.api.nvim_win_close(win, true)
-    return
-  end
-
-  state.mode = mode
-  state.win = win
-  state.buf = vim.api.nvim_get_current_buf()
-  state.job_id = job_id
-  state.pid = vim.fn.jobpid(job_id)
-
-  -- Enter terminal mode for immediate interaction.
-  vim.cmd("startinsert")
-
-  -- Connect IPC after a short delay (daemon needs time to bind socket).
-  vim.defer_fn(function()
-    if state.pid then
-      local socket = find_socket_for_pid(state.pid, workspace)
-      if socket then
-        ipc_connect(socket, function()
-          if mode == "panel" then
-            M._setup_auto_reveal()
-          end
-        end)
-      else
-        vim.notify("[trev] socket not found for pid " .. state.pid, vim.log.levels.WARN)
-      end
+--- @return string[]
+local function build_cmd(reveal)
+    local cmd = {
+        config.trev_path,
+        "--daemon",
+        vim.fn.getcwd(),
+    }
+    if reveal and reveal ~= "" then
+        table.insert(cmd, "--reveal")
+        table.insert(cmd, reveal)
     end
-  end, 300)
+    return cmd
+end
+
+--- Connect IPC after a short delay (daemon needs time to bind socket).
+--- @param pid number daemon process ID
+--- @param mode string "panel" | "float"
+local function connect_ipc(pid, mode)
+    vim.defer_fn(function()
+        local socket = find_socket_for_pid(pid)
+        if socket then
+            ipc_connect(socket, function()
+                if mode == "panel" then
+                    M._setup_auto_reveal()
+                end
+            end)
+        else
+            vim.notify("[trev] socket not found for pid " .. pid, vim.log.levels.WARN)
+        end
+    end, 300)
 end
 
 ---------------------------------------------------------------------------
--- Side panel (terminal)
+-- Adapter callback helpers
+---------------------------------------------------------------------------
+
+--- Create the on_exit callback for the adapter.
+--- @return fun(exit_code: number)
+local function make_on_exit()
+    return function(exit_code)
+        M._on_daemon_exit(exit_code)
+    end
+end
+
+--- Create the on_ready callback for the adapter.
+--- @param mode string "panel" | "float"
+--- @return fun(handle: trev.AdapterHandle)
+local function make_on_ready(mode)
+    return function(handle)
+        state.handle = handle
+        if handle.pid then
+            connect_ipc(handle.pid, mode)
+        end
+    end
+end
+
+---------------------------------------------------------------------------
+-- Side panel
 ---------------------------------------------------------------------------
 
 --- Open the trev side panel.
 function M.open()
-  if state.win and vim.api.nvim_win_is_valid(state.win) then
-    -- Already open — focus it.
-    vim.api.nvim_set_current_win(state.win)
-    return
-  end
+    if state.handle and adapter and adapter:is_visible(state.handle) then
+        adapter:focus(state.handle)
+        return
+    end
 
-  -- Capture the current buffer path before creating the split.
-  local reveal = M._current_editor_path()
+    local reveal = M._current_editor_path()
+    local cmd = build_cmd(reveal)
 
-  -- Create a vertical split on the left.
-  vim.cmd("topleft " .. config.width .. "vsplit")
-  local win = vim.api.nvim_get_current_win()
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_win_set_buf(win, buf)
-
-  -- Disable line numbers and other decorations in the panel.
-  vim.wo[win].number = false
-  vim.wo[win].relativenumber = false
-  vim.wo[win].signcolumn = "no"
-  vim.wo[win].foldcolumn = "0"
-  vim.wo[win].winfixwidth = true
-
-  start_daemon(win, "panel", reveal)
+    state.mode = "panel"
+    state.handle = adapter:open_panel(cmd, {
+        width = config.width,
+        on_exit = make_on_exit(),
+        on_ready = make_on_ready("panel"),
+    })
 end
 
 --- Close the trev instance (panel or float).
 function M.close()
-  M._close_instance()
+    M._close_instance()
 end
 
 --- Internal close: teardown IPC, stop job, close window, reset state.
 function M._close_instance()
-  M._teardown_auto_reveal()
-  M._disconnect()
+    M._teardown_auto_reveal()
 
-  if state.job_id then
-    vim.fn.jobstop(state.job_id)
-    state.job_id = nil
-  end
-  if state.win and vim.api.nvim_win_is_valid(state.win) then
-    vim.api.nvim_win_close(state.win, true)
-  end
-  state.win = nil
-  state.buf = nil
-  state.pid = nil
-  state.mode = nil
-  state.prev_win = nil
+    if state.pipe then
+        -- Ask trev to quit gracefully (saves session before exiting).
+        M._send_request("quit", nil, nil)
+        M._disconnect()
+    -- Don't jobstop — trev will exit on its own after saving.
+    elseif state.handle and state.handle.job_id then
+        -- No IPC connection — force kill.
+        vim.fn.jobstop(state.handle.job_id)
+    end
+
+    -- Close window immediately for responsive UX.
+    if state.handle and adapter then
+        adapter:close(state.handle)
+    end
+
+    state.handle = nil
+    state.mode = nil
+    state.prev_win = nil
 end
 
 --- Toggle the side panel.
 --- @param mode string|nil "float" for float picker, nil for side panel
 function M.toggle(mode)
-  if mode == "float" then
-    M.float_pick()
-    return
-  end
+    if mode == "float" then
+        M.float_pick()
+        return
+    end
 
-  if state.win and vim.api.nvim_win_is_valid(state.win) then
-    M.close()
-  else
-    M.open()
-  end
+    if state.handle and adapter and adapter:is_visible(state.handle) then
+        M.close()
+    else
+        M.open()
+    end
 end
 
 --- Handle daemon process exit.
 --- @param exit_code number
 function M._on_daemon_exit(exit_code)
-  M._teardown_auto_reveal()
-  M._disconnect()
-  state.job_id = nil
-  state.pid = nil
+    M._teardown_auto_reveal()
+    M._disconnect()
 
-  if state.win and vim.api.nvim_win_is_valid(state.win) then
-    vim.api.nvim_win_close(state.win, true)
-  end
-  state.win = nil
-  state.buf = nil
-  state.mode = nil
-  state.prev_win = nil
+    if state.handle and adapter then
+        adapter:close(state.handle)
+    end
 
-  if exit_code ~= 0 then
-    vim.notify("[trev] daemon exited with code " .. exit_code, vim.log.levels.WARN)
-  end
+    state.handle = nil
+    state.mode = nil
+    state.prev_win = nil
+
+    if exit_code ~= 0 then
+        vim.notify("[trev] daemon exited with code " .. exit_code, vim.log.levels.WARN)
+    end
 end
 
 ---------------------------------------------------------------------------
--- Float picker (daemon mode)
+-- Float picker
 ---------------------------------------------------------------------------
 
 --- Open a float picker for quick file selection.
 function M.float_pick()
-  -- Close existing instance if any.
-  if state.win and vim.api.nvim_win_is_valid(state.win) then
-    M.close()
-  end
+    -- Close existing instance if any.
+    if state.handle and adapter and adapter:is_visible(state.handle) then
+        M.close()
+    end
 
-  -- Capture the current buffer path and window before creating the float.
-  local reveal = M._current_editor_path()
-  state.prev_win = vim.api.nvim_get_current_win()
+    local reveal = M._current_editor_path()
+    state.prev_win = vim.api.nvim_get_current_win()
 
-  -- Create a centered floating window.
-  local ui = vim.api.nvim_list_uis()[1]
-  local width = math.floor(ui.width * 0.6)
-  local height = math.floor(ui.height * 0.7)
-  local row = math.floor((ui.height - height) / 2)
-  local col = math.floor((ui.width - width) / 2)
+    local cmd = build_cmd(reveal)
 
-  local buf = vim.api.nvim_create_buf(false, true)
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    style = "minimal",
-    border = "rounded",
-  })
-
-  start_daemon(win, "float", reveal)
+    state.mode = "float"
+    state.handle = adapter:open_float(cmd, {
+        on_exit = make_on_exit(),
+        on_ready = make_on_ready("float"),
+    })
 end
 
 ---------------------------------------------------------------------------
@@ -545,12 +568,12 @@ end
 --- No-op if not in float mode.
 --- @return number|nil prev_win
 function M.close_float()
-  if state.mode ~= "float" then
-    return nil
-  end
-  local prev_win = state.prev_win
-  M._close_instance()
-  return prev_win
+    if state.mode ~= "float" then
+        return nil
+    end
+    local prev_win = state.prev_win
+    M._close_instance()
+    return prev_win
 end
 
 ---------------------------------------------------------------------------
@@ -561,63 +584,91 @@ end
 --- @param path string|nil file path (defaults to current buffer)
 --- @param callback function|nil called with (ok: boolean)
 function M.reveal(path, callback)
-  path = path or vim.api.nvim_buf_get_name(0)
-  if path == "" then
-    return
-  end
-  -- Resolve to absolute path.
-  path = vim.fn.fnamemodify(path, ":p")
-
-  M._send_request("reveal", { path = path }, function(result, err)
-    if callback then
-      local ok = result and result.ok or false
-      callback(ok)
+    path = path or vim.api.nvim_buf_get_name(0)
+    if path == "" then
+        return
     end
-  end)
+    -- Resolve to absolute path.
+    path = vim.fn.fnamemodify(path, ":p")
+
+    M._send_request("reveal", { path = path }, function(result, _)
+        if callback then
+            local ok = result and result.ok or false
+            callback(ok)
+        end
+    end)
 end
 
 --- Auto-reveal: send notification on BufEnter.
 --- @param path string
 local function auto_reveal(path)
-  if path == "" then
-    return
-  end
-  path = vim.fn.fnamemodify(path, ":p")
-  M._send_notification("reveal", { path = path })
+    if path == "" then
+        return
+    end
+    path = vim.fn.fnamemodify(path, ":p")
+    M._send_notification("reveal", { path = path })
 end
 
 --- Set up BufEnter autocmd for auto-reveal.
 function M._setup_auto_reveal()
-  if not config.auto_reveal then
-    return
-  end
-  if augroup then
-    return
-  end
+    if not config.auto_reveal then
+        return
+    end
+    if augroup then
+        return
+    end
 
-  augroup = vim.api.nvim_create_augroup("TrevAutoReveal", { clear = true })
-  vim.api.nvim_create_autocmd("BufEnter", {
-    group = augroup,
-    callback = function(ev)
-      if is_special_buffer(ev.buf) then
-        return
-      end
-      -- Skip if entering the trev panel itself.
-      if ev.buf == state.buf then
-        return
-      end
-      local bufname = vim.api.nvim_buf_get_name(ev.buf)
-      auto_reveal(bufname)
-    end,
-  })
+    augroup = vim.api.nvim_create_augroup("TrevAutoReveal", { clear = true })
+    vim.api.nvim_create_autocmd("BufEnter", {
+        group = augroup,
+        callback = function(ev)
+            if is_special_buffer(ev.buf) then
+                return
+            end
+            -- Skip if entering the trev buffer itself.
+            if ev.buf == get_buf() then
+                return
+            end
+            local bufname = vim.api.nvim_buf_get_name(ev.buf)
+            auto_reveal(bufname)
+        end,
+    })
 end
 
 --- Tear down auto-reveal autocmd.
 function M._teardown_auto_reveal()
-  if augroup then
-    vim.api.nvim_del_augroup_by_id(augroup)
-    augroup = nil
-  end
+    if augroup then
+        vim.api.nvim_del_augroup_by_id(augroup)
+        augroup = nil
+    end
+end
+
+---------------------------------------------------------------------------
+-- Adapter resolution
+---------------------------------------------------------------------------
+
+--- Resolve and instantiate the terminal adapter.
+local function resolve_adapter()
+    local choice = config.adapter
+
+    if choice == "auto" then
+        local has_snacks, snacks = pcall(require, "snacks")
+        if has_snacks and snacks and snacks.terminal then
+            choice = "snacks"
+        elseif pcall(require, "toggleterm") then
+            choice = "toggleterm"
+        else
+            choice = "native"
+        end
+    end
+
+    if choice == "snacks" then
+        adapter = require("trev.adapter.snacks").new()
+    elseif choice == "toggleterm" then
+        adapter = require("trev.adapter.toggleterm").new()
+    else
+        adapter = require("trev.adapter.native").new()
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -627,38 +678,40 @@ end
 --- Initialize the trev plugin.
 --- @param opts trev.Config|nil
 function M.setup(opts)
-  config = vim.tbl_deep_extend("force", config, opts or {})
+    config = vim.tbl_deep_extend("force", config, opts or {})
 
-  -- User commands.
-  vim.api.nvim_create_user_command("TrevToggle", function(cmd_opts)
-    local args = vim.split(cmd_opts.args, "%s+", { trimempty = true })
-    local mode = args[1] -- "float" or nil
-    M.toggle(mode)
-  end, {
-    nargs = "*",
-    desc = "Toggle trev side panel or float picker",
-  })
+    resolve_adapter()
 
-  vim.api.nvim_create_user_command("TrevOpen", function()
-    M.open()
-  end, {
-    desc = "Open trev side panel",
-  })
+    -- User commands.
+    vim.api.nvim_create_user_command("TrevToggle", function(cmd_opts)
+        local args = vim.split(cmd_opts.args, "%s+", { trimempty = true })
+        local mode = args[1] -- "float" or nil
+        M.toggle(mode)
+    end, {
+        nargs = "*",
+        desc = "Toggle trev side panel or float picker",
+    })
 
-  vim.api.nvim_create_user_command("TrevClose", function()
-    M.close()
-  end, {
-    desc = "Close trev side panel",
-  })
+    vim.api.nvim_create_user_command("TrevOpen", function()
+        M.open()
+    end, {
+        desc = "Open trev side panel",
+    })
 
-  vim.api.nvim_create_user_command("TrevReveal", function(cmd_opts)
-    local path = cmd_opts.args ~= "" and cmd_opts.args or nil
-    M.reveal(path)
-  end, {
-    nargs = "?",
-    desc = "Reveal file in trev tree",
-    complete = "file",
-  })
+    vim.api.nvim_create_user_command("TrevClose", function()
+        M.close()
+    end, {
+        desc = "Close trev side panel",
+    })
+
+    vim.api.nvim_create_user_command("TrevReveal", function(cmd_opts)
+        local path = cmd_opts.args ~= "" and cmd_opts.args or nil
+        M.reveal(path)
+    end, {
+        nargs = "?",
+        desc = "Reveal file in trev tree",
+        complete = "file",
+    })
 end
 
 return M
