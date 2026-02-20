@@ -40,6 +40,15 @@ pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewStat
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    let content_type = state.content.type_name();
+    let preview_path = state
+        .current_path
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let _span = tracing::info_span!("render_content", content_type, preview_path).entered();
+
     match &mut state.content {
         PreviewContent::HighlightedText { lines, truncated, .. } => {
             render_highlighted_text(

@@ -59,6 +59,21 @@ pub enum PreviewContent {
 }
 
 impl PreviewContent {
+    /// Return a short type label for profiling.
+    pub const fn type_name(&self) -> &'static str {
+        match self {
+            Self::HighlightedText { .. } => "highlighted_text",
+            Self::PlainText { .. } => "plain_text",
+            Self::AnsiText { .. } => "ansi_text",
+            Self::Image { .. } => "image",
+            Self::Binary { .. } => "binary",
+            Self::Directory { .. } => "directory",
+            Self::Loading => "loading",
+            Self::Error { .. } => "error",
+            Self::Empty => "empty",
+        }
+    }
+
     /// Try to clone this content.
     ///
     /// Returns `None` for `Image` (which contains a non-cloneable protocol).
