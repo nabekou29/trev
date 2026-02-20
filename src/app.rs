@@ -59,10 +59,26 @@ use crate::state::tree::TreeState;
 use crate::tree::builder::TreeBuilder;
 use crate::watcher::FsWatcher;
 
-/// Run the application.
-#[expect(clippy::unused_async, reason = "Called from tokio async context")]
-#[expect(clippy::too_many_lines, reason = "Event loop is inherently long")]
-pub async fn run(args: &Args) -> Result<()> {
+/// Async event channel receivers consumed by the main event loop.
+struct EventReceivers {
+    /// Directory children load results.
+    children: tokio::sync::mpsc::Receiver<ChildrenLoadResult>,
+    /// Preview content load results.
+    preview: tokio::sync::mpsc::Receiver<PreviewLoadResult>,
+    /// Git status scan results.
+    git: tokio::sync::mpsc::Receiver<GitStatusResult>,
+    /// File system change events from the watcher.
+    watcher: tokio::sync::mpsc::UnboundedReceiver<Vec<notify_debouncer_mini::DebouncedEvent>>,
+    /// IPC commands from connected editors.
+    ipc: tokio::sync::mpsc::UnboundedReceiver<IpcCommand>,
+}
+
+/// Initialize all application state, context, channels, and terminal.
+///
+/// Must be called before entering the event loop. Handles config loading,
+/// tree construction, session restore, reveal, preview/watcher/IPC setup,
+/// and terminal initialization with scroll pre-centering.
+fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatui::DefaultTerminal)> {
     let load_result = Config::load()?;
     for warning in &load_result.warnings {
         tracing::warn!("{warning}");
@@ -106,16 +122,26 @@ pub async fn run(args: &Args) -> Result<()> {
     let show_preview = config.display.show_preview;
 
     // Create watcher channel and instance.
-    let (watcher_tx, mut watcher_rx) =
+    let (watcher_tx, watcher_rx) =
         tokio::sync::mpsc::unbounded_channel::<Vec<notify_debouncer_mini::DebouncedEvent>>();
     let (fs_watcher, suppressed) = setup_watcher(&config, watcher_tx, &root_path);
 
     // Start IPC server in daemon mode.
-    let (ipc_server, mut ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
+    let (ipc_server, ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
 
     // Restore session and clean up expired sessions.
     let (selection, undo_history, session_restored) =
         restore_session_if_needed(args, &config, &root_path, builder, &mut tree_state);
+
+    // Reveal a specific path on startup (--reveal flag).
+    let reveal_succeeded = args.reveal.as_ref().is_some_and(|reveal| {
+        let builder = TreeBuilder::new(show_hidden, show_ignored);
+        let found = tree_state.reveal_path(reveal, builder);
+        if !found {
+            tracing::warn!(path = %reveal.display(), "failed to reveal path on startup");
+        }
+        found
+    });
 
     // Create app state.
     let mut state = AppState {
@@ -140,14 +166,10 @@ pub async fn run(args: &Args) -> Result<()> {
         git_state: Arc::clone(&git_state),
     };
 
-    // Set up async children load channel.
-    let (children_tx, mut children_rx) = tokio::sync::mpsc::channel::<ChildrenLoadResult>(64);
-
-    // Set up async preview load channel.
-    let (preview_tx, mut preview_rx) = tokio::sync::mpsc::channel::<PreviewLoadResult>(16);
-
-    // Set up async git status channel.
-    let (git_tx, mut git_rx) = tokio::sync::mpsc::channel::<GitStatusResult>(4);
+    // Set up async channels.
+    let (children_tx, children_rx) = tokio::sync::mpsc::channel::<ChildrenLoadResult>(64);
+    let (preview_tx, preview_rx) = tokio::sync::mpsc::channel::<PreviewLoadResult>(16);
+    let (git_tx, git_rx) = tokio::sync::mpsc::channel::<GitStatusResult>(4);
 
     let git_enabled = config.git.enabled;
 
@@ -183,19 +205,51 @@ pub async fn run(args: &Args) -> Result<()> {
     // Trigger initial preview for the currently selected file.
     trigger_preview(&mut state, &ctx);
 
-    // Initialize terminal.
-    let mut terminal = crate::terminal::init();
+    let terminal = setup_terminal(&mut state, session_restored || reveal_succeeded);
 
-    // Auto-hide preview on narrow terminals before first draw.
-    if let Ok((width, _)) = crossterm::terminal::size()
-        && width <= crate::ui::NARROW_WIDTH_THRESHOLD
-    {
-        state.show_preview = false;
+    let channels = EventReceivers {
+        children: children_rx,
+        preview: preview_rx,
+        git: git_rx,
+        watcher: watcher_rx,
+        ipc: ipc_rx,
+    };
+
+    Ok((state, ctx, channels, terminal))
+}
+
+/// Initialize terminal and pre-compute viewport dimensions.
+///
+/// Auto-hides preview on narrow terminals and centers scroll
+/// when restoring a session or revealing a path.
+fn setup_terminal(state: &mut AppState, needs_center: bool) -> ratatui::DefaultTerminal {
+    let terminal = crate::terminal::init();
+
+    // Pre-compute viewport height and auto-hide preview on narrow terminals
+    // before first draw, so session-restore / reveal can center without a flash.
+    if let Ok((width, height)) = crossterm::terminal::size() {
+        if width <= crate::ui::NARROW_WIDTH_THRESHOLD {
+            state.show_preview = false;
+        }
+        state.viewport_height = height.saturating_sub(1) as usize;
     }
 
-    // Track cursor for change detection.
+    // Center scroll before first draw to prevent flash on session restore.
+    if needs_center {
+        state
+            .scroll
+            .center_on_cursor(state.tree_state.cursor(), state.viewport_height);
+    }
+
+    terminal
+}
+
+/// Run the application.
+#[expect(clippy::unused_async, reason = "Called from tokio async context")]
+pub async fn run(args: &Args) -> Result<()> {
+    let (mut state, ctx, mut channels, mut terminal) = init_app(args)?;
+    let root_path = ctx.root_path.clone();
     let mut last_cursor = state.tree_state.cursor();
-    let mut needs_center_scroll = session_restored;
 
     // Main event loop.
     loop {
@@ -207,14 +261,6 @@ pub async fn run(args: &Args) -> Result<()> {
             crate::ui::render(frame, &mut state);
         })?;
 
-        // Center scroll on cursor after first draw (viewport_height is now known).
-        if needs_center_scroll {
-            needs_center_scroll = false;
-            state
-                .scroll
-                .center_on_cursor(state.tree_state.cursor(), state.viewport_height as usize);
-        }
-
         // Poll for events (50ms timeout for responsive async result handling).
         if crossterm::event::poll(Duration::from_millis(50))?
             && let Event::Key(key) = crossterm::event::read()?
@@ -223,7 +269,7 @@ pub async fn run(args: &Args) -> Result<()> {
         }
 
         // Receive async children load results.
-        while let Ok(result) = children_rx.try_recv() {
+        while let Ok(result) = channels.children.try_recv() {
             match result.children {
                 Ok(children) => {
                     let loaded_path = result.path.clone();
@@ -249,15 +295,15 @@ pub async fn run(args: &Args) -> Result<()> {
         }
 
         // Receive watcher events (file system changes in watched directories).
-        process_watcher_events(&mut watcher_rx, &mut state, &ctx);
+        process_watcher_events(&mut channels.watcher, &mut state, &ctx);
 
         // Receive IPC commands.
-        while let Ok(cmd) = ipc_rx.try_recv() {
+        while let Ok(cmd) = channels.ipc.try_recv() {
             handle_ipc_command(cmd, &mut state);
         }
 
         // Receive async git status results.
-        while let Ok(result) = git_rx.try_recv() {
+        while let Ok(result) = channels.git.try_recv() {
             if let Ok(mut guard) = state.git_state.write() {
                 *guard = result.state;
             }
@@ -265,7 +311,7 @@ pub async fn run(args: &Args) -> Result<()> {
         }
 
         // Receive async preview load results.
-        process_preview_results(&mut preview_rx, &mut state);
+        process_preview_results(&mut channels.preview, &mut state);
 
         // Trigger preview when cursor changes.
         let current_cursor = state.tree_state.cursor();
@@ -277,7 +323,7 @@ pub async fn run(args: &Args) -> Result<()> {
         }
 
         // Update scroll position.
-        state.scroll.clamp_to_cursor(state.tree_state.cursor(), state.viewport_height as usize);
+        state.scroll.clamp_to_cursor(state.tree_state.cursor(), state.viewport_height);
 
         if state.should_quit {
             break;
