@@ -8,6 +8,7 @@ mod tree;
 
 use std::sync::Arc;
 
+use crate::action::Action;
 use file_op::handle_file_op_action;
 use input::{
     handle_confirm_mode_key,
@@ -65,25 +66,25 @@ pub fn handle_key_event(key: crossterm::event::KeyEvent, state: &mut AppState, c
                 return;
             };
             match action {
-                crate::action::Action::Quit => {
+                Action::Quit => {
                     state.should_quit = true;
                 }
-                crate::action::Action::Tree(tree_action) => {
+                Action::Tree(tree_action) => {
                     handle_tree_action(*tree_action, state, ctx);
                 }
-                crate::action::Action::Preview(preview_action) => {
+                Action::Preview(preview_action) => {
                     handle_preview_action(*preview_action, state, ctx);
                 }
-                crate::action::Action::FileOp(file_op_action) => {
+                Action::FileOp(file_op_action) => {
                     handle_file_op_action(*file_op_action, state, ctx);
                 }
-                crate::action::Action::Shell(cmd) => {
+                Action::Shell(cmd) => {
                     handle_shell_action(cmd, state);
                 }
-                crate::action::Action::Notify(method) => {
+                Action::Notify(method) => {
                     handle_notify_action(method, state, ctx);
                 }
-                crate::action::Action::Noop => {}
+                Action::Noop => {}
             }
         }
     }
