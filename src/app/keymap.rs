@@ -86,7 +86,7 @@ impl KeyMap {
     pub fn from_config(config: &KeybindingConfig) -> Self {
         let mut km = Self::empty();
 
-        // Load defaults per section (only universal has defaults currently).
+        // Load defaults (universal + context-specific defaults like daemon.file).
         if !config.disable_default && !config.universal.disable_default {
             km.load_universal_defaults();
         }
@@ -142,12 +142,24 @@ impl KeyMap {
             .insert(((code, modifiers), BTreeSet::new()), action);
     }
 
+    /// Register a key binding with a specific context set.
+    fn bind_when(
+        &mut self,
+        code: KeyCode,
+        modifiers: KeyModifiers,
+        when: WhenSet,
+        action: Action,
+    ) {
+        self.bindings.insert(((code, modifiers), when), action);
+    }
+
     /// Load default vim-style universal keybindings.
     fn load_universal_defaults(&mut self) {
         self.load_default_navigation();
         self.load_default_preview();
         self.load_default_display();
         self.load_default_file_ops();
+        self.load_default_daemon();
     }
 
     /// Default navigation and quit bindings.
@@ -161,7 +173,14 @@ impl KeyMap {
         self.bind(KeyCode::Right, KeyModifiers::NONE, Action::Tree(TreeAction::Expand));
         self.bind(KeyCode::Char('h'), KeyModifiers::NONE, Action::Tree(TreeAction::Collapse));
         self.bind(KeyCode::Left, KeyModifiers::NONE, Action::Tree(TreeAction::Collapse));
-        self.bind(KeyCode::Enter, KeyModifiers::NONE, Action::Tree(TreeAction::ToggleExpand));
+        // Enter on directories: toggle expand/collapse.
+        // Enter on files in daemon mode is handled by load_default_daemon().
+        self.bind_when(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+            BTreeSet::from([KeyContext::Directory]),
+            Action::Tree(TreeAction::ToggleExpand),
+        );
         self.bind(KeyCode::Char('g'), KeyModifiers::NONE, Action::Tree(TreeAction::JumpFirst));
         self.bind(KeyCode::Char('G'), KeyModifiers::SHIFT, Action::Tree(TreeAction::JumpLast));
         self.bind(KeyCode::Char('G'), KeyModifiers::NONE, Action::Tree(TreeAction::JumpLast));
@@ -215,6 +234,17 @@ impl KeyMap {
         self.bind(KeyCode::Char('r'), KeyModifiers::CONTROL, Action::FileOp(FileOpAction::Redo));
         self.bind(KeyCode::Esc, KeyModifiers::NONE, Action::FileOp(FileOpAction::ClearSelections));
         self.bind(KeyCode::Char('c'), KeyModifiers::NONE, Action::FileOp(FileOpAction::CopyMenu));
+    }
+
+    /// Default daemon-mode keybindings.
+    fn load_default_daemon(&mut self) {
+        // Enter on a file in daemon mode: send open_file notification to the editor.
+        self.bind_when(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+            BTreeSet::from([KeyContext::Daemon, KeyContext::File]),
+            Action::Notify("open_file".to_string()),
+        );
     }
 }
 
@@ -350,12 +380,29 @@ mod tests {
     }
 
     #[rstest]
-    fn resolve_enter_to_toggle_expand() {
+    fn resolve_enter_on_directory_to_toggle_expand() {
         let km = default_keymap();
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         assert_eq!(
-            km.resolve(key, &file_ctx()),
+            km.resolve(key, &dir_ctx()),
             Some(&Action::Tree(TreeAction::ToggleExpand))
+        );
+    }
+
+    #[rstest]
+    fn resolve_enter_on_file_is_none() {
+        let km = default_keymap();
+        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(km.resolve(key, &file_ctx()), None);
+    }
+
+    #[rstest]
+    fn resolve_enter_on_daemon_file_to_notify_open_file() {
+        let km = default_keymap();
+        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(
+            km.resolve(key, &daemon_file_ctx()),
+            Some(&Action::Notify("open_file".to_string()))
         );
     }
 

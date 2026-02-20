@@ -8,7 +8,7 @@ local M = {}
 --- @field width number Side panel width (columns)
 --- @field auto_reveal boolean Auto-reveal on BufEnter
 --- @field action string Default editor action (edit/split/vsplit/tabedit)
---- @field handlers table<string, function> External command handlers
+--- @field handlers table<string, function> Notification handlers
 
 --- @type trev.Config
 local config = {
@@ -30,6 +30,8 @@ local config = {
 --- @field read_buf string partial read buffer for line framing
 --- @field request_id number next JSON-RPC request ID
 --- @field pending table<number, function> pending request callbacks
+--- @field mode string|nil "panel" | "float" | nil
+--- @field prev_win number|nil window before float opened
 
 --- @type trev.State
 local state = {
@@ -42,6 +44,8 @@ local state = {
   read_buf = "",
   request_id = 1,
   pending = {},
+  mode = nil,
+  prev_win = nil,
 }
 
 --- @type number|nil
@@ -217,6 +221,8 @@ function M._handle_message(line)
     M._handle_open_file(params)
   elseif method == "external_command" then
     M._handle_external_command(params)
+  elseif config.handlers[method] then
+    config.handlers[method](params)
   end
 end
 
@@ -229,10 +235,19 @@ function M._handle_open_file(params)
     return
   end
 
-  -- Focus the editor window (not the trev panel).
-  local target_win = M._find_editor_window()
-  if target_win then
-    vim.api.nvim_set_current_win(target_win)
+  if state.mode == "float" then
+    -- Float mode: close the float, focus the previous window.
+    local prev_win = state.prev_win
+    M._close_instance()
+    if prev_win and vim.api.nvim_win_is_valid(prev_win) then
+      vim.api.nvim_set_current_win(prev_win)
+    end
+  else
+    -- Panel mode: focus the editor window (not the trev panel).
+    local target_win = M._find_editor_window()
+    if target_win then
+      vim.api.nvim_set_current_win(target_win)
+    end
   end
 
   vim.cmd(action .. " " .. escape_path(path))
@@ -307,38 +322,19 @@ local function find_socket_for_pid(pid, workspace)
 end
 
 ---------------------------------------------------------------------------
--- Side panel (terminal)
+-- Common daemon startup
 ---------------------------------------------------------------------------
 
---- Open the trev side panel.
-function M.open()
-  if state.win and vim.api.nvim_win_is_valid(state.win) then
-    -- Already open — focus it.
-    vim.api.nvim_set_current_win(state.win)
-    return
-  end
-
+--- Start trev daemon in a given window/buffer and connect IPC.
+--- @param win number window ID
+--- @param mode string "panel" | "float"
+local function start_daemon(win, mode)
   local workspace = vim.fn.getcwd()
   local cmd = {
     config.trev_path,
     "--daemon",
-    "--action",
-    config.action,
     workspace,
   }
-
-  -- Create a vertical split on the left.
-  vim.cmd("topleft " .. config.width .. "vsplit")
-  local win = vim.api.nvim_get_current_win()
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_win_set_buf(win, buf)
-
-  -- Disable line numbers and other decorations in the panel.
-  vim.wo[win].number = false
-  vim.wo[win].relativenumber = false
-  vim.wo[win].signcolumn = "no"
-  vim.wo[win].foldcolumn = "0"
-  vim.wo[win].winfixwidth = true
 
   -- Start the terminal.
   local job_id = vim.fn.termopen(cmd, {
@@ -355,6 +351,7 @@ function M.open()
     return
   end
 
+  state.mode = mode
   state.win = win
   state.buf = vim.api.nvim_get_current_buf()
   state.job_id = job_id
@@ -369,7 +366,9 @@ function M.open()
       local socket = find_socket_for_pid(state.pid, workspace)
       if socket then
         ipc_connect(socket, function()
-          M._setup_auto_reveal()
+          if mode == "panel" then
+            M._setup_auto_reveal()
+          end
         end)
       else
         vim.notify("[trev] socket not found for pid " .. state.pid, vim.log.levels.WARN)
@@ -378,8 +377,41 @@ function M.open()
   end, 300)
 end
 
---- Close the trev side panel.
+---------------------------------------------------------------------------
+-- Side panel (terminal)
+---------------------------------------------------------------------------
+
+--- Open the trev side panel.
+function M.open()
+  if state.win and vim.api.nvim_win_is_valid(state.win) then
+    -- Already open — focus it.
+    vim.api.nvim_set_current_win(state.win)
+    return
+  end
+
+  -- Create a vertical split on the left.
+  vim.cmd("topleft " .. config.width .. "vsplit")
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_win_set_buf(win, buf)
+
+  -- Disable line numbers and other decorations in the panel.
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = "no"
+  vim.wo[win].foldcolumn = "0"
+  vim.wo[win].winfixwidth = true
+
+  start_daemon(win, "panel")
+end
+
+--- Close the trev instance (panel or float).
 function M.close()
+  M._close_instance()
+end
+
+--- Internal close: teardown IPC, stop job, close window, reset state.
+function M._close_instance()
   M._teardown_auto_reveal()
   M._disconnect()
 
@@ -393,14 +425,15 @@ function M.close()
   state.win = nil
   state.buf = nil
   state.pid = nil
+  state.mode = nil
+  state.prev_win = nil
 end
 
 --- Toggle the side panel.
 --- @param mode string|nil "float" for float picker, nil for side panel
---- @param action string|nil override editor action
-function M.toggle(mode, action)
+function M.toggle(mode)
   if mode == "float" then
-    M.float_pick(action)
+    M.float_pick()
     return
   end
 
@@ -424,6 +457,8 @@ function M._on_daemon_exit(exit_code)
   end
   state.win = nil
   state.buf = nil
+  state.mode = nil
+  state.prev_win = nil
 
   if exit_code ~= 0 then
     vim.notify("[trev] daemon exited with code " .. exit_code, vim.log.levels.WARN)
@@ -431,19 +466,18 @@ function M._on_daemon_exit(exit_code)
 end
 
 ---------------------------------------------------------------------------
--- Float picker (--emit mode)
+-- Float picker (daemon mode)
 ---------------------------------------------------------------------------
 
 --- Open a float picker for quick file selection.
---- @param action string|nil editor action override
-function M.float_pick(action)
-  action = action or config.action
-  local workspace = vim.fn.getcwd()
-  local cmd = {
-    config.trev_path,
-    "--emit",
-    workspace,
-  }
+function M.float_pick()
+  -- Close existing instance if any.
+  if state.win and vim.api.nvim_win_is_valid(state.win) then
+    M.close()
+  end
+
+  -- Remember the current window to return to after file selection.
+  state.prev_win = vim.api.nvim_get_current_win()
 
   -- Create a centered floating window.
   local ui = vim.api.nvim_list_uis()[1]
@@ -463,32 +497,24 @@ function M.float_pick(action)
     border = "rounded",
   })
 
-  vim.fn.termopen(cmd, {
-    on_exit = function(_, _, _)
-      vim.schedule(function()
-        -- Read output from terminal buffer (selected file paths).
-        local lines = {}
-        if vim.api.nvim_buf_is_valid(buf) then
-          lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-        end
+  start_daemon(win, "float")
+end
 
-        -- Close the float window.
-        if vim.api.nvim_win_is_valid(win) then
-          vim.api.nvim_win_close(win, true)
-        end
+---------------------------------------------------------------------------
+-- Public API for custom handlers
+---------------------------------------------------------------------------
 
-        -- Open selected files.
-        for _, line in ipairs(lines) do
-          local path = vim.trim(line)
-          if path ~= "" and vim.fn.filereadable(path) == 1 then
-            vim.cmd(action .. " " .. escape_path(path))
-          end
-        end
-      end)
-    end,
-  })
-
-  vim.cmd("startinsert")
+--- Close the float window if in float mode.
+--- Returns the previous window ID (or nil).
+--- No-op if not in float mode.
+--- @return number|nil prev_win
+function M.close_float()
+  if state.mode ~= "float" then
+    return nil
+  end
+  local prev_win = state.prev_win
+  M._close_instance()
+  return prev_win
 end
 
 ---------------------------------------------------------------------------
@@ -571,8 +597,7 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("TrevToggle", function(cmd_opts)
     local args = vim.split(cmd_opts.args, "%s+", { trimempty = true })
     local mode = args[1] -- "float" or nil
-    local action = args[2] -- editor action override
-    M.toggle(mode, action)
+    M.toggle(mode)
   end, {
     nargs = "*",
     desc = "Toggle trev side panel or float picker",
