@@ -277,6 +277,20 @@ function M._handle_external_command(params)
   end
 end
 
+--- Get the absolute path of the current editor buffer (or nil).
+--- @return string|nil
+function M._current_editor_path()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if is_special_buffer(bufnr) then
+    return nil
+  end
+  local name = vim.api.nvim_buf_get_name(bufnr)
+  if name == "" then
+    return nil
+  end
+  return vim.fn.fnamemodify(name, ":p")
+end
+
 --- Find an editor window (not the trev side panel).
 --- @return number|nil window ID
 function M._find_editor_window()
@@ -339,13 +353,20 @@ end
 --- Start trev daemon in a given window/buffer and connect IPC.
 --- @param win number window ID
 --- @param mode string "panel" | "float"
-local function start_daemon(win, mode)
+--- @param reveal string|nil file path to reveal on startup
+local function start_daemon(win, mode, reveal)
   local workspace = vim.fn.getcwd()
   local cmd = {
     config.trev_path,
     "--daemon",
     workspace,
   }
+
+  -- Reveal the specified file on startup.
+  if reveal and reveal ~= "" then
+    table.insert(cmd, "--reveal")
+    table.insert(cmd, reveal)
+  end
 
   -- Start the terminal.
   local job_id = vim.fn.termopen(cmd, {
@@ -400,6 +421,9 @@ function M.open()
     return
   end
 
+  -- Capture the current buffer path before creating the split.
+  local reveal = M._current_editor_path()
+
   -- Create a vertical split on the left.
   vim.cmd("topleft " .. config.width .. "vsplit")
   local win = vim.api.nvim_get_current_win()
@@ -413,7 +437,7 @@ function M.open()
   vim.wo[win].foldcolumn = "0"
   vim.wo[win].winfixwidth = true
 
-  start_daemon(win, "panel")
+  start_daemon(win, "panel", reveal)
 end
 
 --- Close the trev instance (panel or float).
@@ -487,7 +511,8 @@ function M.float_pick()
     M.close()
   end
 
-  -- Remember the current window to return to after file selection.
+  -- Capture the current buffer path and window before creating the float.
+  local reveal = M._current_editor_path()
   state.prev_win = vim.api.nvim_get_current_win()
 
   -- Create a centered floating window.
@@ -508,7 +533,7 @@ function M.float_pick()
     border = "rounded",
   })
 
-  start_daemon(win, "float")
+  start_daemon(win, "float", reveal)
 end
 
 ---------------------------------------------------------------------------
