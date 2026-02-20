@@ -1,0 +1,579 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Config",
+  "description": "Application configuration.",
+  "type": "object",
+  "properties": {
+    "display": {
+      "description": "Display settings.",
+      "$ref": "#/$defs/DisplayConfig",
+      "default": {
+        "show_hidden": false,
+        "show_ignored": false,
+        "show_preview": true,
+        "show_root": false
+      }
+    },
+    "file_operations": {
+      "description": "File operation settings.",
+      "$ref": "#/$defs/FileOpConfig",
+      "default": {
+        "delete_mode": "permanent",
+        "undo_stack_size": 100
+      }
+    },
+    "git": {
+      "description": "Git integration settings.",
+      "$ref": "#/$defs/GitConfig",
+      "default": {
+        "enabled": true
+      }
+    },
+    "keybindings": {
+      "description": "Keybinding customization.",
+      "$ref": "#/$defs/KeybindingConfig",
+      "default": {
+        "daemon": {
+          "directory": {
+            "bindings": [],
+            "disable_default": false
+          },
+          "file": {
+            "bindings": [],
+            "disable_default": false
+          },
+          "universal": {
+            "bindings": [],
+            "disable_default": false
+          }
+        },
+        "directory": {
+          "bindings": [],
+          "disable_default": false
+        },
+        "disable_default": false,
+        "file": {
+          "bindings": [],
+          "disable_default": false
+        },
+        "universal": {
+          "bindings": [],
+          "disable_default": false
+        }
+      }
+    },
+    "preview": {
+      "description": "Preview settings.",
+      "$ref": "#/$defs/PreviewConfig",
+      "default": {
+        "cache_size": 50,
+        "command_timeout": 3,
+        "commands": [],
+        "max_bytes": 10485760,
+        "max_lines": 1000
+      }
+    },
+    "session": {
+      "description": "Session persistence settings.",
+      "$ref": "#/$defs/SessionConfig",
+      "default": {
+        "expiry_days": 90,
+        "restore_by_default": true
+      }
+    },
+    "sort": {
+      "description": "Sort settings.",
+      "$ref": "#/$defs/SortConfig",
+      "default": {
+        "direction": "asc",
+        "directories_first": true,
+        "order": "name"
+      }
+    },
+    "watcher": {
+      "description": "File system watcher settings.",
+      "$ref": "#/$defs/WatcherConfig",
+      "default": {
+        "debounce_ms": 250,
+        "enabled": true
+      }
+    }
+  },
+  "$defs": {
+    "ContextBindings": {
+      "description": "Keybindings for a specific context.",
+      "type": "object",
+      "properties": {
+        "bindings": {
+          "description": "Keybinding entries.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/KeyBindingEntry"
+          }
+        },
+        "disable_default": {
+          "description": "Disable default keybindings for this context.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "DaemonBindings": {
+      "description": "Daemon-mode keybindings, subdivided by node context.",
+      "type": "object",
+      "properties": {
+        "directory": {
+          "description": "Bindings active in daemon mode when cursor is on a directory.",
+          "$ref": "#/$defs/ContextBindings",
+          "default": {
+            "bindings": [],
+            "disable_default": false
+          }
+        },
+        "file": {
+          "description": "Bindings active in daemon mode when cursor is on a file.",
+          "$ref": "#/$defs/ContextBindings",
+          "default": {
+            "bindings": [],
+            "disable_default": false
+          }
+        },
+        "universal": {
+          "description": "Bindings active in daemon mode regardless of node type.",
+          "$ref": "#/$defs/ContextBindings",
+          "default": {
+            "bindings": [],
+            "disable_default": false
+          }
+        }
+      }
+    },
+    "DeleteMode": {
+      "description": "Delete mode variants.",
+      "oneOf": [
+        {
+          "description": "Permanently delete files (undo not possible).",
+          "type": "string",
+          "const": "permanent"
+        },
+        {
+          "description": "Move files to custom trash directory (undo possible).",
+          "type": "string",
+          "const": "custom_trash"
+        }
+      ]
+    },
+    "DisplayConfig": {
+      "description": "Display configuration.",
+      "type": "object",
+      "properties": {
+        "show_hidden": {
+          "description": "Show hidden files.",
+          "type": "boolean",
+          "default": false
+        },
+        "show_ignored": {
+          "description": "Show gitignored files.",
+          "type": "boolean",
+          "default": false
+        },
+        "show_preview": {
+          "description": "Show preview panel.",
+          "type": "boolean",
+          "default": true
+        },
+        "show_root": {
+          "description": "Show root directory as a tree node.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "ExternalCommand": {
+      "description": "External command configuration for preview.",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Command arguments.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "command": {
+          "description": "Command name (must be in `$PATH`).",
+          "type": "string"
+        },
+        "directories": {
+          "description": "Whether this command handles directories.",
+          "type": "boolean",
+          "default": false
+        },
+        "extensions": {
+          "description": "File extensions this command applies to.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "git_status": {
+          "description": "Git status condition: only apply when file has one of these statuses.\n\nValues: `modified`, `staged`, `added`, `deleted`, `renamed`, `untracked`, `conflicted`.\nEmpty means no git status filtering.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "description": "Display name for this command provider.\n\nDefaults to the command binary name when omitted.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "priority": {
+          "description": "Priority for ordering (lower = higher priority, default: 100).\n\nAccepts a number or a named constant: `high` (0), `mid` (100), `low` (1000).",
+          "$ref": "#/$defs/Priority",
+          "default": 100
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
+    "FileOpConfig": {
+      "description": "File operation configuration.",
+      "type": "object",
+      "properties": {
+        "delete_mode": {
+          "description": "Delete mode for the `d` key.",
+          "$ref": "#/$defs/DeleteMode",
+          "default": "permanent"
+        },
+        "undo_stack_size": {
+          "description": "Maximum undo stack size.",
+          "type": "integer",
+          "format": "uint",
+          "default": 100,
+          "minimum": 0
+        }
+      }
+    },
+    "GitConfig": {
+      "description": "Git integration configuration.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Whether Git integration is enabled.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "KeyBindingEntry": {
+      "description": "A keybinding entry. Exactly one of 'action', 'run', or 'notify' must be set.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Built-in action name",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "quit",
+                "noop",
+                "tree.move_down",
+                "tree.move_up",
+                "tree.expand",
+                "tree.collapse",
+                "tree.toggle_expand",
+                "tree.jump_first",
+                "tree.jump_last",
+                "tree.half_page_down",
+                "tree.half_page_up",
+                "tree.expand_all",
+                "tree.collapse_all",
+                "tree.toggle_hidden",
+                "tree.toggle_ignored",
+                "tree.refresh",
+                "preview.scroll_down",
+                "preview.scroll_up",
+                "preview.scroll_right",
+                "preview.scroll_left",
+                "preview.half_page_down",
+                "preview.half_page_up",
+                "preview.cycle_next_provider",
+                "preview.cycle_prev_provider",
+                "preview.toggle_preview",
+                "file_op.yank",
+                "file_op.cut",
+                "file_op.paste",
+                "file_op.create_file",
+                "file_op.rename",
+                "file_op.delete",
+                "file_op.system_trash",
+                "file_op.undo",
+                "file_op.redo",
+                "file_op.toggle_mark",
+                "file_op.clear_selections",
+                "file_op.copy_menu"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "description": "Key notation (e.g. \"j\", \"<C-a>\", \"G\", \"<CR>\")",
+          "type": "string"
+        },
+        "notify": {
+          "description": "IPC notification method name",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run": {
+          "description": "Shell command template. Variables: {path}, {dir}, {name}, {root}",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "key"
+      ]
+    },
+    "KeybindingConfig": {
+      "description": "Keybinding configuration with context-based sections.\n\nEach section groups bindings by context: `universal` (always active),\n`file` (cursor on file), `directory` (cursor on directory), and\n`daemon.*` (daemon mode variants).",
+      "type": "object",
+      "properties": {
+        "daemon": {
+          "description": "Bindings active in daemon mode.",
+          "$ref": "#/$defs/DaemonBindings",
+          "default": {
+            "directory": {
+              "bindings": [],
+              "disable_default": false
+            },
+            "file": {
+              "bindings": [],
+              "disable_default": false
+            },
+            "universal": {
+              "bindings": [],
+              "disable_default": false
+            }
+          }
+        },
+        "directory": {
+          "description": "Bindings active when cursor is on a directory.",
+          "$ref": "#/$defs/ContextBindings",
+          "default": {
+            "bindings": [],
+            "disable_default": false
+          }
+        },
+        "disable_default": {
+          "description": "Disable all default keybindings.",
+          "type": "boolean",
+          "default": false
+        },
+        "file": {
+          "description": "Bindings active when cursor is on a file.",
+          "$ref": "#/$defs/ContextBindings",
+          "default": {
+            "bindings": [],
+            "disable_default": false
+          }
+        },
+        "universal": {
+          "description": "Bindings active regardless of context.",
+          "$ref": "#/$defs/ContextBindings",
+          "default": {
+            "bindings": [],
+            "disable_default": false
+          }
+        }
+      }
+    },
+    "PreviewConfig": {
+      "description": "Preview configuration.",
+      "type": "object",
+      "properties": {
+        "cache_size": {
+          "description": "LRU cache capacity (default: 10).",
+          "type": "integer",
+          "format": "uint",
+          "default": 50,
+          "minimum": 0
+        },
+        "command_timeout": {
+          "description": "Timeout for external commands in seconds (default: 3).",
+          "type": "integer",
+          "format": "uint64",
+          "default": 3,
+          "minimum": 0
+        },
+        "commands": {
+          "description": "External preview commands.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ExternalCommand"
+          }
+        },
+        "max_bytes": {
+          "description": "Maximum bytes to read per file (default: 10 MB).",
+          "type": "integer",
+          "format": "uint64",
+          "default": 10485760,
+          "minimum": 0
+        },
+        "max_lines": {
+          "description": "Maximum number of lines to preview (default: 1000).",
+          "type": "integer",
+          "format": "uint",
+          "default": 1000,
+          "minimum": 0
+        }
+      }
+    },
+    "Priority": {
+      "description": "Priority for ordering (lower = higher priority). Number or named constant: high (0), mid (100), low (1000)",
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "enum": [
+            "high",
+            "mid",
+            "low"
+          ]
+        }
+      ],
+      "default": 100
+    },
+    "SessionConfig": {
+      "description": "Session persistence configuration.",
+      "type": "object",
+      "properties": {
+        "expiry_days": {
+          "description": "Days before a session file expires and is auto-deleted.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 90,
+          "minimum": 0
+        },
+        "restore_by_default": {
+          "description": "Whether to restore session by default on startup.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "SortConfig": {
+      "description": "Sort configuration.",
+      "type": "object",
+      "properties": {
+        "direction": {
+          "description": "Sort direction.",
+          "$ref": "#/$defs/SortDirection",
+          "default": "asc"
+        },
+        "directories_first": {
+          "description": "Whether directories come first.",
+          "type": "boolean",
+          "default": true
+        },
+        "order": {
+          "description": "Sort order field.",
+          "$ref": "#/$defs/SortOrder",
+          "default": "name"
+        }
+      }
+    },
+    "SortDirection": {
+      "description": "Sort direction.",
+      "oneOf": [
+        {
+          "description": "Ascending order.",
+          "type": "string",
+          "const": "asc"
+        },
+        {
+          "description": "Descending order.",
+          "type": "string",
+          "const": "desc"
+        }
+      ]
+    },
+    "SortOrder": {
+      "description": "Sort order variants.",
+      "oneOf": [
+        {
+          "description": "Sort by name.",
+          "type": "string",
+          "const": "name"
+        },
+        {
+          "description": "Sort by file size.",
+          "type": "string",
+          "const": "size"
+        },
+        {
+          "description": "Sort by modification time.",
+          "type": "string",
+          "const": "mtime"
+        },
+        {
+          "description": "Sort by file type.",
+          "type": "string",
+          "const": "type"
+        },
+        {
+          "description": "Sort by file extension.",
+          "type": "string",
+          "const": "extension"
+        }
+      ]
+    },
+    "WatcherConfig": {
+      "description": "File system watcher configuration.",
+      "type": "object",
+      "properties": {
+        "debounce_ms": {
+          "description": "Debounce interval in milliseconds.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 250,
+          "minimum": 0
+        },
+        "enabled": {
+          "description": "Whether FS watching is enabled.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    }
+  }
+}
