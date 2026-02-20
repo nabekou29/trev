@@ -136,21 +136,21 @@ impl KeyMap {
         Ok(())
     }
 
-    /// Register a single key binding in the universal (no-context) map.
-    fn bind(&mut self, code: KeyCode, modifiers: KeyModifiers, action: Action) {
-        self.bindings
-            .insert(((code, modifiers), BTreeSet::new()), action);
-    }
-
-    /// Register a key binding with a specific context set.
-    fn bind_when(
-        &mut self,
-        code: KeyCode,
-        modifiers: KeyModifiers,
-        when: WhenSet,
-        action: Action,
-    ) {
-        self.bindings.insert(((code, modifiers), when), action);
+    /// Register a key binding.
+    ///
+    /// - `when` slice specifies required contexts (empty = universal).
+    /// - Uppercase chars with SHIFT auto-register a NONE variant
+    ///   (terminals may report uppercase without the SHIFT flag).
+    fn bind(&mut self, code: KeyCode, modifiers: KeyModifiers, when: &[KeyContext], action: Action) {
+        let when_set: WhenSet = when.iter().copied().collect();
+        if let KeyCode::Char(c) = code
+            && c.is_ascii_uppercase()
+            && modifiers.contains(KeyModifiers::SHIFT)
+        {
+            self.bindings
+                .insert(((code, KeyModifiers::NONE), when_set.clone()), action.clone());
+        }
+        self.bindings.insert(((code, modifiers), when_set), action);
     }
 
     /// Load default vim-style universal keybindings.
@@ -164,89 +164,73 @@ impl KeyMap {
 
     /// Default navigation and quit bindings.
     fn load_default_navigation(&mut self) {
-        self.bind(KeyCode::Char('q'), KeyModifiers::NONE, Action::Quit);
-        self.bind(KeyCode::Char('j'), KeyModifiers::NONE, Action::Tree(TreeAction::MoveDown));
-        self.bind(KeyCode::Down, KeyModifiers::NONE, Action::Tree(TreeAction::MoveDown));
-        self.bind(KeyCode::Char('k'), KeyModifiers::NONE, Action::Tree(TreeAction::MoveUp));
-        self.bind(KeyCode::Up, KeyModifiers::NONE, Action::Tree(TreeAction::MoveUp));
-        self.bind(KeyCode::Char('l'), KeyModifiers::NONE, Action::Tree(TreeAction::Expand));
-        self.bind(KeyCode::Right, KeyModifiers::NONE, Action::Tree(TreeAction::Expand));
-        self.bind(KeyCode::Char('h'), KeyModifiers::NONE, Action::Tree(TreeAction::Collapse));
-        self.bind(KeyCode::Left, KeyModifiers::NONE, Action::Tree(TreeAction::Collapse));
+        use KeyContext::Directory;
+
+        self.bind(KeyCode::Char('q'), KeyModifiers::NONE, &[], Action::Quit);
+        self.bind(KeyCode::Char('j'), KeyModifiers::NONE, &[], Action::Tree(TreeAction::MoveDown));
+        self.bind(KeyCode::Down, KeyModifiers::NONE, &[], Action::Tree(TreeAction::MoveDown));
+        self.bind(KeyCode::Char('k'), KeyModifiers::NONE, &[], Action::Tree(TreeAction::MoveUp));
+        self.bind(KeyCode::Up, KeyModifiers::NONE, &[], Action::Tree(TreeAction::MoveUp));
+        self.bind(KeyCode::Char('l'), KeyModifiers::NONE, &[], Action::Tree(TreeAction::Expand));
+        self.bind(KeyCode::Right, KeyModifiers::NONE, &[], Action::Tree(TreeAction::Expand));
+        self.bind(KeyCode::Char('h'), KeyModifiers::NONE, &[], Action::Tree(TreeAction::Collapse));
+        self.bind(KeyCode::Left, KeyModifiers::NONE, &[], Action::Tree(TreeAction::Collapse));
         // Enter on directories: toggle expand/collapse.
         // Enter on files in daemon mode is handled by load_default_daemon().
-        self.bind_when(
-            KeyCode::Enter,
-            KeyModifiers::NONE,
-            BTreeSet::from([KeyContext::Directory]),
-            Action::Tree(TreeAction::ToggleExpand),
-        );
-        self.bind(KeyCode::Char('g'), KeyModifiers::NONE, Action::Tree(TreeAction::JumpFirst));
-        self.bind(KeyCode::Char('G'), KeyModifiers::SHIFT, Action::Tree(TreeAction::JumpLast));
-        self.bind(KeyCode::Char('G'), KeyModifiers::NONE, Action::Tree(TreeAction::JumpLast));
-        self.bind(KeyCode::Char('d'), KeyModifiers::CONTROL, Action::Tree(TreeAction::HalfPageDown));
-        self.bind(KeyCode::Char('u'), KeyModifiers::CONTROL, Action::Tree(TreeAction::HalfPageUp));
+        self.bind(KeyCode::Enter, KeyModifiers::NONE, &[Directory], Action::Tree(TreeAction::ToggleExpand));
+        self.bind(KeyCode::Char('g'), KeyModifiers::NONE, &[], Action::Tree(TreeAction::JumpFirst));
+        self.bind(KeyCode::Char('G'), KeyModifiers::SHIFT, &[], Action::Tree(TreeAction::JumpLast));
+        self.bind(KeyCode::Char('d'), KeyModifiers::CONTROL, &[], Action::Tree(TreeAction::HalfPageDown));
+        self.bind(KeyCode::Char('u'), KeyModifiers::CONTROL, &[], Action::Tree(TreeAction::HalfPageUp));
     }
 
     /// Default preview scroll and toggle bindings.
     fn load_default_preview(&mut self) {
-        self.bind(KeyCode::Char('J'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::ScrollDown));
-        self.bind(KeyCode::Char('J'), KeyModifiers::NONE, Action::Preview(PreviewAction::ScrollDown));
-        self.bind(KeyCode::Char('K'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::ScrollUp));
-        self.bind(KeyCode::Char('K'), KeyModifiers::NONE, Action::Preview(PreviewAction::ScrollUp));
-        self.bind(KeyCode::Char('L'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::ScrollRight));
-        self.bind(KeyCode::Char('L'), KeyModifiers::NONE, Action::Preview(PreviewAction::ScrollRight));
-        self.bind(KeyCode::Char('H'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::ScrollLeft));
-        self.bind(KeyCode::Char('H'), KeyModifiers::NONE, Action::Preview(PreviewAction::ScrollLeft));
-        self.bind(KeyCode::Char('U'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::HalfPageUp));
-        self.bind(KeyCode::Char('U'), KeyModifiers::NONE, Action::Preview(PreviewAction::HalfPageUp));
-        self.bind(KeyCode::Tab, KeyModifiers::NONE, Action::Preview(PreviewAction::CycleNextProvider));
-        self.bind(KeyCode::BackTab, KeyModifiers::SHIFT, Action::Preview(PreviewAction::CyclePrevProvider));
-        self.bind(KeyCode::Char('P'), KeyModifiers::SHIFT, Action::Preview(PreviewAction::TogglePreview));
-        self.bind(KeyCode::Char('P'), KeyModifiers::NONE, Action::Preview(PreviewAction::TogglePreview));
+        self.bind(KeyCode::Char('J'), KeyModifiers::SHIFT, &[], Action::Preview(PreviewAction::ScrollDown));
+        self.bind(KeyCode::Char('K'), KeyModifiers::SHIFT, &[], Action::Preview(PreviewAction::ScrollUp));
+        self.bind(KeyCode::Char('L'), KeyModifiers::SHIFT, &[], Action::Preview(PreviewAction::ScrollRight));
+        self.bind(KeyCode::Char('H'), KeyModifiers::SHIFT, &[], Action::Preview(PreviewAction::ScrollLeft));
+        self.bind(KeyCode::Char('U'), KeyModifiers::SHIFT, &[], Action::Preview(PreviewAction::HalfPageUp));
+        self.bind(KeyCode::Tab, KeyModifiers::NONE, &[], Action::Preview(PreviewAction::CycleNextProvider));
+        self.bind(KeyCode::BackTab, KeyModifiers::SHIFT, &[], Action::Preview(PreviewAction::CyclePrevProvider));
+        self.bind(KeyCode::Char('P'), KeyModifiers::SHIFT, &[], Action::Preview(PreviewAction::TogglePreview));
     }
 
     /// Default display toggle bindings.
     fn load_default_display(&mut self) {
-        self.bind(KeyCode::Char('E'), KeyModifiers::SHIFT, Action::Tree(TreeAction::ExpandAll));
-        self.bind(KeyCode::Char('E'), KeyModifiers::NONE, Action::Tree(TreeAction::ExpandAll));
-        self.bind(KeyCode::Char('W'), KeyModifiers::SHIFT, Action::Tree(TreeAction::CollapseAll));
-        self.bind(KeyCode::Char('W'), KeyModifiers::NONE, Action::Tree(TreeAction::CollapseAll));
-        self.bind(KeyCode::Char('.'), KeyModifiers::NONE, Action::Tree(TreeAction::ToggleHidden));
-        self.bind(KeyCode::Char('I'), KeyModifiers::SHIFT, Action::Tree(TreeAction::ToggleIgnored));
-        self.bind(KeyCode::Char('I'), KeyModifiers::NONE, Action::Tree(TreeAction::ToggleIgnored));
-        self.bind(KeyCode::Char('R'), KeyModifiers::SHIFT, Action::Tree(TreeAction::Refresh));
-        self.bind(KeyCode::Char('R'), KeyModifiers::NONE, Action::Tree(TreeAction::Refresh));
+        self.bind(KeyCode::Char('E'), KeyModifiers::SHIFT, &[], Action::Tree(TreeAction::ExpandAll));
+        self.bind(KeyCode::Char('W'), KeyModifiers::SHIFT, &[], Action::Tree(TreeAction::CollapseAll));
+        self.bind(KeyCode::Char('.'), KeyModifiers::NONE, &[], Action::Tree(TreeAction::ToggleHidden));
+        self.bind(KeyCode::Char('I'), KeyModifiers::SHIFT, &[], Action::Tree(TreeAction::ToggleIgnored));
+        self.bind(KeyCode::Char('R'), KeyModifiers::SHIFT, &[], Action::Tree(TreeAction::Refresh));
     }
 
     /// Default file operation bindings.
     fn load_default_file_ops(&mut self) {
-        self.bind(KeyCode::Char(' '), KeyModifiers::NONE, Action::FileOp(FileOpAction::ToggleMark));
-        self.bind(KeyCode::Char('a'), KeyModifiers::NONE, Action::FileOp(FileOpAction::CreateFile));
-        self.bind(KeyCode::Char('r'), KeyModifiers::NONE, Action::FileOp(FileOpAction::Rename));
-        self.bind(KeyCode::Char('y'), KeyModifiers::NONE, Action::FileOp(FileOpAction::Yank));
-        self.bind(KeyCode::Char('x'), KeyModifiers::NONE, Action::FileOp(FileOpAction::Cut));
-        self.bind(KeyCode::Char('p'), KeyModifiers::NONE, Action::FileOp(FileOpAction::Paste));
-        self.bind(KeyCode::Char('d'), KeyModifiers::NONE, Action::FileOp(FileOpAction::Delete));
-        self.bind(KeyCode::Char('D'), KeyModifiers::SHIFT, Action::FileOp(FileOpAction::SystemTrash));
-        self.bind(KeyCode::Char('D'), KeyModifiers::NONE, Action::FileOp(FileOpAction::SystemTrash));
-        self.bind(KeyCode::Char('u'), KeyModifiers::NONE, Action::FileOp(FileOpAction::Undo));
-        self.bind(KeyCode::Char('r'), KeyModifiers::CONTROL, Action::FileOp(FileOpAction::Redo));
-        self.bind(KeyCode::Esc, KeyModifiers::NONE, Action::FileOp(FileOpAction::ClearSelections));
-        self.bind(KeyCode::Char('c'), KeyModifiers::NONE, Action::FileOp(FileOpAction::CopyMenu));
+        self.bind(KeyCode::Char(' '), KeyModifiers::NONE, &[], Action::FileOp(FileOpAction::ToggleMark));
+        self.bind(KeyCode::Char('a'), KeyModifiers::NONE, &[], Action::FileOp(FileOpAction::CreateFile));
+        self.bind(KeyCode::Char('r'), KeyModifiers::NONE, &[], Action::FileOp(FileOpAction::Rename));
+        self.bind(KeyCode::Char('y'), KeyModifiers::NONE, &[], Action::FileOp(FileOpAction::Yank));
+        self.bind(KeyCode::Char('x'), KeyModifiers::NONE, &[], Action::FileOp(FileOpAction::Cut));
+        self.bind(KeyCode::Char('p'), KeyModifiers::NONE, &[], Action::FileOp(FileOpAction::Paste));
+        self.bind(KeyCode::Char('d'), KeyModifiers::NONE, &[], Action::FileOp(FileOpAction::Delete));
+        self.bind(KeyCode::Char('D'), KeyModifiers::SHIFT, &[], Action::FileOp(FileOpAction::SystemTrash));
+        self.bind(KeyCode::Char('u'), KeyModifiers::NONE, &[], Action::FileOp(FileOpAction::Undo));
+        self.bind(KeyCode::Char('r'), KeyModifiers::CONTROL, &[], Action::FileOp(FileOpAction::Redo));
+        self.bind(KeyCode::Esc, KeyModifiers::NONE, &[], Action::FileOp(FileOpAction::ClearSelections));
+        self.bind(KeyCode::Char('c'), KeyModifiers::NONE, &[], Action::FileOp(FileOpAction::CopyMenu));
     }
 
     /// Default daemon-mode keybindings.
     fn load_default_daemon(&mut self) {
-        let daemon = BTreeSet::from([KeyContext::Daemon]);
-        let daemon_file = BTreeSet::from([KeyContext::Daemon, KeyContext::File]);
+        use KeyContext::{Daemon, File};
 
         // q in daemon mode: notify the editor to close the panel/float
         // (overrides universal quit so the plugin can handle cleanup properly).
-        self.bind_when(KeyCode::Char('q'), KeyModifiers::NONE, daemon, Action::Notify("close".to_string()));
+        self.bind(KeyCode::Char('q'), KeyModifiers::NONE, &[Daemon], Action::Notify("close".to_string()));
 
         // Enter on a file in daemon mode: send open_file notification to the editor.
-        self.bind_when(KeyCode::Enter, KeyModifiers::NONE, daemon_file, Action::Notify("open_file".to_string()));
+        self.bind(KeyCode::Enter, KeyModifiers::NONE, &[Daemon, File], Action::Notify("open_file".to_string()));
     }
 }
 
