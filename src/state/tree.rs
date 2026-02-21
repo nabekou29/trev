@@ -233,6 +233,19 @@ impl TreeState {
         self.current_node_info().map(|info| info.path)
     }
 
+    /// Paths of visible nodes above the cursor, nearest first.
+    ///
+    /// Used as fallback targets when the cursor's node disappears after
+    /// a tree rebuild (e.g. toggling hidden/ignored files).
+    pub fn paths_above_cursor(&self) -> Vec<PathBuf> {
+        let visible = self.visible_nodes();
+        let cursor = self.cursor.min(visible.len().saturating_sub(1));
+        (0..cursor)
+            .rev()
+            .filter_map(|i| visible.get(i).map(|vn| vn.node.path.clone()))
+            .collect()
+    }
+
     /// Move the cursor to the node matching the given path.
     ///
     /// Searches visible nodes for a path match. If found, moves the cursor
@@ -1913,5 +1926,49 @@ mod tests {
         verify_that!(range[0].node.name.as_str(), eq("a.txt"))?;
         verify_that!(range[1].node.name.as_str(), eq("b.txt"))?;
         Ok(())
+    }
+
+    // =========================================================================
+    // paths_above_cursor
+    // =========================================================================
+
+    #[rstest]
+    fn paths_above_cursor_returns_nearest_first() {
+        let root = Path::new("/test/root");
+        let mut state = state_with_children(vec![
+            file_node("a.txt", root),
+            file_node("b.txt", root),
+            file_node("c.txt", root),
+        ]);
+        // show_root is false by default, visible: [a, b, c]
+        state.move_cursor_to(2); // cursor on c.txt
+
+        let paths = state.paths_above_cursor();
+        assert_eq!(paths, vec![root.join("b.txt"), root.join("a.txt")]);
+    }
+
+    #[rstest]
+    fn paths_above_cursor_empty_when_cursor_at_top() {
+        let root = Path::new("/test/root");
+        let state = state_with_children(vec![
+            file_node("a.txt", root),
+            file_node("b.txt", root),
+        ]);
+        // cursor at 0
+        let paths = state.paths_above_cursor();
+        assert!(paths.is_empty());
+    }
+
+    #[rstest]
+    fn paths_above_cursor_single_node_above() {
+        let root = Path::new("/test/root");
+        let mut state = state_with_children(vec![
+            file_node("a.txt", root),
+            file_node("b.txt", root),
+        ]);
+        state.move_cursor_to(1); // cursor on b.txt
+
+        let paths = state.paths_above_cursor();
+        assert_eq!(paths, vec![root.join("a.txt")]);
     }
 }

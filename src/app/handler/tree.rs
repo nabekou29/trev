@@ -193,6 +193,8 @@ fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
 
     let expanded = state.tree_state.expanded_paths();
     let cursor_path = state.tree_state.cursor_path();
+    let fallback_paths = state.tree_state.paths_above_cursor();
+    let visual_row = state.tree_state.cursor().saturating_sub(state.scroll.offset());
     let order = state.tree_state.sort_order();
     let direction = state.tree_state.sort_direction();
     let dirs_first = state.tree_state.directories_first();
@@ -251,8 +253,16 @@ fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
         }
 
         // Restore cursor position.
-        if let Some(ref cp) = cursor_path {
-            new_tree.move_cursor_to_path(cp);
+        // If the cursor's node was filtered out, fall back to the nearest
+        // node that was above the cursor in the previous tree.
+        if let Some(ref cp) = cursor_path
+            && !new_tree.move_cursor_to_path(cp)
+        {
+            for path in &fallback_paths {
+                if new_tree.move_cursor_to_path(path) {
+                    break;
+                }
+            }
         }
 
         // Send result (ignore error if receiver dropped during shutdown).
@@ -262,6 +272,7 @@ fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
             show_hidden,
             show_ignored,
             generation,
+            visual_row,
         });
     });
 }

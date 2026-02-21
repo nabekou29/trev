@@ -145,6 +145,11 @@ impl ScrollState {
         self.offset = cursor.saturating_sub(viewport_height / 2);
     }
 
+    /// Set the scroll offset directly.
+    pub const fn set_offset(&mut self, offset: usize) {
+        self.offset = offset;
+    }
+
     /// Clamp the scroll offset so the cursor stays visible.
     ///
     /// Ensures `cursor - viewport_height + 1 <= offset <= cursor`.
@@ -226,6 +231,11 @@ pub struct TreeRebuildResult {
     pub show_ignored: bool,
     /// Generation counter to discard stale results from superseded rebuilds.
     pub generation: u64,
+    /// Cursor's visual row (cursor - scroll offset) before the rebuild.
+    ///
+    /// Used to restore the scroll position so the cursor stays at the same
+    /// screen row after the tree is swapped in.
+    pub visual_row: usize,
 }
 
 /// Result of an async preview load operation.
@@ -300,6 +310,68 @@ mod tests {
     fn scroll_state_center_on_cursor_zero_viewport() {
         let mut scroll = ScrollState { offset: 5 };
         scroll.center_on_cursor(10, 0);
+        assert_that!(scroll.offset(), eq(0));
+    }
+
+    #[rstest]
+    fn scroll_state_set_offset() {
+        let mut scroll = ScrollState::new();
+        scroll.set_offset(42);
+        assert_that!(scroll.offset(), eq(42));
+    }
+
+    #[rstest]
+    fn scroll_visual_row_preserved_after_rebuild() {
+        // Simulate: cursor=30, offset=20, visual_row=10
+        // After rebuild: new_cursor=35 (hidden files inserted above)
+        // Expected: offset=25 so visual_row stays 10
+        let mut scroll = ScrollState { offset: 20 };
+        let visual_row = 30_usize.saturating_sub(scroll.offset()); // 10
+        let new_cursor: usize = 35;
+        let total: usize = 100;
+        let viewport_height: usize = 40;
+        let max_offset = total.saturating_sub(viewport_height);
+        let desired = new_cursor.saturating_sub(visual_row);
+        scroll.set_offset(desired.min(max_offset));
+
+        assert_that!(scroll.offset(), eq(25));
+        assert_that!(new_cursor - scroll.offset(), eq(visual_row));
+    }
+
+    #[rstest]
+    fn scroll_clamps_to_tree_end_when_shrinking() {
+        // Simulate: cursor=80, offset=70, visual_row=10, viewport=20
+        // After rebuild: tree shrinks to 50 nodes, cursor at 40
+        // max_offset = 50-20 = 30, desired = 40-10 = 30
+        // offset should be 30 (not 30+), cursor at row 10
+        let mut scroll = ScrollState { offset: 70 };
+        let visual_row = 80_usize.saturating_sub(scroll.offset()); // 10
+        let new_cursor: usize = 40;
+        let total: usize = 50;
+        let viewport_height: usize = 20;
+        let max_offset = total.saturating_sub(viewport_height);
+        let desired = new_cursor.saturating_sub(visual_row);
+        scroll.set_offset(desired.min(max_offset));
+
+        assert_that!(scroll.offset(), eq(30));
+    }
+
+    #[rstest]
+    fn scroll_clamps_when_tree_smaller_than_viewport() {
+        // Tree has 10 nodes, viewport is 40.
+        // visual_row=5, new_cursor=8
+        // max_offset = 0 (10-40 saturating), desired = 8-5 = 3
+        // offset should be 0 (can't scroll in a small tree)
+        let scroll_offset = 0;
+        let visual_row = 5_usize.saturating_sub(scroll_offset);
+        let new_cursor: usize = 8;
+        let total: usize = 10;
+        let viewport_height: usize = 40;
+        let max_offset = total.saturating_sub(viewport_height);
+        let desired = new_cursor.saturating_sub(visual_row);
+        let mut scroll = ScrollState { offset: scroll_offset };
+        scroll.set_offset(desired.min(max_offset));
+
         assert_that!(scroll.offset(), eq(0));
     }
 }
