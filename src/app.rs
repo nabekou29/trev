@@ -268,27 +268,35 @@ pub async fn run(args: &Args) -> Result<()> {
     let root_path = ctx.root_path.clone();
     let mut last_cursor = state.tree_state.cursor();
 
+    // Initial draw before entering the event loop.
+    terminal.draw(|frame| {
+        crate::ui::render(frame, &mut state);
+    })?;
+
     // Main event loop.
+    //
+    // Order: poll → drain all key events → process async results → preview → scroll → draw.
+    // Draining all pending key events before drawing avoids input lag when
+    // the terminal buffers key repeats faster than the frame rate.
     loop {
         let _frame_span = tracing::info_span!("frame").entered();
 
         // Clear expired status messages.
         state.clear_expired_status();
 
-        // Draw UI.
-        {
-            let _span = tracing::info_span!("draw").entered();
-            terminal.draw(|frame| {
-                crate::ui::render(frame, &mut state);
-            })?;
-        }
-
         // Poll for events (50ms timeout for responsive async result handling).
-        if crossterm::event::poll(Duration::from_millis(50))?
-            && let Event::Key(key) = crossterm::event::read()?
-        {
+        // Drain ALL pending key events so buffered key repeats are processed in
+        // a single frame rather than one-per-frame.
+        if crossterm::event::poll(Duration::from_millis(50))? {
             let _span = tracing::info_span!("key_event").entered();
-            handle_key_event(key, &mut state, &ctx);
+            loop {
+                if let Event::Key(key) = crossterm::event::read()? {
+                    handle_key_event(key, &mut state, &ctx);
+                }
+                if !crossterm::event::poll(Duration::ZERO)? {
+                    break;
+                }
+            }
         }
 
         // Receive async children load results.
@@ -359,6 +367,14 @@ pub async fn run(args: &Args) -> Result<()> {
 
         if state.should_quit {
             break;
+        }
+
+        // Draw UI (once per frame, after all events are processed).
+        {
+            let _span = tracing::info_span!("draw").entered();
+            terminal.draw(|frame| {
+                crate::ui::render(frame, &mut state);
+            })?;
         }
     }
 
