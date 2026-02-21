@@ -55,7 +55,7 @@ trev schema               # Print config JSON Schema
 | `-a, --show-hidden`        | Show hidden files                       |
 | `--show-ignored`           | Show gitignored files                   |
 | `--no-preview`             | Disable preview panel                   |
-| `--sort-order <ORDER>`     | name, size, mtime, type, extension      |
+| `--sort-order <ORDER>`     | smart, name, size, mtime, type, extension |
 | `--sort-direction <DIR>`   | asc, desc                               |
 | `--no-directories-first`   | Do not sort directories before files    |
 | `--no-icons`               | Disable file icons                      |
@@ -103,7 +103,7 @@ trev schema               # Print config JSON Schema
 | `W` | Collapse all          |
 | `.` | Toggle hidden files   |
 | `I` | Toggle ignored files  |
-| `S` | Cycle sort order      |
+| `S` | Sort order menu       |
 | `s` | Toggle sort direction |
 
 ### File Operations
@@ -154,7 +154,7 @@ trev schema > ~/.config/trev/config.schema.json
 
 ```yaml
 sort:
-  order: name           # name | size | mtime | type | extension
+  order: smart          # smart | name | size | mtime | type | extension
   direction: asc        # asc | desc
   directories_first: true
 
