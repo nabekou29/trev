@@ -8,6 +8,17 @@
       "description": "Display settings.",
       "$ref": "#/$defs/DisplayConfig",
       "default": {
+        "column_options": {
+          "modified_at": {
+            "format": "relative",
+            "mode": "os_mtime"
+          }
+        },
+        "columns": [
+          "git_status",
+          "size",
+          "modified_at"
+        ],
         "show_hidden": false,
         "show_ignored": false,
         "show_preview": true,
@@ -70,7 +81,10 @@
         "command_timeout": 3,
         "commands": [],
         "max_bytes": 10485760,
-        "max_lines": 1000
+        "max_lines": 1000,
+        "narrow_split": 60,
+        "narrow_threshold": 80,
+        "split": 50
       }
     },
     "session": {
@@ -100,6 +114,40 @@
     }
   },
   "$defs": {
+    "ColumnKind": {
+      "description": "Kind of column that can be displayed in the tree view.",
+      "oneOf": [
+        {
+          "description": "File size (human-readable).",
+          "type": "string",
+          "const": "size"
+        },
+        {
+          "description": "Last modification time.",
+          "type": "string",
+          "const": "modified_at"
+        },
+        {
+          "description": "Git status indicator.",
+          "type": "string",
+          "const": "git_status"
+        }
+      ]
+    },
+    "ColumnOptionsConfig": {
+      "description": "Per-column options configuration.\n\nEach field corresponds to a column kind that supports options.",
+      "type": "object",
+      "properties": {
+        "modified_at": {
+          "description": "Options for the `ModifiedAt` column.",
+          "$ref": "#/$defs/ModifiedAtColumnOptions",
+          "default": {
+            "format": "relative",
+            "mode": "os_mtime"
+          }
+        }
+      }
+    },
     "ContextBindings": {
       "description": "Keybindings for a specific context.",
       "type": "object",
@@ -168,6 +216,28 @@
       "description": "Display configuration.",
       "type": "object",
       "properties": {
+        "column_options": {
+          "description": "Per-column options (e.g., format and mode for `modified_at`).",
+          "$ref": "#/$defs/ColumnOptionsConfig",
+          "default": {
+            "modified_at": {
+              "format": "relative",
+              "mode": "os_mtime"
+            }
+          }
+        },
+        "columns": {
+          "description": "Columns to display in the tree view (ordered list of column kinds).",
+          "type": "array",
+          "default": [
+            "git_status",
+            "size",
+            "modified_at"
+          ],
+          "items": {
+            "$ref": "#/$defs/ColumnKind"
+          }
+        },
         "show_hidden": {
           "description": "Show hidden files.",
           "type": "boolean",
@@ -413,6 +483,52 @@
         }
       }
     },
+    "ModifiedAtColumnOptions": {
+      "description": "Per-column options for the `ModifiedAt` column.",
+      "type": "object",
+      "properties": {
+        "format": {
+          "description": "Display format.",
+          "$ref": "#/$defs/MtimeFormat",
+          "default": "relative"
+        },
+        "mode": {
+          "description": "How directory mtime is computed.",
+          "$ref": "#/$defs/MtimeMode",
+          "default": "os_mtime"
+        }
+      }
+    },
+    "MtimeFormat": {
+      "description": "Display format for the `ModifiedAt` column.",
+      "oneOf": [
+        {
+          "description": "Tiered relative time: `Xm ago`, `Xh ago`, `Xd ago`, `Xw ago`, then ISO.",
+          "type": "string",
+          "const": "relative"
+        },
+        {
+          "description": "Always ISO format (`YYYY-MM-DD`).",
+          "type": "string",
+          "const": "absolute"
+        }
+      ]
+    },
+    "MtimeMode": {
+      "description": "How directory modification times are computed.",
+      "oneOf": [
+        {
+          "description": "Use the OS modification time of the directory itself.",
+          "type": "string",
+          "const": "os_mtime"
+        },
+        {
+          "description": "Use the maximum mtime among all loaded descendant files (GitHub-like).",
+          "type": "string",
+          "const": "recursive_max"
+        }
+      ]
+    },
     "PreviewConfig": {
       "description": "Preview configuration.",
       "type": "object",
@@ -451,6 +567,30 @@
           "type": "integer",
           "format": "uint",
           "default": 1000,
+          "minimum": 0
+        },
+        "narrow_split": {
+          "description": "Tree/preview split percentage in narrow layout (default: 60).",
+          "type": "integer",
+          "format": "uint16",
+          "default": 60,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "narrow_threshold": {
+          "description": "Width threshold for narrow layout in columns (default: 80).",
+          "type": "integer",
+          "format": "uint16",
+          "default": 80,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "split": {
+          "description": "Tree/preview split percentage in wide layout (default: 50).",
+          "type": "integer",
+          "format": "uint16",
+          "default": 50,
+          "maximum": 65535,
           "minimum": 0
         }
       }
