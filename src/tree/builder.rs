@@ -50,14 +50,17 @@ impl TreeBuilder {
         let name = root_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
 
         let children = self.load_children(&root_path)?;
+        let recursive_max_mtime = children.iter().filter_map(|c| c.modified).max();
 
         Ok(TreeNode {
             name,
             path: root_path,
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: metadata.modified().ok(),
+            recursive_max_mtime,
             children: ChildrenState::Loaded(children),
             is_expanded: true,
         })
@@ -105,13 +108,21 @@ impl TreeBuilder {
 
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
 
+            let symlink_target = if is_symlink {
+                std::fs::read_link(path).ok().map(|t| t.to_string_lossy().into_owned())
+            } else {
+                None
+            };
+
             children.push(TreeNode {
                 name,
                 path: path.to_path_buf(),
                 is_dir,
                 is_symlink,
+                symlink_target,
                 size: if is_dir { 0 } else { metadata.len() },
                 modified: metadata.modified().ok(),
+                recursive_max_mtime: None,
                 children: ChildrenState::NotLoaded,
                 is_expanded: false,
             });

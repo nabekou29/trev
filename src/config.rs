@@ -180,7 +180,7 @@ pub struct SortConfig {
 }
 
 /// Display configuration.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 #[expect(clippy::struct_excessive_bools, reason = "DisplayConfig aggregates independent display flags")]
 pub struct DisplayConfig {
@@ -192,6 +192,10 @@ pub struct DisplayConfig {
     pub show_preview: bool,
     /// Show root directory as a tree node.
     pub show_root: bool,
+    /// Columns to display in the tree view (ordered list of column kinds).
+    pub columns: Vec<crate::ui::column::ColumnKind>,
+    /// Per-column options (e.g., format and mode for `modified_at`).
+    pub column_options: crate::ui::column::ColumnOptionsConfig,
 }
 
 /// Sort order variants.
@@ -236,6 +240,12 @@ pub struct PreviewConfig {
     pub commands: Vec<ExternalCommand>,
     /// Timeout for external commands in seconds (default: 3).
     pub command_timeout: u64,
+    /// Tree/preview split percentage in wide layout (default: 50).
+    pub split: u16,
+    /// Tree/preview split percentage in narrow layout (default: 60).
+    pub narrow_split: u16,
+    /// Width threshold for narrow layout in columns (default: 80).
+    pub narrow_threshold: u16,
 }
 
 /// External command configuration for preview.
@@ -434,6 +444,9 @@ impl Default for PreviewConfig {
             cache_size: 50,
             commands: Vec::new(),
             command_timeout: 3,
+            split: 50,
+            narrow_split: 60,
+            narrow_threshold: 80,
         }
     }
 }
@@ -450,7 +463,14 @@ impl Default for SortConfig {
 
 impl Default for DisplayConfig {
     fn default() -> Self {
-        Self { show_hidden: false, show_ignored: false, show_preview: true, show_root: false }
+        Self {
+            show_hidden: false,
+            show_ignored: false,
+            show_preview: true,
+            show_root: false,
+            columns: crate::ui::column::default_columns(),
+            column_options: crate::ui::column::ColumnOptionsConfig::default(),
+        }
     }
 }
 
@@ -1154,5 +1174,159 @@ preview:
 
         let result = Config::load_from(&path).unwrap();
         assert_that!(result.config.git.enabled, eq(true));
+    }
+
+    // --- Display columns config ---
+
+    #[rstest]
+    fn display_columns_default_has_three_columns() {
+        use crate::ui::column::ColumnKind;
+
+        let config = DisplayConfig::default();
+        assert_that!(config.columns.len(), eq(3));
+        assert_that!(config.columns[0], eq(ColumnKind::GitStatus));
+        assert_that!(config.columns[1], eq(ColumnKind::Size));
+        assert_that!(config.columns[2], eq(ColumnKind::ModifiedAt));
+    }
+
+    #[rstest]
+    fn display_columns_yaml_simple_form() {
+        use crate::ui::column::ColumnKind;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "display:\n  columns:\n    - size\n").unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        assert_that!(result.config.display.columns.len(), eq(1));
+        assert_that!(result.config.display.columns[0], eq(ColumnKind::Size));
+    }
+
+    #[rstest]
+    fn display_columns_yaml_empty_list() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "display:\n  columns: []\n").unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        assert!(result.config.display.columns.is_empty());
+    }
+
+    #[rstest]
+    fn display_columns_yaml_reordered() {
+        use crate::ui::column::ColumnKind;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(
+            &path,
+            "display:\n  columns:\n    - git_status\n    - size\n    - modified_at\n",
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        let cols = &result.config.display.columns;
+        assert_that!(cols.len(), eq(3));
+        assert_that!(cols[0], eq(ColumnKind::GitStatus));
+        assert_that!(cols[1], eq(ColumnKind::Size));
+        assert_that!(cols[2], eq(ColumnKind::ModifiedAt));
+    }
+
+    #[rstest]
+    fn display_column_options_yaml() {
+        use crate::ui::column::{MtimeFormat, MtimeMode};
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(
+            &path,
+            "display:\n  columns:\n    - modified_at\n  column_options:\n    modified_at:\n      format: absolute\n      mode: recursive_max\n",
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        let opts = &result.config.display.column_options;
+        assert_that!(opts.modified_at.format, eq(MtimeFormat::Absolute));
+        assert_that!(opts.modified_at.mode, eq(MtimeMode::RecursiveMax));
+    }
+
+    #[rstest]
+    fn display_column_options_defaults_when_omitted() {
+        use crate::ui::column::{MtimeFormat, MtimeMode};
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "display:\n  columns:\n    - modified_at\n").unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        let opts = &result.config.display.column_options;
+        assert_that!(opts.modified_at.format, eq(MtimeFormat::Relative));
+        assert_that!(opts.modified_at.mode, eq(MtimeMode::OsMtime));
+    }
+
+    #[rstest]
+    fn display_columns_yaml_unknown_column_errors() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "display:\n  columns:\n    - unknown_col\n").unwrap();
+
+        let result = Config::load_from(&path);
+        assert!(result.is_err());
+    }
+
+    // --- Schema display columns ---
+
+    #[rstest]
+    fn schema_display_has_columns_and_column_options() {
+        let schema = Config::generate_schema();
+        let json = serde_json::to_value(&schema).unwrap();
+        let json_str = json.to_string();
+        assert!(json_str.contains("columns"), "schema should contain columns field");
+        assert!(json_str.contains("column_options"), "schema should contain column_options field");
+    }
+
+    #[rstest]
+    fn preview_split_defaults() {
+        let config = PreviewConfig::default();
+        assert_that!(config.split, eq(50));
+        assert_that!(config.narrow_split, eq(60));
+        assert_that!(config.narrow_threshold, eq(80));
+    }
+
+    #[rstest]
+    fn preview_split_yaml_overrides() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(
+            &path,
+            "preview:\n  split: 40\n  narrow_split: 70\n  narrow_threshold: 100\n",
+        )
+        .unwrap();
+        let result = Config::load_from(&path).unwrap();
+        assert_that!(result.config.preview.split, eq(40));
+        assert_that!(result.config.preview.narrow_split, eq(70));
+        assert_that!(result.config.preview.narrow_threshold, eq(100));
+    }
+
+    #[rstest]
+    fn preview_split_partial_override_preserves_defaults() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "preview:\n  split: 35\n").unwrap();
+        let result = Config::load_from(&path).unwrap();
+        assert_that!(result.config.preview.split, eq(35));
+        assert_that!(result.config.preview.narrow_split, eq(60));
+        assert_that!(result.config.preview.narrow_threshold, eq(80));
+    }
+
+    #[rstest]
+    fn preview_split_does_not_affect_existing_fields() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "preview:\n  max_lines: 500\n  split: 40\n").unwrap();
+        let result = Config::load_from(&path).unwrap();
+        assert_that!(result.config.preview.max_lines, eq(500));
+        assert_that!(result.config.preview.split, eq(40));
+        assert_that!(result.config.preview.cache_size, eq(50));
     }
 }

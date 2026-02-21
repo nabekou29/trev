@@ -198,8 +198,10 @@ mod tests {
             path: root.join(name),
             is_dir: false,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
         };
@@ -208,8 +210,10 @@ mod tests {
             path: root.to_path_buf(),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::Loaded(vec![child]),
             is_expanded: true,
         };
@@ -226,8 +230,10 @@ mod tests {
             path: root.join(name),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
         };
@@ -236,8 +242,10 @@ mod tests {
             path: root.to_path_buf(),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::Loaded(vec![child]),
             is_expanded: true,
         };

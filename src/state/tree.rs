@@ -26,6 +26,13 @@ pub struct TreeNode {
     pub size: u64,
     /// Last modification time.
     pub modified: Option<SystemTime>,
+    /// Maximum modification time among loaded descendants (directories only).
+    ///
+    /// Computed when children are loaded via `set_children`.
+    /// Uses the max of all children's `modified` (files) and `recursive_max_mtime` (dirs).
+    pub recursive_max_mtime: Option<SystemTime>,
+    /// Symlink target path (only `Some` when `is_symlink == true` and `read_link` succeeds).
+    pub symlink_target: Option<String>,
     /// Children loading state (only meaningful for directories).
     pub children: ChildrenState,
     /// Whether this directory is expanded (only meaningful for directories).
@@ -430,6 +437,7 @@ impl TreeState {
             if let Some(old_children) = node.children.as_loaded_mut() {
                 transfer_expansion_state(old_children, &mut children);
             }
+            node.recursive_max_mtime = compute_recursive_max_mtime(&children);
             node.children = ChildrenState::Loaded(children);
             if auto_expand {
                 node.is_expanded = true;
@@ -884,6 +892,23 @@ fn transfer_expansion_state(old_children: &mut Vec<TreeNode>, new_children: &mut
     }
 }
 
+/// Compute the maximum modification time among loaded children.
+///
+/// For file children, uses their `modified` time. For directory children,
+/// uses `recursive_max_mtime` if available, falling back to `modified`.
+fn compute_recursive_max_mtime(children: &[TreeNode]) -> Option<SystemTime> {
+    children
+        .iter()
+        .filter_map(|child| {
+            if child.is_dir {
+                child.recursive_max_mtime.or(child.modified)
+            } else {
+                child.modified
+            }
+        })
+        .max()
+}
+
 /// Recursively search for a node by path.
 fn find_node_recursive<'a>(node: &'a mut TreeNode, path: &Path) -> Option<&'a mut TreeNode> {
     node.children.as_loaded_mut()?.iter_mut().find_map(|child| {
@@ -914,6 +939,8 @@ mod tests {
             is_symlink: false,
             size: 100,
             modified: None,
+            recursive_max_mtime: None,
+            symlink_target: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
         }
@@ -928,6 +955,8 @@ mod tests {
             is_symlink: false,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
+            symlink_target: None,
             children: ChildrenState::Loaded(children),
             is_expanded: false,
         }
@@ -942,6 +971,8 @@ mod tests {
             is_symlink: false,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
+            symlink_target: None,
             children: ChildrenState::Loaded(children),
             is_expanded: true,
         }
@@ -1036,8 +1067,10 @@ mod tests {
             path: root.join("empty_dir"),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: true, // expanded but NotLoaded
         };
@@ -1116,8 +1149,10 @@ mod tests {
             path: root.join("subdir"),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
         };
@@ -1168,8 +1203,10 @@ mod tests {
             path: parent_path.join("inner"),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
         };
@@ -1229,8 +1266,10 @@ mod tests {
             path: root.join("subdir"),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::Loading,
             is_expanded: true,
         };
@@ -1258,8 +1297,10 @@ mod tests {
             path: root.join("subdir"),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::Loading,
             is_expanded: false, // collapsed (prefetch scenario)
         };
@@ -1285,8 +1326,10 @@ mod tests {
             path: root.join("dir_a"),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
         };
@@ -1295,8 +1338,10 @@ mod tests {
             path: root.join("dir_b"),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
         };
@@ -1324,8 +1369,10 @@ mod tests {
             path: root.join("loading"),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::Loading,
             is_expanded: false,
         };
@@ -1451,8 +1498,10 @@ mod tests {
             path: root.join("subdir"),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
         };
@@ -1617,8 +1666,10 @@ mod tests {
             path: root.join("subdir"),
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
         };
@@ -1706,6 +1757,8 @@ mod tests {
             is_symlink: false,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
+            symlink_target: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
         }

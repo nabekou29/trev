@@ -85,6 +85,7 @@ pathdiff = "0.2"
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
 googletest = "0.14"
+proptest = "1"
 rstest = "0.26"
 tempfile = "3"
 tokio-test = "0.4"

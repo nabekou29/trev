@@ -36,8 +36,10 @@ fn file_node(name: &str, parent: &Path) -> TreeNode {
         path: parent.join(name),
         is_dir: false,
         is_symlink: false,
+        symlink_target: None,
         size: 100,
         modified: None,
+        recursive_max_mtime: None,
         children: ChildrenState::NotLoaded,
         is_expanded: false,
     }
@@ -50,8 +52,10 @@ fn dir_node(name: &str, parent: &Path, children: Vec<TreeNode>) -> TreeNode {
         path: parent.join(name),
         is_dir: true,
         is_symlink: false,
+        symlink_target: None,
         size: 0,
         modified: None,
+        recursive_max_mtime: None,
         children: ChildrenState::Loaded(children),
         is_expanded: false,
     }
@@ -80,6 +84,13 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
         emit_paths: None,
         git_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
         rebuild_generation: 0,
+        columns: trev::ui::column::resolve_columns(
+            &trev::ui::column::default_columns(),
+            &trev::ui::column::ColumnOptionsConfig::default(),
+        ),
+        layout_split: 50,
+        layout_narrow_split: 60,
+        layout_narrow_threshold: 80,
     }
 }
 
@@ -90,8 +101,10 @@ fn tree_with_children(children: Vec<TreeNode>) -> TreeState {
         path: PathBuf::from("/test/root"),
         is_dir: true,
         is_symlink: false,
+        symlink_target: None,
         size: 0,
         modified: None,
+        recursive_max_mtime: None,
         children: ChildrenState::Loaded(children),
         is_expanded: true,
     };
