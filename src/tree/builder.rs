@@ -56,6 +56,7 @@ impl TreeBuilder {
             path: root_path,
             is_dir: true,
             is_symlink: false,
+            symlink_target: None,
             size: 0,
             modified: metadata.modified().ok(),
             children: ChildrenState::Loaded(children),
@@ -105,11 +106,18 @@ impl TreeBuilder {
 
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
 
+            let symlink_target = if is_symlink {
+                std::fs::read_link(path).ok().map(|t| t.to_string_lossy().into_owned())
+            } else {
+                None
+            };
+
             children.push(TreeNode {
                 name,
                 path: path.to_path_buf(),
                 is_dir,
                 is_symlink,
+                symlink_target,
                 size: if is_dir { 0 } else { metadata.len() },
                 modified: metadata.modified().ok(),
                 children: ChildrenState::NotLoaded,
