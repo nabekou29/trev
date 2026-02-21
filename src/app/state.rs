@@ -20,6 +20,7 @@ use crate::git::{
     GitStatusResult,
 };
 use crate::input::AppMode;
+use crate::ui::column::ResolvedColumn;
 use crate::preview::cache::PreviewCache;
 use crate::preview::content::PreviewContent;
 use crate::preview::provider::PreviewRegistry;
@@ -78,6 +79,14 @@ pub struct AppState {
     pub git_state: Arc<std::sync::RwLock<Option<GitState>>>,
     /// Generation counter for tree rebuilds (latest-wins on rapid toggles).
     pub rebuild_generation: u64,
+    /// Resolved column definitions for the metadata columns display.
+    pub columns: Vec<ResolvedColumn>,
+    /// Tree/preview split percentage in wide layout.
+    pub layout_split: u16,
+    /// Tree/preview split percentage in narrow layout.
+    pub layout_narrow_split: u16,
+    /// Width threshold for narrow layout (columns).
+    pub layout_narrow_threshold: u16,
 }
 
 impl AppState {

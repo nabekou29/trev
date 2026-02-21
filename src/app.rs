@@ -39,10 +39,13 @@ use crate::git::{
     GitState,
     GitStatusResult,
 };
-
-use crate::ipc::types::IpcCommand;
 use crate::file_op::selection::SelectionBuffer;
 use crate::file_op::undo::UndoHistory;
+use crate::ipc::types::IpcCommand;
+use crate::ui::column::{
+    ColumnKind,
+    resolve_columns,
+};
 use crate::input::AppMode;
 use crate::preview::cache::PreviewCache;
 use crate::preview::provider::{
@@ -133,6 +136,13 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
         })
     };
 
+    // Resolve display columns from config, filtering GitStatus when git is disabled.
+    let git_enabled = config.git.enabled;
+    let mut columns = resolve_columns(&config.display.columns);
+    if !git_enabled {
+        columns.retain(|c| c.kind != ColumnKind::GitStatus);
+    }
+
     // Create app state.
     let mut state = AppState {
         tree_state,
@@ -155,17 +165,43 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
         emit_paths: if args.emit { Some(Vec::new()) } else { None },
         git_state: Arc::clone(&git_state),
         rebuild_generation: 0,
+        columns,
+        layout_split: config.preview.split,
+        layout_narrow_split: config.preview.narrow_split,
+        layout_narrow_threshold: config.preview.narrow_threshold,
     };
 
-    // Set up async channels.
+    let (ctx, channels) = build_context_and_channels(
+        &config, args, suppressed, ipc_server, git_enabled, &root_path, watcher_rx, ipc_rx,
+    );
+
+    trigger_initial_loads(&mut state, &ctx, &root_path);
+
+    let terminal = {
+        let _span = tracing::info_span!("terminal_setup").entered();
+        setup_terminal(&mut state, session_restored || reveal_succeeded)
+    };
+
+    Ok((state, ctx, channels, terminal))
+}
+
+/// Build the immutable runtime context and async event channels.
+#[allow(clippy::too_many_arguments)]
+fn build_context_and_channels(
+    config: &Config,
+    args: &Args,
+    suppressed: Arc<AtomicBool>,
+    ipc_server: Option<Arc<crate::ipc::server::IpcServer>>,
+    git_enabled: bool,
+    root_path: &Path,
+    watcher_rx: tokio::sync::mpsc::UnboundedReceiver<Vec<notify_debouncer_mini::DebouncedEvent>>,
+    ipc_rx: tokio::sync::mpsc::UnboundedReceiver<IpcCommand>,
+) -> (AppContext, EventReceivers) {
     let (children_tx, children_rx) = tokio::sync::mpsc::channel::<ChildrenLoadResult>(64);
     let (preview_tx, preview_rx) = tokio::sync::mpsc::channel::<PreviewLoadResult>(16);
     let (git_tx, git_rx) = tokio::sync::mpsc::channel::<GitStatusResult>(4);
     let (rebuild_tx, rebuild_rx) = tokio::sync::mpsc::channel::<TreeRebuildResult>(2);
 
-    let git_enabled = config.git.enabled;
-
-    // Create immutable runtime context.
     let ctx = AppContext {
         children_tx,
         preview_tx,
@@ -177,15 +213,8 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
         editor_action: args.action.into(),
         git_tx,
         git_enabled,
-        root_path: root_path.clone(),
+        root_path: root_path.to_path_buf(),
         rebuild_tx,
-    };
-
-    trigger_initial_loads(&mut state, &ctx, &root_path);
-
-    let terminal = {
-        let _span = tracing::info_span!("terminal_setup").entered();
-        setup_terminal(&mut state, session_restored || reveal_succeeded)
     };
 
     let channels = EventReceivers {
@@ -197,7 +226,7 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
         ipc: ipc_rx,
     };
 
-    Ok((state, ctx, channels, terminal))
+    (ctx, channels)
 }
 
 /// Initialize terminal and pre-compute viewport dimensions.
@@ -210,7 +239,7 @@ fn setup_terminal(state: &mut AppState, needs_center: bool) -> ratatui::DefaultT
     // Pre-compute viewport height and auto-hide preview on narrow terminals
     // before first draw, so session-restore / reveal can center without a flash.
     if let Ok((width, height)) = crossterm::terminal::size() {
-        if width <= crate::ui::NARROW_WIDTH_THRESHOLD {
+        if width <= state.layout_narrow_threshold {
             state.show_preview = false;
         }
         state.viewport_height = height.saturating_sub(1) as usize;
