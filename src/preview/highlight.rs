@@ -77,6 +77,8 @@ pub fn init_theme() {
 /// Uses the syntax set to detect language by file extension,
 /// falling back to plain text for unknown extensions.
 pub fn highlight_lines(code: &str, extension: &str) -> Vec<Line<'static>> {
+    let line_count = code.lines().count();
+    let _span = tracing::info_span!("highlight", extension, line_count).entered();
     let ss = &*SYNTAX_SET;
     // Index is safe: EmbeddedLazyThemeSet always contains all EmbeddedThemeName variants.
     #[expect(clippy::indexing_slicing, reason = "EmbeddedLazyThemeSet always contains all EmbeddedThemeName variants")]

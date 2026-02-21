@@ -116,6 +116,12 @@ impl PreviewProvider for ExternalCmdProvider {
     }
 
     fn load(&self, path: &Path, ctx: &LoadContext) -> anyhow::Result<PreviewContent> {
+        let _span = tracing::info_span!(
+            "external_cmd_load",
+            command = %self.command.command,
+            path = %path.display(),
+        )
+        .entered();
         if ctx.cancel_token.is_cancelled() {
             return Ok(PreviewContent::Empty);
         }

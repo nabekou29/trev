@@ -65,6 +65,7 @@ impl TreeBuilder {
 
     /// Load immediate children of a directory (depth=1).
     pub fn load_children(&self, dir_path: &Path) -> Result<Vec<TreeNode>> {
+        let _span = tracing::info_span!("load_children", dir_path = %dir_path.display()).entered();
         let mut children = Vec::new();
 
         let walker = ignore::WalkBuilder::new(dir_path)

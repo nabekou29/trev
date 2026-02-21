@@ -215,6 +215,7 @@ fn handle_collapse_all(state: &mut AppState) {
 /// Re-expands previously expanded directories and restores the cursor position.
 fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
     let expanded = state.tree_state.expanded_paths();
+    let _span = tracing::info_span!("rebuild_tree", expanded_count = expanded.len()).entered();
     let cursor_path = state.tree_state.cursor_path();
     let order = state.tree_state.sort_order();
     let direction = state.tree_state.sort_direction();

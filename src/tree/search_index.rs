@@ -74,6 +74,8 @@ impl Default for SearchIndex {
 /// Uses `ignore::WalkBuilder` for `.gitignore` awareness.
 /// This function is synchronous and should be called via `tokio::task::spawn_blocking`.
 pub fn build_search_index(root_path: &Path, show_hidden: bool, show_ignored: bool) -> SearchIndex {
+    let _span =
+        tracing::info_span!("build_search_index", root_path = %root_path.display()).entered();
     let mut index = SearchIndex::new();
 
     let walker = ignore::WalkBuilder::new(root_path)

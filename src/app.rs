@@ -650,6 +650,7 @@ pub fn trigger_git_status(ctx: &AppContext) {
 
 /// Synchronously run `git status --porcelain=v1` and parse the output.
 fn fetch_git_status(root: &Path) -> GitStatusResult {
+    let _span = tracing::info_span!("fetch_git_status", root_path = %root.display()).entered();
     let output = std::process::Command::new("git")
         .args(["status", "--porcelain=v1"])
         .current_dir(root)

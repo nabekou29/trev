@@ -75,7 +75,11 @@ pub fn trigger_preview(state: &mut AppState, ctx: &AppContext) {
     };
     state.preview_state.request_preview(path.clone());
 
-    if !try_load_from_cache(state, &path, &providers) {
+    let cache_hit = try_load_from_cache(state, &path, &providers);
+    let _span =
+        tracing::info_span!("trigger_preview", path = %path.display(), cache_hit).entered();
+
+    if !cache_hit {
         spawn_preview_for(state, &path, &providers, ctx, false);
     }
     prefetch_adjacent(state, ctx);
@@ -242,6 +246,12 @@ fn spawn_preview_load(params: PreviewLoadParams) {
         let token = cancel_token.clone();
 
         let result = tokio::task::spawn_blocking(move || {
+            let _span = tracing::info_span!(
+                "preview_load",
+                path = %load_path.display(),
+                provider_name = %provider.name(),
+            )
+            .entered();
             let ctx = LoadContext { max_lines, max_bytes, cancel_token: token };
             match provider.load(&load_path, &ctx) {
                 Ok(c) => c,

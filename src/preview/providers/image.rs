@@ -66,6 +66,7 @@ impl PreviewProvider for ImagePreviewProvider {
     }
 
     fn load(&self, path: &Path, ctx: &LoadContext) -> anyhow::Result<PreviewContent> {
+        let _span = tracing::info_span!("image_load", path = %path.display()).entered();
         if ctx.cancel_token.is_cancelled() {
             return Ok(PreviewContent::Empty);
         }
@@ -109,6 +110,7 @@ fn load_image(path: &Path) -> anyhow::Result<image::DynamicImage> {
     reason = "SVG rendering requires floating point math and integer casts"
 )]
 fn load_svg(path: &Path) -> anyhow::Result<image::DynamicImage> {
+    let _span = tracing::info_span!("svg_load").entered();
     let svg_data = std::fs::read(path)?;
 
     let tree = resvg::usvg::Tree::from_data(&svg_data, &resvg::usvg::Options::default())?;
