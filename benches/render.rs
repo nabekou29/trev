@@ -39,6 +39,7 @@ fn file_node(name: &str, parent: &Path) -> TreeNode {
         symlink_target: None,
         size: 100,
         modified: None,
+        recursive_max_mtime: None,
         children: ChildrenState::NotLoaded,
         is_expanded: false,
     }
@@ -54,6 +55,7 @@ fn dir_node(name: &str, parent: &Path, children: Vec<TreeNode>) -> TreeNode {
         symlink_target: None,
         size: 0,
         modified: None,
+        recursive_max_mtime: None,
         children: ChildrenState::Loaded(children),
         is_expanded: false,
     }
@@ -102,6 +104,7 @@ fn tree_with_children(children: Vec<TreeNode>) -> TreeState {
         symlink_target: None,
         size: 0,
         modified: None,
+        recursive_max_mtime: None,
         children: ChildrenState::Loaded(children),
         is_expanded: true,
     };

@@ -50,6 +50,7 @@ impl TreeBuilder {
         let name = root_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
 
         let children = self.load_children(&root_path)?;
+        let recursive_max_mtime = children.iter().filter_map(|c| c.modified).max();
 
         Ok(TreeNode {
             name,
@@ -59,6 +60,7 @@ impl TreeBuilder {
             symlink_target: None,
             size: 0,
             modified: metadata.modified().ok(),
+            recursive_max_mtime,
             children: ChildrenState::Loaded(children),
             is_expanded: true,
         })
@@ -120,6 +122,7 @@ impl TreeBuilder {
                 symlink_target,
                 size: if is_dir { 0 } else { metadata.len() },
                 modified: metadata.modified().ok(),
+                recursive_max_mtime: None,
                 children: ChildrenState::NotLoaded,
                 is_expanded: false,
             });

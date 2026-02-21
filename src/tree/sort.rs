@@ -106,6 +106,7 @@ mod tests {
             symlink_target: None,
             size,
             modified,
+            recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
         }
@@ -121,6 +122,7 @@ mod tests {
             symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::Loaded(vec![]),
             is_expanded: false,
         }
@@ -180,6 +182,7 @@ mod tests {
             symlink_target: None,
             size: 0,
             modified: None,
+            recursive_max_mtime: None,
             children: ChildrenState::Loaded(inner_children),
             is_expanded: true,
         };

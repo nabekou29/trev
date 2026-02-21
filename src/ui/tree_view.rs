@@ -23,6 +23,7 @@ use crate::state::tree::{
 };
 use crate::ui::column::{
     ColumnKind,
+    MtimeMode,
     ResolvedColumn,
     format_mtime,
     format_size,
@@ -224,8 +225,13 @@ fn push_name_and_columns(
                 spans.push(Span::styled(text, Style::default().fg(Color::DarkGray)));
             }
             ColumnKind::ModifiedAt => {
-                let text = format_mtime(vnode.node.modified, col.mtime_format);
-                let color = mtime_color(vnode.node.modified);
+                let mtime = if vnode.node.is_dir && col.mtime_mode == MtimeMode::RecursiveMax {
+                    vnode.node.recursive_max_mtime
+                } else {
+                    vnode.node.modified
+                };
+                let text = format_mtime(mtime, col.mtime_format);
+                let color = mtime_color(mtime);
                 spans.push(Span::styled(text, Style::default().fg(color)));
             }
             ColumnKind::GitStatus => {
