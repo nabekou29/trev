@@ -22,7 +22,7 @@ const WEEK: u64 = 7 * DAY;
 const MONTH: u64 = 30 * DAY;
 
 /// Kind of column that can be displayed in the tree view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ColumnKind {
     /// File size (human-readable).
@@ -55,53 +55,48 @@ pub enum MtimeFormat {
     Absolute,
 }
 
-/// A column entry in the config file.
-///
-/// Supports both simple string form (`- size`) and object form with options
-/// (`- kind: modified_at\n  format: absolute`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(untagged)]
-pub enum ColumnEntry {
-    /// Simple string form: just the column kind.
-    Simple(ColumnKind),
-    /// Object form with per-column options.
-    WithOptions {
-        /// Column kind.
-        kind: ColumnKind,
-        /// Display format (only meaningful for `ModifiedAt`).
-        #[serde(default)]
-        format: Option<MtimeFormat>,
-    },
+/// How directory modification times are computed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MtimeMode {
+    /// Use the OS modification time of the directory itself.
+    #[default]
+    OsMtime,
+    /// Use the maximum mtime among all loaded descendant files (GitHub-like).
+    RecursiveMax,
 }
 
-impl ColumnEntry {
-    /// Get the column kind.
-    pub const fn kind(&self) -> ColumnKind {
-        match self {
-            Self::Simple(kind) | Self::WithOptions { kind, .. } => *kind,
-        }
-    }
+/// Per-column options for the `ModifiedAt` column.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct ModifiedAtColumnOptions {
+    /// Display format.
+    pub format: MtimeFormat,
+    /// How directory mtime is computed.
+    pub mode: MtimeMode,
+}
 
-    /// Resolve this entry into a `ResolvedColumn`.
-    pub fn resolve(&self) -> ResolvedColumn {
-        let kind = self.kind();
-        let mtime_format = match self {
-            Self::WithOptions { format: Some(fmt), .. } => *fmt,
-            _ => MtimeFormat::default(),
-        };
-        ResolvedColumn { kind, mtime_format }
-    }
+/// Per-column options configuration.
+///
+/// Each field corresponds to a column kind that supports options.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct ColumnOptionsConfig {
+    /// Options for the `ModifiedAt` column.
+    pub modified_at: ModifiedAtColumnOptions,
 }
 
 /// A resolved column ready for rendering.
 ///
-/// Created from `ColumnEntry` by resolving options to concrete values.
+/// Created by merging column kind with per-column options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolvedColumn {
     /// Column kind.
     pub kind: ColumnKind,
     /// Format for `ModifiedAt` columns.
     pub mtime_format: MtimeFormat,
+    /// How directory mtime is computed for `ModifiedAt` columns.
+    pub mtime_mode: MtimeMode,
 }
 
 impl ResolvedColumn {
@@ -111,9 +106,18 @@ impl ResolvedColumn {
     }
 }
 
-/// Resolve a list of column entries into resolved columns.
-pub fn resolve_columns(entries: &[ColumnEntry]) -> Vec<ResolvedColumn> {
-    entries.iter().map(ColumnEntry::resolve).collect()
+/// Resolve a list of column kinds into resolved columns using the given options.
+pub fn resolve_columns(kinds: &[ColumnKind], options: &ColumnOptionsConfig) -> Vec<ResolvedColumn> {
+    kinds
+        .iter()
+        .map(|&kind| {
+            let (mtime_format, mtime_mode) = match kind {
+                ColumnKind::ModifiedAt => (options.modified_at.format, options.modified_at.mode),
+                _ => (MtimeFormat::default(), MtimeMode::default()),
+            };
+            ResolvedColumn { kind, mtime_format, mtime_mode }
+        })
+        .collect()
 }
 
 /// Calculate the total width needed for all columns (including separators).
@@ -126,13 +130,9 @@ pub fn total_columns_width(columns: &[ResolvedColumn]) -> usize {
     columns.iter().map(|c| c.width() + 1).sum()
 }
 
-/// Default column entries: `[Size, ModifiedAt, GitStatus]`.
-pub fn default_column_entries() -> Vec<ColumnEntry> {
-    vec![
-        ColumnEntry::Simple(ColumnKind::Size),
-        ColumnEntry::Simple(ColumnKind::ModifiedAt),
-        ColumnEntry::Simple(ColumnKind::GitStatus),
-    ]
+/// Default column kinds: `[GitStatus, Size, ModifiedAt]`.
+pub fn default_columns() -> Vec<ColumnKind> {
+    vec![ColumnKind::GitStatus, ColumnKind::Size, ColumnKind::ModifiedAt]
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +304,7 @@ mod tests {
     use super::*;
 
     // =========================================================================
-    // T003: ColumnKind, MtimeFormat, ColumnEntry, ResolvedColumn
+    // T003: ColumnKind, MtimeFormat, MtimeMode, ResolvedColumn
     // =========================================================================
 
     #[rstest]
@@ -316,8 +316,8 @@ mod tests {
 
     #[rstest]
     fn total_columns_width_all_defaults() {
-        let cols = resolve_columns(&default_column_entries());
-        // (5+1) + (10+1) + (2+1) = 20
+        let cols = resolve_columns(&default_columns(), &ColumnOptionsConfig::default());
+        // (2+1) + (5+1) + (10+1) = 20
         assert_that!(total_columns_width(&cols), eq(20));
     }
 
@@ -328,65 +328,38 @@ mod tests {
 
     #[rstest]
     fn total_columns_width_single() {
-        let cols = resolve_columns(&[ColumnEntry::Simple(ColumnKind::Size)]);
+        let cols = resolve_columns(&[ColumnKind::Size], &ColumnOptionsConfig::default());
         assert_that!(total_columns_width(&cols), eq(6)); // 5+1
     }
 
     #[rstest]
-    fn column_entry_simple_resolve() {
-        let entry = ColumnEntry::Simple(ColumnKind::ModifiedAt);
-        let resolved = entry.resolve();
-        assert_that!(resolved.kind, eq(ColumnKind::ModifiedAt));
-        assert_that!(resolved.mtime_format, eq(MtimeFormat::Relative));
-    }
-
-    #[rstest]
-    fn column_entry_with_options_resolve() {
-        let entry = ColumnEntry::WithOptions {
-            kind: ColumnKind::ModifiedAt,
-            format: Some(MtimeFormat::Absolute),
-        };
-        let resolved = entry.resolve();
-        assert_that!(resolved.kind, eq(ColumnKind::ModifiedAt));
-        assert_that!(resolved.mtime_format, eq(MtimeFormat::Absolute));
-    }
-
-    #[rstest]
-    fn column_entry_with_options_no_format_defaults_relative() {
-        let entry = ColumnEntry::WithOptions {
-            kind: ColumnKind::ModifiedAt,
-            format: None,
-        };
-        let resolved = entry.resolve();
-        assert_that!(resolved.mtime_format, eq(MtimeFormat::Relative));
-    }
-
-    #[rstest]
-    fn column_entry_serde_simple_string() {
-        let yaml = "\"size\"";
-        let entry: ColumnEntry = serde_yaml_ng::from_str(yaml).unwrap();
-        assert_that!(entry.kind(), eq(ColumnKind::Size));
-    }
-
-    #[rstest]
-    fn column_entry_serde_object_form() {
-        let yaml = "kind: modified_at\nformat: absolute";
-        let entry: ColumnEntry = serde_yaml_ng::from_str(yaml).unwrap();
-        assert_that!(entry.kind(), eq(ColumnKind::ModifiedAt));
-        assert!(
-            matches!(entry, ColumnEntry::WithOptions { format: Some(MtimeFormat::Absolute), .. }),
-            "expected WithOptions with Absolute format"
+    fn resolve_columns_default_options() {
+        let cols = resolve_columns(
+            &[ColumnKind::ModifiedAt],
+            &ColumnOptionsConfig::default(),
         );
+        assert_that!(cols.len(), eq(1));
+        assert_that!(cols[0].kind, eq(ColumnKind::ModifiedAt));
+        assert_that!(cols[0].mtime_format, eq(MtimeFormat::Relative));
+        assert_that!(cols[0].mtime_mode, eq(MtimeMode::OsMtime));
     }
 
     #[rstest]
-    fn column_entry_serde_list_mixed() {
-        let yaml = "- size\n- kind: modified_at\n  format: absolute\n- git_status";
-        let entries: Vec<ColumnEntry> = serde_yaml_ng::from_str(yaml).unwrap();
-        assert_that!(entries.len(), eq(3));
-        assert_that!(entries[0].kind(), eq(ColumnKind::Size));
-        assert_that!(entries[1].kind(), eq(ColumnKind::ModifiedAt));
-        assert_that!(entries[2].kind(), eq(ColumnKind::GitStatus));
+    fn resolve_columns_with_custom_options() {
+        let options = ColumnOptionsConfig {
+            modified_at: ModifiedAtColumnOptions {
+                format: MtimeFormat::Absolute,
+                mode: MtimeMode::RecursiveMax,
+            },
+        };
+        let cols = resolve_columns(&[ColumnKind::Size, ColumnKind::ModifiedAt], &options);
+        assert_that!(cols.len(), eq(2));
+        // Size column ignores mtime options.
+        assert_that!(cols[0].mtime_format, eq(MtimeFormat::Relative));
+        assert_that!(cols[0].mtime_mode, eq(MtimeMode::OsMtime));
+        // ModifiedAt gets custom options.
+        assert_that!(cols[1].mtime_format, eq(MtimeFormat::Absolute));
+        assert_that!(cols[1].mtime_mode, eq(MtimeMode::RecursiveMax));
     }
 
     #[rstest]
@@ -396,6 +369,31 @@ mod tests {
             let back: ColumnKind = serde_yaml_ng::from_str(&yaml).unwrap();
             assert_eq!(kind, back);
         }
+    }
+
+    #[rstest]
+    fn mtime_mode_serde_round_trip() {
+        for mode in [MtimeMode::OsMtime, MtimeMode::RecursiveMax] {
+            let yaml = serde_yaml_ng::to_string(&mode).unwrap();
+            let back: MtimeMode = serde_yaml_ng::from_str(&yaml).unwrap();
+            assert_eq!(mode, back);
+        }
+    }
+
+    #[rstest]
+    fn column_options_config_serde() {
+        let yaml = "modified_at:\n  format: absolute\n  mode: recursive_max";
+        let config: ColumnOptionsConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_that!(config.modified_at.format, eq(MtimeFormat::Absolute));
+        assert_that!(config.modified_at.mode, eq(MtimeMode::RecursiveMax));
+    }
+
+    #[rstest]
+    fn column_options_config_defaults() {
+        let yaml = "";
+        let config: ColumnOptionsConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_that!(config.modified_at.format, eq(MtimeFormat::Relative));
+        assert_that!(config.modified_at.mode, eq(MtimeMode::OsMtime));
     }
 
     // =========================================================================

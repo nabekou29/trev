@@ -82,7 +82,10 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
         emit_paths: None,
         git_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
         rebuild_generation: 0,
-        columns: trev::ui::column::resolve_columns(&trev::ui::column::default_column_entries()),
+        columns: trev::ui::column::resolve_columns(
+            &trev::ui::column::default_columns(),
+            &trev::ui::column::ColumnOptionsConfig::default(),
+        ),
         layout_split: 50,
         layout_narrow_split: 60,
         layout_narrow_threshold: 80,

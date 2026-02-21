@@ -192,11 +192,10 @@ pub struct DisplayConfig {
     pub show_preview: bool,
     /// Show root directory as a tree node.
     pub show_root: bool,
-    /// Columns to display in the tree view.
-    ///
-    /// Each entry can be a simple column name (e.g., `size`) or an object with
-    /// per-column options (e.g., `{ kind: modified_at, format: absolute }`).
-    pub columns: Vec<crate::ui::column::ColumnEntry>,
+    /// Columns to display in the tree view (ordered list of column kinds).
+    pub columns: Vec<crate::ui::column::ColumnKind>,
+    /// Per-column options (e.g., format and mode for `modified_at`).
+    pub column_options: crate::ui::column::ColumnOptionsConfig,
 }
 
 /// Sort order variants.
@@ -469,7 +468,8 @@ impl Default for DisplayConfig {
             show_ignored: false,
             show_preview: true,
             show_root: false,
-            columns: crate::ui::column::default_column_entries(),
+            columns: crate::ui::column::default_columns(),
+            column_options: crate::ui::column::ColumnOptionsConfig::default(),
         }
     }
 }
@@ -1184,9 +1184,9 @@ preview:
 
         let config = DisplayConfig::default();
         assert_that!(config.columns.len(), eq(3));
-        assert_that!(config.columns[0].kind(), eq(ColumnKind::Size));
-        assert_that!(config.columns[1].kind(), eq(ColumnKind::ModifiedAt));
-        assert_that!(config.columns[2].kind(), eq(ColumnKind::GitStatus));
+        assert_that!(config.columns[0], eq(ColumnKind::GitStatus));
+        assert_that!(config.columns[1], eq(ColumnKind::Size));
+        assert_that!(config.columns[2], eq(ColumnKind::ModifiedAt));
     }
 
     #[rstest]
@@ -1199,7 +1199,7 @@ preview:
 
         let result = Config::load_from(&path).unwrap();
         assert_that!(result.config.display.columns.len(), eq(1));
-        assert_that!(result.config.display.columns[0].kind(), eq(ColumnKind::Size));
+        assert_that!(result.config.display.columns[0], eq(ColumnKind::Size));
     }
 
     #[rstest]
@@ -1227,50 +1227,41 @@ preview:
         let result = Config::load_from(&path).unwrap();
         let cols = &result.config.display.columns;
         assert_that!(cols.len(), eq(3));
-        assert_that!(cols[0].kind(), eq(ColumnKind::GitStatus));
-        assert_that!(cols[1].kind(), eq(ColumnKind::Size));
-        assert_that!(cols[2].kind(), eq(ColumnKind::ModifiedAt));
+        assert_that!(cols[0], eq(ColumnKind::GitStatus));
+        assert_that!(cols[1], eq(ColumnKind::Size));
+        assert_that!(cols[2], eq(ColumnKind::ModifiedAt));
     }
 
     #[rstest]
-    fn display_columns_yaml_object_form_with_format() {
-        use crate::ui::column::{ColumnEntry, ColumnKind, MtimeFormat};
+    fn display_column_options_yaml() {
+        use crate::ui::column::{MtimeFormat, MtimeMode};
 
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("config.yml");
         std::fs::write(
             &path,
-            "display:\n  columns:\n    - kind: modified_at\n      format: absolute\n",
+            "display:\n  columns:\n    - modified_at\n  column_options:\n    modified_at:\n      format: absolute\n      mode: recursive_max\n",
         )
         .unwrap();
 
         let result = Config::load_from(&path).unwrap();
-        let cols = &result.config.display.columns;
-        assert_that!(cols.len(), eq(1));
-        assert_that!(cols[0].kind(), eq(ColumnKind::ModifiedAt));
-        assert!(matches!(
-            cols[0],
-            ColumnEntry::WithOptions { format: Some(MtimeFormat::Absolute), .. }
-        ));
+        let opts = &result.config.display.column_options;
+        assert_that!(opts.modified_at.format, eq(MtimeFormat::Absolute));
+        assert_that!(opts.modified_at.mode, eq(MtimeMode::RecursiveMax));
     }
 
     #[rstest]
-    fn display_columns_yaml_mixed_simple_and_object() {
-        use crate::ui::column::ColumnKind;
+    fn display_column_options_defaults_when_omitted() {
+        use crate::ui::column::{MtimeFormat, MtimeMode};
 
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("config.yml");
-        std::fs::write(
-            &path,
-            "display:\n  columns:\n    - size\n    - kind: modified_at\n      format: absolute\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "display:\n  columns:\n    - modified_at\n").unwrap();
 
         let result = Config::load_from(&path).unwrap();
-        let cols = &result.config.display.columns;
-        assert_that!(cols.len(), eq(2));
-        assert_that!(cols[0].kind(), eq(ColumnKind::Size));
-        assert_that!(cols[1].kind(), eq(ColumnKind::ModifiedAt));
+        let opts = &result.config.display.column_options;
+        assert_that!(opts.modified_at.format, eq(MtimeFormat::Relative));
+        assert_that!(opts.modified_at.mode, eq(MtimeMode::OsMtime));
     }
 
     #[rstest]
@@ -1286,11 +1277,12 @@ preview:
     // --- Schema display columns ---
 
     #[rstest]
-    fn schema_display_has_columns_field() {
+    fn schema_display_has_columns_and_column_options() {
         let schema = Config::generate_schema();
         let json = serde_json::to_value(&schema).unwrap();
         let json_str = json.to_string();
         assert!(json_str.contains("columns"), "schema should contain columns field");
+        assert!(json_str.contains("column_options"), "schema should contain column_options field");
     }
 
     #[rstest]

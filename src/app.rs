@@ -138,7 +138,7 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
 
     // Resolve display columns from config, filtering GitStatus when git is disabled.
     let git_enabled = config.git.enabled;
-    let mut columns = resolve_columns(&config.display.columns);
+    let mut columns = resolve_columns(&config.display.columns, &config.display.column_options);
     if !git_enabled {
         columns.retain(|c| c.kind != ColumnKind::GitStatus);
     }

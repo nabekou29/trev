@@ -83,7 +83,8 @@ mod tests {
             git_state: Arc::new(std::sync::RwLock::new(None)),
             rebuild_generation: 0,
             columns: crate::ui::column::resolve_columns(
-                &crate::ui::column::default_column_entries(),
+                &crate::ui::column::default_columns(),
+                &crate::ui::column::ColumnOptionsConfig::default(),
             ),
             layout_split: 50,
             layout_narrow_split: 60,
