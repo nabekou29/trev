@@ -61,6 +61,14 @@ impl PreviewProvider for FallbackProvider {
             return Ok(PreviewContent::Directory { entry_count, total_size });
         }
 
+        // Special files (FIFOs, sockets, device nodes) — describe without opening.
+        if !metadata.is_file() {
+            let kind = describe_special_file(&metadata);
+            return Ok(PreviewContent::Error {
+                message: format!("Special file ({kind})"),
+            });
+        }
+
         let size = metadata.len();
 
         if size == 0 {
@@ -70,6 +78,31 @@ impl PreviewProvider for FallbackProvider {
         // Non-text file → binary.
         Ok(PreviewContent::Binary { size })
     }
+}
+
+/// Describe the type of a special (non-regular, non-directory) file.
+#[cfg(unix)]
+fn describe_special_file(metadata: &fs::Metadata) -> &'static str {
+    use std::os::unix::fs::FileTypeExt;
+
+    let ft = metadata.file_type();
+    if ft.is_fifo() {
+        "pipe"
+    } else if ft.is_socket() {
+        "socket"
+    } else if ft.is_char_device() {
+        "char device"
+    } else if ft.is_block_device() {
+        "block device"
+    } else {
+        "special file"
+    }
+}
+
+/// Describe the type of a special (non-regular, non-directory) file.
+#[cfg(not(unix))]
+fn describe_special_file(_metadata: &fs::Metadata) -> &'static str {
+    "special file"
 }
 
 #[cfg(test)]
@@ -165,5 +198,31 @@ mod tests {
         let result = provider.load(&path, &make_ctx()).unwrap();
 
         assert!(matches!(result, PreviewContent::Empty));
+    }
+
+    #[cfg(unix)]
+    #[rstest]
+    fn load_fifo_produces_error(temp_dir: TempDir) {
+        use std::os::unix::fs::FileTypeExt;
+
+        let fifo_path = temp_dir.path().join("test.pipe");
+        std::process::Command::new("mkfifo")
+            .arg(&fifo_path)
+            .status()
+            .unwrap();
+
+        // Verify it's actually a FIFO.
+        let meta = fs::metadata(&fifo_path).unwrap();
+        assert!(meta.file_type().is_fifo());
+
+        let provider = FallbackProvider::new();
+        let result = provider.load(&fifo_path, &make_ctx()).unwrap();
+
+        match result {
+            PreviewContent::Error { message } => {
+                assert_that!(message.as_str(), eq("Special file (pipe)"));
+            }
+            other => panic!("Expected Error, got {other:?}"),
+        }
     }
 }

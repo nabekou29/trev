@@ -43,6 +43,11 @@ impl PreviewProvider for TextPreviewProvider {
             return false;
         }
 
+        // Skip special files (FIFOs, sockets, device files) to avoid blocking on open().
+        if !fs::metadata(path).is_ok_and(|m| m.is_file()) {
+            return false;
+        }
+
         // Read first 1024 bytes for binary detection.
         let Ok(buf) = read_head(path, 1024) else {
             return false;
@@ -57,6 +62,7 @@ impl PreviewProvider for TextPreviewProvider {
     }
 
     fn load(&self, path: &Path, ctx: &LoadContext) -> anyhow::Result<PreviewContent> {
+        let _span = tracing::info_span!("text_load", path = %path.display()).entered();
         let metadata = fs::metadata(path)?;
         if metadata.len() == 0 {
             return Ok(PreviewContent::Empty);
@@ -182,6 +188,19 @@ mod tests {
     fn can_handle_nonexistent_file() {
         let provider = TextPreviewProvider::new();
         assert_that!(provider.can_handle(Path::new("/nonexistent/file.txt"), false), eq(false));
+    }
+
+    #[cfg(unix)]
+    #[rstest]
+    fn can_handle_fifo_returns_false(temp_dir: TempDir) {
+        let fifo_path = temp_dir.path().join("test.pipe");
+        std::process::Command::new("mkfifo")
+            .arg(&fifo_path)
+            .status()
+            .unwrap();
+
+        let provider = TextPreviewProvider::new();
+        assert_that!(provider.can_handle(&fifo_path, false), eq(false));
     }
 
     // --- load tests ---
