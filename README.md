@@ -150,38 +150,37 @@ Generate JSON Schema for editor autocompletion:
 trev schema > ~/.config/trev/config.schema.json
 ```
 
-### Example
+### Default Configuration
 
 ```yaml
 sort:
-  order: name # name | size | mtime | type | extension
-  direction: asc # asc | desc
+  order: name           # name | size | mtime | type | extension
+  direction: asc        # asc | desc
   directories_first: true
 
 display:
   show_hidden: false
   show_ignored: false
   show_preview: true
+  show_root: false
+  columns:              # Display order of metadata columns
+    - git_status
+    - size
+    - modified_at
+  column_options:
+    modified_at:
+      format: relative  # relative | absolute
+      mode: os_mtime    # os_mtime | recursive_max
 
 preview:
   max_lines: 1000
-  max_bytes: 10485760 # 10 MB
+  max_bytes: 10485760   # 10 MB
   cache_size: 50
-  command_timeout: 3 # seconds
-  commands:
-    - name: "Pretty JSON"
-      extensions: [json]
-      priority: high # high (0) | mid (100) | low (1000) | <number>
-      command: jq
-      args: ["."]
-    - name: "Markdown"
-      extensions: [md]
-      command: glow
-    - name: "Disk Usage"
-      directories: true
-      priority: low
-      command: dust
-      args: ["-r"]
+  command_timeout: 3    # seconds
+  split: 50             # Tree/preview split % (wide layout)
+  narrow_split: 60      # Tree/preview split % (narrow layout)
+  narrow_threshold: 80  # Width threshold for narrow layout (columns)
+  commands: []
 
 file_operations:
   delete_mode: permanent # permanent | custom_trash
@@ -194,6 +193,29 @@ session:
 watcher:
   enabled: true
   debounce_ms: 250
+
+git:
+  enabled: true
+```
+
+### Preview Commands Example
+
+```yaml
+preview:
+  commands:
+    - name: "Pretty JSON"
+      extensions: [json]
+      priority: high     # high (0) | mid (100) | low (1000) | <number>
+      command: jq
+      args: ["."]
+    - name: "Markdown"
+      extensions: [md]
+      command: glow
+    - name: "Disk Usage"
+      directories: true
+      priority: low
+      command: dust
+      args: ["-r"]
 ```
 
 ### Keybinding Customization
