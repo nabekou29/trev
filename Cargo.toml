@@ -39,6 +39,7 @@ nucleo = "0.5"
 
 # File system
 ignore = "0.4"
+rayon = "1"
 walkdir = "2"
 globset = "0.4"
 notify = "8"

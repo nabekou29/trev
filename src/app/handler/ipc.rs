@@ -81,6 +81,7 @@ mod tests {
             processing: false,
             emit_paths: None,
             git_state: Arc::new(std::sync::RwLock::new(None)),
+            rebuild_generation: 0,
         }
     }
 

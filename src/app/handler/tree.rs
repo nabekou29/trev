@@ -11,11 +11,14 @@ use crate::app::state::{
     AppContext,
     AppState,
     ChildrenLoadResult,
+    TreeRebuildResult,
 };
 use crate::state::tree::{
     ExpandResult,
     TreeState,
 };
+use rayon::prelude::*;
+
 use crate::tree::builder::TreeBuilder;
 
 /// Handle a tree action.
@@ -178,57 +181,89 @@ fn handle_collapse_all(state: &mut AppState) {
     }
 }
 
-/// Rebuild the entire tree with the current `show_hidden` / `show_ignored` settings.
+/// Spawn an async tree rebuild with the current display settings.
 ///
-/// Re-expands previously expanded directories and restores the cursor position.
+/// Captures sort/display state, builds the tree on a background thread,
+/// and sends the result through the rebuild channel. The event loop
+/// applies the result when it arrives.
 fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
+    // Increment generation so any in-flight rebuild is discarded.
+    state.rebuild_generation = state.rebuild_generation.wrapping_add(1);
+    let generation = state.rebuild_generation;
+
     let expanded = state.tree_state.expanded_paths();
-    let _span = tracing::info_span!("rebuild_tree", expanded_count = expanded.len()).entered();
     let cursor_path = state.tree_state.cursor_path();
     let order = state.tree_state.sort_order();
     let direction = state.tree_state.sort_direction();
     let dirs_first = state.tree_state.directories_first();
+    let show_root = state.tree_state.show_root();
     let root_path = state.tree_state.root_path().to_path_buf();
+    let show_hidden = state.show_hidden;
+    let show_ignored = state.show_ignored;
 
-    let builder = TreeBuilder::new(state.show_hidden, state.show_ignored);
-    let Ok(root) = builder.build(&root_path) else {
-        return;
-    };
+    let tx = ctx.rebuild_tx.clone();
 
-    let options = crate::state::tree::TreeOptions {
-        sort_order: order,
-        sort_direction: direction,
-        directories_first: dirs_first,
-        show_root: state.tree_state.show_root(),
-    };
-    let mut new_tree = TreeState::new(root, options);
+    tokio::task::spawn_blocking(move || {
+        let _span = tracing::info_span!(
+            "rebuild_tree",
+            expanded_count = expanded.len(),
+            generation,
+        )
+        .entered();
 
-    // Re-expand directories (shortest paths first so parents load before children).
-    let mut sorted_expanded = expanded;
-    sorted_expanded.sort_by_key(|p| p.as_os_str().len());
-    for path in &sorted_expanded {
-        if let Ok(children) = builder.load_children(path) {
+        let builder = TreeBuilder::new(show_hidden, show_ignored);
+        let Ok(root) = builder.build(&root_path) else {
+            tracing::warn!("rebuild_tree: failed to build root");
+            return;
+        };
+
+        let options = crate::state::tree::TreeOptions {
+            sort_order: order,
+            sort_direction: direction,
+            directories_first: dirs_first,
+            show_root,
+        };
+        let mut new_tree = TreeState::new(root, options);
+
+        // Sort root's children (builder.build doesn't sort them).
+        new_tree.apply_sort(order, direction, dirs_first);
+
+        // Re-expand directories (shortest paths first so parents load before children).
+        // Skip root — already loaded by builder.build().
+        let mut sorted_expanded = expanded;
+        sorted_expanded.retain(|p| p != &root_path);
+        sorted_expanded.sort_by_key(|p| p.as_os_str().len());
+
+        // Load children in parallel (each load_children is independent FS I/O).
+        let loaded: Vec<_> = sorted_expanded
+            .par_iter()
+            .filter_map(|path| {
+                builder
+                    .load_children(path)
+                    .ok()
+                    .map(|children| (path, children))
+            })
+            .collect();
+
+        // Apply results sequentially (parent→child order preserved by par_iter).
+        for (path, children) in loaded {
             new_tree.set_children(path, children, true);
         }
-    }
 
-    new_tree.apply_sort(order, direction, dirs_first);
+        // Restore cursor position.
+        if let Some(ref cp) = cursor_path {
+            new_tree.move_cursor_to_path(cp);
+        }
 
-    // Restore cursor position.
-    if let Some(ref cp) = cursor_path {
-        new_tree.move_cursor_to_path(cp);
-    }
-
-    state.tree_state = new_tree;
-
-    // Re-trigger prefetch for visible directories.
-    trigger_prefetch(
-        &mut state.tree_state,
-        &root_path,
-        ctx,
-        state.show_hidden,
-        state.show_ignored,
-    );
+        // Send result (ignore error if receiver dropped during shutdown).
+        let _ = tx.blocking_send(TreeRebuildResult {
+            tree_state: new_tree,
+            root_path,
+            show_hidden,
+            show_ignored,
+            generation,
+        });
+    });
 }
 
 /// Handle an expand result: spawn loads or prefetch as appropriate.

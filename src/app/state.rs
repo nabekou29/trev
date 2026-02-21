@@ -76,6 +76,8 @@ pub struct AppState {
     /// Shared via `Arc<RwLock<…>>` so `ExternalCmdProvider` instances can read
     /// the current status in `can_handle()` without borrowing `AppState`.
     pub git_state: Arc<std::sync::RwLock<Option<GitState>>>,
+    /// Generation counter for tree rebuilds (latest-wins on rapid toggles).
+    pub rebuild_generation: u64,
 }
 
 impl AppState {
@@ -190,6 +192,8 @@ pub struct AppContext {
     pub git_enabled: bool,
     /// Absolute path to the workspace root (for git operations).
     pub root_path: PathBuf,
+    /// Sender for async tree rebuild results.
+    pub rebuild_tx: tokio::sync::mpsc::Sender<TreeRebuildResult>,
 }
 
 /// Result of an async directory children load operation.
@@ -203,6 +207,25 @@ pub struct ChildrenLoadResult {
     pub children: Result<Vec<TreeNode>, String>,
     /// Whether this was a background prefetch (one-level-ahead load).
     pub prefetch: bool,
+}
+
+/// Result of an async tree rebuild operation.
+///
+/// Sent through an mpsc channel from the blocking task to the event loop.
+/// Used by `ToggleHidden`, `ToggleIgnored`, and `Refresh` to avoid blocking
+/// the UI during tree reconstruction.
+#[derive(Debug)]
+pub struct TreeRebuildResult {
+    /// The rebuilt tree state (ready to swap in).
+    pub tree_state: TreeState,
+    /// Root path (for triggering prefetch after swap).
+    pub root_path: PathBuf,
+    /// Whether hidden files are shown (needed for post-swap prefetch).
+    pub show_hidden: bool,
+    /// Whether ignored files are shown (needed for post-swap prefetch).
+    pub show_ignored: bool,
+    /// Generation counter to discard stale results from superseded rebuilds.
+    pub generation: u64,
 }
 
 /// Result of an async preview load operation.

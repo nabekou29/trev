@@ -67,6 +67,8 @@ struct EventReceivers {
     preview: tokio::sync::mpsc::Receiver<PreviewLoadResult>,
     /// Git status scan results.
     git: tokio::sync::mpsc::Receiver<GitStatusResult>,
+    /// Tree rebuild results (from toggle hidden/ignored/refresh).
+    rebuild: tokio::sync::mpsc::Receiver<TreeRebuildResult>,
     /// File system change events from the watcher.
     watcher: tokio::sync::mpsc::UnboundedReceiver<Vec<notify_debouncer_mini::DebouncedEvent>>,
     /// IPC commands from connected editors.
@@ -152,12 +154,14 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
         processing: false,
         emit_paths: if args.emit { Some(Vec::new()) } else { None },
         git_state: Arc::clone(&git_state),
+        rebuild_generation: 0,
     };
 
     // Set up async channels.
     let (children_tx, children_rx) = tokio::sync::mpsc::channel::<ChildrenLoadResult>(64);
     let (preview_tx, preview_rx) = tokio::sync::mpsc::channel::<PreviewLoadResult>(16);
     let (git_tx, git_rx) = tokio::sync::mpsc::channel::<GitStatusResult>(4);
+    let (rebuild_tx, rebuild_rx) = tokio::sync::mpsc::channel::<TreeRebuildResult>(2);
 
     let git_enabled = config.git.enabled;
 
@@ -174,6 +178,7 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
         git_tx,
         git_enabled,
         root_path: root_path.clone(),
+        rebuild_tx,
     };
 
     trigger_initial_loads(&mut state, &ctx, &root_path);
@@ -187,6 +192,7 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
         children: children_rx,
         preview: preview_rx,
         git: git_rx,
+        rebuild: rebuild_rx,
         watcher: watcher_rx,
         ipc: ipc_rx,
     };
@@ -362,6 +368,9 @@ pub async fn run(args: &Args) -> Result<()> {
             }
             tracing::debug!("git status updated");
         }
+
+        // Receive async tree rebuild results.
+        process_rebuild_results(&mut channels.rebuild, &mut state, &ctx);
 
         // Receive async preview load results.
         {
@@ -663,6 +672,38 @@ fn process_preview_results(
         if is_current {
             state.preview_state.set_content(result.content);
         }
+    }
+}
+
+/// Process async tree rebuild results: swap tree and re-trigger prefetch/preview.
+///
+/// Discards stale results from superseded rebuilds using the generation counter.
+fn process_rebuild_results(
+    rebuild_rx: &mut tokio::sync::mpsc::Receiver<TreeRebuildResult>,
+    state: &mut AppState,
+    ctx: &AppContext,
+) {
+    while let Ok(result) = rebuild_rx.try_recv() {
+        if result.generation != state.rebuild_generation {
+            tracing::debug!(
+                expected = state.rebuild_generation,
+                got = result.generation,
+                "discarding stale rebuild result",
+            );
+            continue;
+        }
+        state.tree_state = result.tree_state;
+        trigger_prefetch(
+            &mut state.tree_state,
+            &result.root_path,
+            ctx,
+            result.show_hidden,
+            result.show_ignored,
+        );
+        if state.show_preview {
+            trigger_preview(state, ctx);
+        }
+        tracing::info!("tree rebuild applied");
     }
 }
 
