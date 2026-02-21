@@ -81,18 +81,7 @@ struct EventReceivers {
 fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatui::DefaultTerminal)> {
     let _span = tracing::info_span!("init_app").entered();
 
-    let (config, root_path) = {
-        let _span = tracing::info_span!("config_load").entered();
-        let load_result = Config::load()?;
-        for warning in &load_result.warnings {
-            tracing::warn!("{warning}");
-        }
-        let mut config = load_result.config;
-        config.apply_cli_overrides(args);
-        tracing::info!(?args, "starting trev");
-        let root_path = std::fs::canonicalize(&args.path)?;
-        (config, root_path)
-    };
+    let (config, root_path) = load_config(args)?;
 
     let (show_hidden, show_ignored) = (config.display.show_hidden, config.display.show_ignored);
     let (builder, root) = {
@@ -231,6 +220,20 @@ fn setup_terminal(state: &mut AppState, needs_center: bool) -> ratatui::DefaultT
     terminal
 }
 
+/// Load configuration, apply CLI overrides, and canonicalize the root path.
+fn load_config(args: &Args) -> Result<(Config, PathBuf)> {
+    let _span = tracing::info_span!("config_load").entered();
+    let load_result = Config::load()?;
+    for warning in &load_result.warnings {
+        tracing::warn!("{warning}");
+    }
+    let mut config = load_result.config;
+    config.apply_cli_overrides(args);
+    tracing::info!(?args, "starting trev");
+    let root_path = std::fs::canonicalize(&args.path)?;
+    Ok((config, root_path))
+}
+
 /// Detect terminal graphics protocol and theme, then build preview registry.
 ///
 /// Must be called before entering raw mode. Picker detection must happen before
@@ -307,10 +310,23 @@ pub async fn run(args: &Args) -> Result<()> {
                     Ok(children) => {
                         let loaded_path = result.path.clone();
                         let is_prefetch = result.prefetch;
-                        state.tree_state.set_children(&result.path, children, !is_prefetch);
+                        {
+                            let _span = tracing::info_span!(
+                                "set_children",
+                                path = %result.path.display(),
+                                child_count = children.len(),
+                                is_prefetch,
+                            )
+                            .entered();
+                            state
+                                .tree_state
+                                .set_children(&result.path, children, !is_prefetch);
+                        }
 
                         // Prefetch child directories one level ahead (user-initiated loads only).
                         if !is_prefetch {
+                            let _span =
+                                tracing::info_span!("trigger_prefetch_in_process").entered();
                             trigger_prefetch(
                                 &mut state.tree_state,
                                 &loaded_path,
@@ -400,7 +416,7 @@ fn setup_watcher(
     match FsWatcher::new(&config.watcher, watcher_tx) {
         Ok(mut w) => {
             let suppressed = w.suppressed();
-            if let Err(e) = w.watch(root_path) {
+            if let Err(e) = w.watch_root(root_path) {
                 tracing::warn!(%e, "failed to watch root directory");
             }
             (Some(w), suppressed)

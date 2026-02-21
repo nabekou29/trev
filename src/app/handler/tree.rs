@@ -37,8 +37,6 @@ pub fn handle_tree_action(
             let show_hidden = state.show_hidden;
             let show_ignored = state.show_ignored;
             if let Some(result) = state.tree_state.expand_dir() {
-                // Watch newly expanded directory.
-                watch_if_expand(&result, &mut state.watcher);
                 handle_expand_result(
                     &result,
                     &mut state.tree_state,
@@ -49,38 +47,14 @@ pub fn handle_tree_action(
             }
         }
         TreeAction::Collapse => {
-            // Check if current node is an expanded directory (will be collapsed).
-            let visible = state.tree_state.visible_nodes();
-            let cursor = state.tree_state.cursor();
-            let collapse_path = visible
-                .get(cursor)
-                .filter(|vn| vn.node.is_dir && vn.node.is_expanded)
-                .map(|vn| vn.node.path.clone());
-            drop(visible);
-
             state.tree_state.collapse();
-
-            // Unwatch the collapsed directory.
-            if let Some(path) = collapse_path {
-                unwatch_dir(&path, &mut state.watcher);
-            }
         }
         TreeAction::ToggleExpand => {
             let show_hidden = state.show_hidden;
             let show_ignored = state.show_ignored;
             let cursor = state.tree_state.cursor();
 
-            // Capture collapse path before toggle (toggle may collapse expanded dir).
-            let visible = state.tree_state.visible_nodes();
-            let collapse_path = visible
-                .get(cursor)
-                .filter(|vn| vn.node.is_dir && vn.node.is_expanded)
-                .map(|vn| vn.node.path.clone());
-            drop(visible);
-
             if let Some(result) = state.tree_state.toggle_expand(cursor) {
-                // Expanded — watch.
-                watch_if_expand(&result, &mut state.watcher);
                 handle_expand_result(
                     &result,
                     &mut state.tree_state,
@@ -92,9 +66,6 @@ pub fn handle_tree_action(
                 if let ExpandResult::OpenFile(ref path) = result {
                     handle_emit_open(path, state);
                 }
-            } else if let Some(path) = collapse_path {
-                // Collapsed — unwatch.
-                unwatch_dir(&path, &mut state.watcher);
             }
         }
         TreeAction::JumpFirst => {
@@ -150,10 +121,12 @@ fn handle_expand_all(state: &mut AppState, ctx: &AppContext) {
     let show_ignored = state.show_ignored;
     let result = state.tree_state.expand_subtree(&dir_path, EXPAND_ALL_LIMIT);
 
-    // Spawn loads and watch directories that need loading.
+    // Spawn loads for directories that need loading.
+    // Use prefetch=true because expand_subtree already set is_expanded=true.
+    // This avoids redundant trigger_prefetch calls in process_children,
+    // which would otherwise do an expensive find_node_mut for each result.
     for path in &result.needs_load {
-        spawn_load_children(&ctx.children_tx, path.clone(), show_hidden, show_ignored, false);
-        watch_dir(path, &mut state.watcher);
+        spawn_load_children(&ctx.children_tx, path.clone(), show_hidden, show_ignored, true);
     }
 
     // Status message.
@@ -199,11 +172,6 @@ fn handle_collapse_all(state: &mut AppState) {
 
     // Move cursor to the collapsed directory.
     state.tree_state.move_cursor_to_path(&dir_path);
-
-    // Unwatch collapsed directories.
-    for path in &collapsed {
-        unwatch_dir(path, &mut state.watcher);
-    }
 
     if !collapsed.is_empty() {
         state.set_status(format!("Collapsed {} directories", collapsed.len()));
@@ -261,38 +229,6 @@ fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
         state.show_hidden,
         state.show_ignored,
     );
-}
-
-/// Watch a directory if the expand result indicates expansion.
-fn watch_if_expand(result: &ExpandResult, watcher: &mut Option<crate::watcher::FsWatcher>) {
-    match result {
-        ExpandResult::NeedsLoad(path) | ExpandResult::AlreadyLoaded(path) => {
-            if let Some(w) = watcher
-                && let Err(e) = w.watch(path)
-            {
-                tracing::warn!(%e, ?path, "failed to watch directory");
-            }
-        }
-        ExpandResult::OpenFile(_) => {}
-    }
-}
-
-/// Watch a directory.
-fn watch_dir(path: &Path, watcher: &mut Option<crate::watcher::FsWatcher>) {
-    if let Some(w) = watcher
-        && let Err(e) = w.watch(path)
-    {
-        tracing::warn!(%e, ?path, "failed to watch directory");
-    }
-}
-
-/// Unwatch a directory.
-fn unwatch_dir(path: &Path, watcher: &mut Option<crate::watcher::FsWatcher>) {
-    if let Some(w) = watcher
-        && let Err(e) = w.unwatch(path)
-    {
-        tracing::warn!(%e, ?path, "failed to unwatch directory");
-    }
 }
 
 /// Handle an expand result: spawn loads or prefetch as appropriate.
