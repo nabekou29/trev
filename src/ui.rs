@@ -67,7 +67,7 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         state.viewport_height = tree_area.height as usize;
 
         {
-            let visible_count = state.tree_state.visible_nodes().len();
+            let visible_count = state.tree_state.visible_node_count();
             let _span = tracing::info_span!("render_tree", visible_count).entered();
             tree_view::render_tree(frame, tree_area, state);
         }

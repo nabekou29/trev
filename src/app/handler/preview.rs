@@ -179,11 +179,13 @@ fn spawn_preview_for(
 /// Only prefetches file nodes that are not already cached.
 fn prefetch_adjacent(state: &mut AppState, ctx: &AppContext) {
     let cursor = state.tree_state.cursor();
-    let visible = state.tree_state.visible_nodes();
+    // Only fetch the 3 nodes around cursor (prev, current, next) instead of all visible nodes.
+    let start = cursor.saturating_sub(1);
+    let visible = state.tree_state.visible_nodes_in_range(start, 3);
 
     let indices = [cursor.wrapping_sub(1), cursor + 1];
     for &idx in &indices {
-        let Some(vn) = visible.get(idx) else { continue };
+        let Some(vn) = visible.get(idx.saturating_sub(start)) else { continue };
         let path = &vn.node.path;
         let providers = state.preview_registry.resolve(path, vn.node.is_dir);
         let Some(provider) = providers.first() else { continue };

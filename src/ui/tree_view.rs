@@ -24,15 +24,15 @@ const METADATA_WIDTH: usize = 2;
 
 /// Render the tree view into the given area.
 pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let visible = state.tree_state.visible_nodes();
     let offset = state.scroll.offset();
     let height = area.height as usize;
+    let visible = state.tree_state.visible_nodes_in_range(offset, height);
     let cursor = state.tree_state.cursor();
     let area_width = area.width as usize;
 
     let mut lines: Vec<Line<'_>> = Vec::with_capacity(height);
 
-    for (row, vnode) in visible.iter().skip(offset).take(height).enumerate() {
+    for (row, vnode) in visible.iter().enumerate() {
         let global_index = offset + row;
         let is_selected = global_index == cursor;
 

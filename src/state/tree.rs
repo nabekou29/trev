@@ -333,6 +333,41 @@ impl TreeState {
         result
     }
 
+    /// Generate visible nodes for a viewport range only.
+    ///
+    /// Walks the tree in DFS order, skipping the first `skip` nodes and
+    /// collecting at most `take` nodes. Early-terminates once enough nodes
+    /// are collected, avoiding a full tree walk when the viewport is near
+    /// the top.
+    pub fn visible_nodes_in_range(&self, skip: usize, take: usize) -> Vec<VisibleNode<'_>> {
+        let mut result = Vec::with_capacity(take);
+        let mut skipped: usize = 0;
+        let depth_offset = usize::from(self.options.show_root);
+
+        if self.options.show_root {
+            if skipped >= skip {
+                result.push(VisibleNode { node: &self.root, depth: 0 });
+                if result.len() >= take {
+                    return result;
+                }
+            } else {
+                skipped += 1;
+            }
+        }
+
+        if (!self.options.show_root || self.root.is_expanded)
+            && let Some(children) = self.root.children.as_loaded()
+        {
+            for child in children {
+                collect_visible_range(child, depth_offset, &mut result, &mut skipped, skip, take);
+                if result.len() >= take {
+                    break;
+                }
+            }
+        }
+        result
+    }
+
     /// Count of visible nodes (without allocating the full list).
     pub fn visible_node_count(&self) -> usize {
         fn count_visible(node: &TreeNode) -> usize {
@@ -719,6 +754,40 @@ fn collect_visible<'a>(node: &'a TreeNode, depth: usize, result: &mut Vec<Visibl
     {
         for child in children {
             collect_visible(child, depth + 1, result);
+        }
+    }
+}
+
+/// Collect visible nodes within a range, with early termination.
+fn collect_visible_range<'a>(
+    node: &'a TreeNode,
+    depth: usize,
+    result: &mut Vec<VisibleNode<'a>>,
+    skipped: &mut usize,
+    skip: usize,
+    take: usize,
+) {
+    if result.len() >= take {
+        return;
+    }
+
+    if *skipped >= skip {
+        result.push(VisibleNode { node, depth });
+        if result.len() >= take {
+            return;
+        }
+    } else {
+        *skipped += 1;
+    }
+
+    if node.is_expanded
+        && let Some(children) = node.children.as_loaded()
+    {
+        for child in children {
+            collect_visible_range(child, depth + 1, result, skipped, skip, take);
+            if result.len() >= take {
+                return;
+            }
         }
     }
 }
@@ -1762,5 +1831,87 @@ mod tests {
 
         // After collapse only 1 node visible, cursor clamped to 0.
         assert_eq!(state.cursor(), 0);
+    }
+
+    // --- visible_nodes_in_range ---
+
+    #[rstest]
+    fn visible_nodes_in_range_returns_full_range() -> Result<()> {
+        let root = Path::new("/test/root");
+        let state = state_with_children(vec![
+            file_node("a.txt", root),
+            file_node("b.txt", root),
+            file_node("c.txt", root),
+        ]);
+        let range = state.visible_nodes_in_range(0, 10);
+        verify_that!(range.len(), eq(3))?;
+        verify_that!(range[0].node.name.as_str(), eq("a.txt"))?;
+        verify_that!(range[2].node.name.as_str(), eq("c.txt"))?;
+        Ok(())
+    }
+
+    #[rstest]
+    fn visible_nodes_in_range_skips_and_takes() -> Result<()> {
+        let root = Path::new("/test/root");
+        let state = state_with_children(vec![
+            file_node("a.txt", root),
+            file_node("b.txt", root),
+            file_node("c.txt", root),
+            file_node("d.txt", root),
+        ]);
+        let range = state.visible_nodes_in_range(1, 2);
+        verify_that!(range.len(), eq(2))?;
+        verify_that!(range[0].node.name.as_str(), eq("b.txt"))?;
+        verify_that!(range[1].node.name.as_str(), eq("c.txt"))?;
+        Ok(())
+    }
+
+    #[rstest]
+    fn visible_nodes_in_range_matches_visible_nodes() -> Result<()> {
+        let root = Path::new("/test/root");
+        let sub_path = root.join("sub");
+        let mut sub = dir_node("sub", root, vec![
+            file_node("x.txt", &sub_path),
+            file_node("y.txt", &sub_path),
+        ]);
+        sub.is_expanded = true;
+        let state = state_with_children(vec![
+            file_node("a.txt", root),
+            sub,
+            file_node("z.txt", root),
+        ]);
+        // Full list: a.txt, sub, x.txt, y.txt, z.txt
+        let all = state.visible_nodes();
+        verify_that!(all.len(), eq(5))?;
+
+        // Range should match the corresponding slice.
+        let range = state.visible_nodes_in_range(1, 3);
+        verify_that!(range.len(), eq(3))?;
+        for (i, vn) in range.iter().enumerate() {
+            verify_that!(vn.node.name.as_str(), eq(all[i + 1].node.name.as_str()))?;
+            verify_that!(vn.depth, eq(all[i + 1].depth))?;
+        }
+        Ok(())
+    }
+
+    #[rstest]
+    fn visible_nodes_in_range_with_show_root() -> Result<()> {
+        let root = Path::new("/test/root");
+        let state = TreeState::new(
+            root_with_children(vec![file_node("a.txt", root), file_node("b.txt", root)]),
+            TreeOptions { show_root: true, ..TreeOptions::default() },
+        );
+        // skip=0, take=2 → root + a.txt
+        let range = state.visible_nodes_in_range(0, 2);
+        verify_that!(range.len(), eq(2))?;
+        verify_that!(range[0].node.name.as_str(), eq("root"))?;
+        verify_that!(range[1].node.name.as_str(), eq("a.txt"))?;
+
+        // skip=1, take=2 → a.txt + b.txt
+        let range = state.visible_nodes_in_range(1, 2);
+        verify_that!(range.len(), eq(2))?;
+        verify_that!(range[0].node.name.as_str(), eq("a.txt"))?;
+        verify_that!(range[1].node.name.as_str(), eq("b.txt"))?;
+        Ok(())
     }
 }
