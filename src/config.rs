@@ -129,6 +129,7 @@ impl JsonSchema for KeyBindingEntry {
                                 "tree.half_page_down", "tree.half_page_up",
                                 "tree.expand_all", "tree.collapse_all",
                                 "tree.toggle_hidden", "tree.toggle_ignored", "tree.refresh",
+                                "tree.sort_menu", "tree.toggle_sort_direction",
                                 "preview.scroll_down", "preview.scroll_up",
                                 "preview.scroll_right", "preview.scroll_left",
                                 "preview.half_page_down", "preview.half_page_up",
@@ -202,8 +203,10 @@ pub struct DisplayConfig {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum SortOrder {
-    /// Sort by name.
+    /// Natural sort with suffix grouping (test files after their base).
     #[default]
+    Smart,
+    /// Sort by name.
     Name,
     /// Sort by file size.
     Size,
@@ -652,11 +655,22 @@ mod tests {
         std::fs::write(&path, "").unwrap();
 
         let result = Config::load_from(&path).unwrap();
+        assert_that!(result.config.sort.order, eq(SortOrder::Smart));
         assert_that!(result.config.sort.directories_first, eq(true));
         assert_that!(result.config.display.show_hidden, eq(false));
         assert_that!(result.config.display.show_preview, eq(true));
         assert_that!(result.config.preview.max_lines, eq(1000));
         assert!(result.warnings.is_empty());
+    }
+
+    #[rstest]
+    fn yaml_sort_order_smart_parses_correctly() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "sort:\n  order: smart\n").unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        assert_that!(result.config.sort.order, eq(SortOrder::Smart));
     }
 
     // --- T006: valid YAML deserializes correctly ---
@@ -1064,7 +1078,7 @@ keybindings:
         let sort_order = &json["$defs"]["SortOrder"];
         let json_str = sort_order.to_string();
 
-        for val in ["name", "size", "mtime", "type", "extension"] {
+        for val in ["smart", "name", "size", "mtime", "type", "extension"] {
             assert!(json_str.contains(val), "SortOrder missing variant: {val}");
         }
     }

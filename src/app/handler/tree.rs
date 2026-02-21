@@ -109,6 +109,12 @@ pub fn handle_tree_action(
             }
             state.set_status("Refreshed");
         }
+        TreeAction::SortMenu => {
+            open_sort_menu(state);
+        }
+        TreeAction::ToggleSortDirection => {
+            toggle_sort_direction(state);
+        }
     }
 }
 
@@ -179,6 +185,70 @@ fn handle_collapse_all(state: &mut AppState) {
     if !collapsed.is_empty() {
         state.set_status(format!("Collapsed {} directories", collapsed.len()));
     }
+}
+
+/// Open the sort order selection menu.
+///
+/// Lists all sort order variants with the current one marked with `●`.
+fn open_sort_menu(state: &mut AppState) {
+    use clap::ValueEnum;
+    use crate::input::{
+        AppMode,
+        MenuAction,
+        MenuItem,
+        MenuState,
+    };
+
+    let current = state.tree_state.sort_order();
+    let variants = crate::config::SortOrder::value_variants();
+
+    let mut items = Vec::with_capacity(variants.len());
+    let mut current_idx = 0;
+
+    for (i, variant) in variants.iter().enumerate() {
+        let Some(pv) = variant.to_possible_value() else {
+            continue;
+        };
+        let name = pv.get_name();
+        let state_order: crate::state::tree::SortOrder = (*variant).into();
+        let is_current = state_order == current;
+        if is_current {
+            current_idx = i;
+        }
+        let label = if is_current {
+            format!("● {name}")
+        } else {
+            format!("  {name}")
+        };
+        // Use first character as shortcut key.
+        let key = name.chars().next().unwrap_or(' ');
+        items.push(MenuItem { key, label, value: name.to_string() });
+    }
+
+    state.mode = AppMode::Menu(MenuState {
+        title: "Sort order".to_string(),
+        items,
+        cursor: current_idx,
+        on_select: MenuAction::SelectSortOrder,
+    });
+}
+
+/// Toggle sort direction between ascending and descending.
+fn toggle_sort_direction(state: &mut AppState) {
+    use crate::state::tree::SortDirection;
+
+    let new_direction = match state.tree_state.sort_direction() {
+        SortDirection::Asc => SortDirection::Desc,
+        SortDirection::Desc => SortDirection::Asc,
+    };
+    let order = state.tree_state.sort_order();
+    let dirs_first = state.tree_state.directories_first();
+    state.tree_state.apply_sort(order, new_direction, dirs_first);
+    let label = match new_direction {
+        SortDirection::Asc => "ascending",
+        SortDirection::Desc => "descending",
+    };
+    state.set_status(format!("Sort direction: {label}"));
 }
 
 /// Spawn an async tree rebuild with the current display settings.

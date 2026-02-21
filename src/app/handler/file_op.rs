@@ -127,6 +127,7 @@ pub fn handle_file_op_action(
 /// Build and open the copy-to-clipboard menu for the current cursor node.
 fn open_copy_menu(state: &mut AppState) {
     use crate::input::{
+        MenuAction,
         MenuItem,
         MenuState,
     };
@@ -166,6 +167,7 @@ fn open_copy_menu(state: &mut AppState) {
             MenuItem { key: 'd', label: "Parent directory".to_string(), value: parent_dir },
         ],
         cursor: 0,
+        on_select: MenuAction::CopyToClipboard,
     });
 }
 

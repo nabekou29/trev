@@ -312,6 +312,15 @@ pub struct MenuItem {
     pub value: String,
 }
 
+/// Action to perform when a menu item is selected.
+#[derive(Debug, Clone, Copy)]
+pub enum MenuAction {
+    /// Copy the selected item's value to clipboard.
+    CopyToClipboard,
+    /// Apply the selected item's value as the new sort order.
+    SelectSortOrder,
+}
+
 /// State for a selection menu overlay.
 #[derive(Debug, Clone)]
 pub struct MenuState {
@@ -321,6 +330,8 @@ pub struct MenuState {
     pub items: Vec<MenuItem>,
     /// Currently highlighted item index.
     pub cursor: usize,
+    /// Action to perform on item selection.
+    pub on_select: MenuAction,
 }
 
 /// Application mode state machine.

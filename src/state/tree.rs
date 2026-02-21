@@ -54,8 +54,10 @@ pub enum ChildrenState {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SortOrder {
-    /// Sort by name.
+    /// Natural sort with suffix grouping.
     #[default]
+    Smart,
+    /// Sort by name.
     Name,
     /// Sort by file size.
     Size,
@@ -70,6 +72,7 @@ pub enum SortOrder {
 impl From<crate::config::SortOrder> for SortOrder {
     fn from(order: crate::config::SortOrder) -> Self {
         match order {
+            crate::config::SortOrder::Smart => Self::Smart,
             crate::config::SortOrder::Name => Self::Name,
             crate::config::SortOrder::Size => Self::Size,
             crate::config::SortOrder::Mtime => Self::Modified,

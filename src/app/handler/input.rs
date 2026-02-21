@@ -101,22 +101,61 @@ pub fn handle_menu_mode_key(key: crossterm::event::KeyEvent, state: &mut AppStat
         }
         // Confirm current selection.
         KeyCode::Enter => {
-            let value = menu.items.get(menu.cursor).map(|i| (i.label.clone(), i.value.clone()));
+            let selected = menu.items.get(menu.cursor).map(|i| (i.label.clone(), i.value.clone()));
+            let on_select = menu.on_select;
             state.mode = AppMode::Normal;
-            if let Some((label, value)) = value {
-                copy_to_clipboard(state, &label, &value);
+            if let Some((label, value)) = selected {
+                dispatch_menu_action(on_select, state, &label, &value);
             }
         }
         // Direct shortcut key.
         KeyCode::Char(ch) => {
             let matched = menu.items.iter().find(|i| i.key == ch).map(|i| (i.label.clone(), i.value.clone()));
             if let Some((label, value)) = matched {
+                let on_select = menu.on_select;
                 state.mode = AppMode::Normal;
-                copy_to_clipboard(state, &label, &value);
+                dispatch_menu_action(on_select, state, &label, &value);
             }
         }
         _ => {}
     }
+}
+
+/// Dispatch the selected menu item based on the menu action type.
+fn dispatch_menu_action(
+    action: crate::input::MenuAction,
+    state: &mut AppState,
+    label: &str,
+    value: &str,
+) {
+    use crate::input::MenuAction;
+
+    match action {
+        MenuAction::CopyToClipboard => {
+            copy_to_clipboard(state, label, value);
+        }
+        MenuAction::SelectSortOrder => {
+            apply_sort_from_menu(state, value);
+        }
+    }
+}
+
+/// Apply a sort order from the menu selection.
+///
+/// Parses the value as a `SortOrder`, updates the tree state, and re-sorts.
+fn apply_sort_from_menu(state: &mut AppState, value: &str) {
+    use clap::ValueEnum;
+    use crate::state::tree::SortOrder;
+
+    let Ok(config_order) = crate::config::SortOrder::from_str(value, true) else {
+        state.set_status(format!("Unknown sort order: {value}"));
+        return;
+    };
+    let order: SortOrder = config_order.into();
+    let direction = state.tree_state.sort_direction();
+    let dirs_first = state.tree_state.directories_first();
+    state.tree_state.apply_sort(order, direction, dirs_first);
+    state.set_status(format!("Sort: {value}"));
 }
 
 /// Copy text to the system clipboard and set a status message.

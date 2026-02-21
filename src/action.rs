@@ -82,6 +82,10 @@ pub enum TreeAction {
     ToggleIgnored,
     /// Refresh tree structure and git status.
     Refresh,
+    /// Open sort selection menu.
+    SortMenu,
+    /// Toggle sort direction (asc/desc).
+    ToggleSortDirection,
 }
 
 /// Actions for the preview panel.
@@ -128,6 +132,8 @@ impl fmt::Display for TreeAction {
             Self::ToggleHidden => "tree.toggle_hidden",
             Self::ToggleIgnored => "tree.toggle_ignored",
             Self::Refresh => "tree.refresh",
+            Self::SortMenu => "tree.sort_menu",
+            Self::ToggleSortDirection => "tree.toggle_sort_direction",
         };
         f.write_str(s)
     }
@@ -207,6 +213,8 @@ impl FromStr for TreeAction {
             "tree.toggle_hidden" => Ok(Self::ToggleHidden),
             "tree.toggle_ignored" => Ok(Self::ToggleIgnored),
             "tree.refresh" => Ok(Self::Refresh),
+            "tree.sort_menu" => Ok(Self::SortMenu),
+            "tree.toggle_sort_direction" => Ok(Self::ToggleSortDirection),
             _ => Err(format!("unknown tree action: {s}")),
         }
     }
@@ -323,6 +331,8 @@ mod tests {
             TreeAction::ToggleHidden,
             TreeAction::ToggleIgnored,
             TreeAction::Refresh,
+            TreeAction::SortMenu,
+            TreeAction::ToggleSortDirection,
         ];
         for action in actions {
             let s = action.to_string();
