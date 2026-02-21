@@ -101,7 +101,7 @@
       "default": {
         "direction": "asc",
         "directories_first": true,
-        "order": "name"
+        "order": "smart"
       }
     },
     "watcher": {
@@ -370,6 +370,8 @@
                 "tree.toggle_hidden",
                 "tree.toggle_ignored",
                 "tree.refresh",
+                "tree.sort_menu",
+                "tree.toggle_sort_direction",
                 "preview.scroll_down",
                 "preview.scroll_up",
                 "preview.scroll_right",
@@ -648,7 +650,7 @@
         "order": {
           "description": "Sort order field.",
           "$ref": "#/$defs/SortOrder",
-          "default": "name"
+          "default": "smart"
         }
       }
     },
@@ -670,6 +672,11 @@
     "SortOrder": {
       "description": "Sort order variants.",
       "oneOf": [
+        {
+          "description": "Natural sort with suffix grouping (test files after their base).",
+          "type": "string",
+          "const": "smart"
+        },
         {
           "description": "Sort by name.",
           "type": "string",
