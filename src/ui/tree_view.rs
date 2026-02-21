@@ -17,10 +17,19 @@ use crate::app::AppState;
 use crate::file_op::selection::SelectionMode;
 use crate::git::GitFileStatus;
 use crate::input::AppMode;
-use crate::state::tree::ChildrenState;
-
-/// Width reserved for the right-side metadata area (git status indicator).
-const METADATA_WIDTH: usize = 2;
+use crate::state::tree::{
+    ChildrenState,
+    VisibleNode,
+};
+use crate::ui::column::{
+    ColumnKind,
+    ResolvedColumn,
+    format_mtime,
+    format_size,
+    mtime_color,
+    total_columns_width,
+    truncate_to_width,
+};
 
 /// Render the tree view into the given area.
 pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
@@ -29,6 +38,7 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let visible = state.tree_state.visible_nodes_in_range(offset, height);
     let cursor = state.tree_state.cursor();
     let area_width = area.width as usize;
+    let columns_width = total_columns_width(&state.columns);
 
     let mut lines: Vec<Line<'_>> = Vec::with_capacity(height);
 
@@ -36,101 +46,8 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         let global_index = offset + row;
         let is_selected = global_index == cursor;
 
-        let indent = "  ".repeat(vnode.depth);
-
-        // Directory expand/collapse indicator (Nerd Font caret).
-        let indicator = if vnode.node.is_dir {
-            if vnode.node.is_expanded {
-                "\u{f0d7} " //  (expanded)
-            } else {
-                "\u{f0da} " //  (collapsed)
-            }
-        } else {
-            "  "
-        };
-
-        // State indicator based on selection mode.
-        let in_selection = state.selection.contains(&vnode.node.path);
-        let selection_mode = state.selection.mode();
-
-        // Build spans for the line.
-        let mut spans = Vec::new();
-
-        let selection_indicator = if in_selection {
-            match selection_mode {
-                Some(SelectionMode::Mark) => Some(("● ", Color::Green)),
-                Some(SelectionMode::Cut) => Some(("◆ ", Color::Yellow)),
-                Some(SelectionMode::Copy) => Some(("◇ ", Color::Cyan)),
-                None => None,
-            }
-        } else {
-            None
-        };
-
-        match selection_indicator {
-            Some((marker, color)) => spans.push(Span::styled(marker, Style::default().fg(color))),
-            None => spans.push(Span::raw("  ")),
-        }
-
-        spans.push(Span::raw(indent));
-        spans.push(Span::raw(indicator));
-
-        // File icon (if enabled).
-        if state.show_icons {
-            if vnode.node.is_dir {
-                // Nerd Font folder icons: open vs closed.
-                let folder_icon = if vnode.node.is_expanded {
-                    "\u{f07c}" //  folder_open
-                } else {
-                    "\u{f07b}" //  folder
-                };
-                spans.push(Span::styled(
-                    format!("{folder_icon} "),
-                    Style::default().fg(Color::Blue),
-                ));
-            } else {
-                let icon = devicons::icon_for_file(&vnode.node.path, &None);
-                let icon_color = parse_hex_color(icon.color);
-                spans
-                    .push(Span::styled(format!("{} ", icon.icon), Style::default().fg(icon_color)));
-            }
-        }
-
-        // File/directory name.
-        let name = &vnode.node.name;
-
-        // Directory status indicator (loading or empty).
-        let dir_suffix = if vnode.node.is_dir && vnode.node.is_expanded {
-            match &vnode.node.children {
-                ChildrenState::Loading => " [Loading...]",
-                ChildrenState::Loaded(children) if children.is_empty() => " (empty)",
-                _ => "",
-            }
-        } else {
-            ""
-        };
-
-        // Resolve git status (used for both filename color and right-side indicator).
         let git_status = resolve_git_status(state, &vnode.node.path, vnode.node.is_dir);
-
-        let name_style = resolve_name_style(vnode.node.is_dir, git_status);
-
-        spans.push(Span::styled(name.clone(), name_style));
-
-        if !dir_suffix.is_empty() {
-            spans.push(Span::styled(dir_suffix, Style::default().fg(Color::DarkGray)));
-        }
-        if let Some(status) = git_status {
-            // Calculate current left-side content width.
-            let left_width: usize = spans.iter().map(Span::width).sum();
-            let total_needed = left_width + METADATA_WIDTH;
-            if area_width > total_needed {
-                let padding = area_width - total_needed;
-                spans.push(Span::raw(" ".repeat(padding)));
-            }
-            spans.push(git_status_indicator(status));
-        }
-
+        let spans = build_row_spans(vnode, state, area_width, columns_width, git_status);
         let line = Line::from(spans);
 
         if is_selected {
@@ -151,10 +68,180 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     }
 }
 
+/// Build all spans for a single tree row.
+///
+/// Layout: `[selection][indent][caret][icon][name...][pad][col1][col2][col3]`
+fn build_row_spans<'a>(
+    vnode: &VisibleNode<'_>,
+    state: &AppState,
+    area_width: usize,
+    columns_width: usize,
+    git_status: Option<GitFileStatus>,
+) -> Vec<Span<'a>> {
+    let mut spans = Vec::new();
+
+    // Selection indicator.
+    let in_selection = state.selection.contains(&vnode.node.path);
+    let selection_mode = state.selection.mode();
+    let selection_indicator = if in_selection {
+        match selection_mode {
+            Some(SelectionMode::Mark) => Some(("● ", Color::Green)),
+            Some(SelectionMode::Cut) => Some(("◆ ", Color::Yellow)),
+            Some(SelectionMode::Copy) => Some(("◇ ", Color::Cyan)),
+            None => None,
+        }
+    } else {
+        None
+    };
+    match selection_indicator {
+        Some((marker, color)) => spans.push(Span::styled(marker, Style::default().fg(color))),
+        None => spans.push(Span::raw("  ")),
+    }
+
+    // Indent + directory caret.
+    let indent = "  ".repeat(vnode.depth);
+    let indicator = if vnode.node.is_dir {
+        if vnode.node.is_expanded {
+            "\u{f0d7} "
+        } else {
+            "\u{f0da} "
+        }
+    } else {
+        "  "
+    };
+    spans.push(Span::raw(indent));
+    spans.push(Span::raw(indicator));
+
+    // File icon (if enabled).
+    if state.show_icons {
+        push_icon_span(&mut spans, vnode);
+    }
+
+    // Name area (truncated to fit) + metadata columns.
+    let left_prefix_width: usize = spans.iter().map(Span::width).sum();
+    push_name_and_columns(
+        &mut spans,
+        vnode,
+        &state.columns,
+        git_status,
+        area_width,
+        left_prefix_width,
+        columns_width,
+    );
+
+    spans
+}
+
+/// Push the file/directory icon span.
+fn push_icon_span(spans: &mut Vec<Span<'_>>, vnode: &VisibleNode<'_>) {
+    if vnode.node.is_dir {
+        let folder_icon = if vnode.node.is_expanded {
+            "\u{f07c}"
+        } else {
+            "\u{f07b}"
+        };
+        spans.push(Span::styled(
+            format!("{folder_icon} "),
+            Style::default().fg(Color::Blue),
+        ));
+    } else {
+        let icon = devicons::icon_for_file(&vnode.node.path, &None);
+        let icon_color = parse_hex_color(icon.color);
+        spans.push(Span::styled(
+            format!("{} ", icon.icon),
+            Style::default().fg(icon_color),
+        ));
+    }
+}
+
+/// Push the name text (truncated) followed by padding and metadata column spans.
+fn push_name_and_columns(
+    spans: &mut Vec<Span<'_>>,
+    vnode: &VisibleNode<'_>,
+    columns: &[ResolvedColumn],
+    git_status: Option<GitFileStatus>,
+    area_width: usize,
+    left_prefix_width: usize,
+    columns_width: usize,
+) {
+    let name = &vnode.node.name;
+
+    // Symlink indicator: " → target".
+    let symlink_suffix = vnode
+        .node
+        .symlink_target
+        .as_ref()
+        .map(|target| format!(" \u{2192} {target}"));
+
+    // Directory status indicator (loading or empty).
+    let dir_suffix = if vnode.node.is_dir && vnode.node.is_expanded {
+        match &vnode.node.children {
+            ChildrenState::Loading => " [Loading...]",
+            ChildrenState::Loaded(children) if children.is_empty() => " (empty)",
+            _ => "",
+        }
+    } else {
+        ""
+    };
+
+    let full_name = format!(
+        "{name}{}{dir_suffix}",
+        symlink_suffix.as_deref().unwrap_or("")
+    );
+
+    let name_width = area_width.saturating_sub(left_prefix_width + columns_width);
+    let truncated_name = truncate_to_width(&full_name, name_width);
+    let name_style = resolve_name_style(vnode.node.is_dir, git_status);
+
+    // Split truncated name into styled segments: filename vs suffix.
+    let name_display_len = unicode_width::UnicodeWidthStr::width(name.as_str());
+    let truncated_width = unicode_width::UnicodeWidthStr::width(truncated_name.as_str());
+
+    if truncated_width <= name_display_len {
+        spans.push(Span::styled(truncated_name, name_style));
+    } else {
+        spans.push(Span::styled(name.clone(), name_style));
+        let remaining = &truncated_name[name.len()..];
+        if !remaining.is_empty() {
+            spans.push(Span::styled(
+                remaining.to_string(),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+    }
+
+    // Pad name area to its fixed width.
+    if truncated_width < name_width {
+        spans.push(Span::raw(" ".repeat(name_width - truncated_width)));
+    }
+
+    // Render metadata columns.
+    for col in columns {
+        spans.push(Span::raw(" "));
+        match col.kind {
+            ColumnKind::Size => {
+                let text = format_size(vnode.node.size, vnode.node.is_dir);
+                spans.push(Span::styled(text, Style::default().fg(Color::DarkGray)));
+            }
+            ColumnKind::ModifiedAt => {
+                let text = format_mtime(vnode.node.modified, col.mtime_format);
+                let color = mtime_color(vnode.node.modified);
+                spans.push(Span::styled(text, Style::default().fg(color)));
+            }
+            ColumnKind::GitStatus => {
+                if let Some(status) = git_status {
+                    spans.push(git_status_indicator(status));
+                } else {
+                    spans.push(Span::raw("  "));
+                }
+            }
+        }
+    }
+}
+
 /// Resolve the display style for a filename.
 ///
 /// Priority (highest wins): git status color → default color.
-/// Future: glob pattern color will slot in between.
 fn resolve_name_style(is_dir: bool, git_status: Option<GitFileStatus>) -> Style {
     let base = if is_dir {
         Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
