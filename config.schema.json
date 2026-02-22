@@ -22,10 +22,10 @@
         "show_hidden": false,
         "show_ignored": false,
         "show_preview": true,
-        "show_root": false
+        "show_root_entry": false
       }
     },
-    "file_operations": {
+    "file_op": {
       "description": "File operation settings.",
       "$ref": "#/$defs/FileOpConfig",
       "default": {
@@ -67,11 +67,20 @@
           "bindings": [],
           "disable_default": false
         },
+        "key_sequence_timeout_ms": 500,
         "universal": {
           "bindings": [],
           "disable_default": false
         }
       }
+    },
+    "menus": {
+      "description": "User-defined menus.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/MenuDefinition"
+      },
+      "default": {}
     },
     "preview": {
       "description": "Preview settings.",
@@ -82,9 +91,9 @@
         "commands": [],
         "max_bytes": 10485760,
         "max_lines": 1000,
-        "narrow_split": 60,
-        "narrow_threshold": 80,
-        "split": 50,
+        "narrow_split_ratio": 60,
+        "narrow_width": 80,
+        "split_ratio": 50,
         "word_wrap": false
       }
     },
@@ -254,7 +263,7 @@
           "type": "boolean",
           "default": true
         },
-        "show_root": {
+        "show_root_entry": {
           "description": "Show root directory as a tree node.",
           "type": "boolean",
           "default": false
@@ -346,7 +355,7 @@
       }
     },
     "KeyBindingEntry": {
-      "description": "A keybinding entry. Exactly one of 'action', 'run', or 'notify' must be set.",
+      "description": "A keybinding entry. Exactly one of 'action', 'run', 'notify', or 'menu' must be set.",
       "type": "object",
       "properties": {
         "action": {
@@ -368,11 +377,22 @@
                 "tree.half_page_up",
                 "tree.expand_all",
                 "tree.collapse_all",
-                "tree.toggle_hidden",
-                "tree.toggle_ignored",
                 "tree.refresh",
-                "tree.sort_menu",
-                "tree.toggle_sort_direction",
+                "tree.change_root",
+                "tree.change_root_up",
+                "tree.center_cursor",
+                "tree.scroll_cursor_to_top",
+                "tree.scroll_cursor_to_bottom",
+                "tree.sort.menu",
+                "tree.sort.toggle_direction",
+                "tree.sort.by_name",
+                "tree.sort.by_size",
+                "tree.sort.by_mtime",
+                "tree.sort.by_type",
+                "tree.sort.by_extension",
+                "tree.sort.by_smart",
+                "filter.hidden",
+                "filter.ignored",
                 "preview.scroll_down",
                 "preview.scroll_up",
                 "preview.scroll_right",
@@ -387,6 +407,7 @@
                 "file_op.cut",
                 "file_op.paste",
                 "file_op.create_file",
+                "file_op.create_directory",
                 "file_op.rename",
                 "file_op.delete",
                 "file_op.system_trash",
@@ -394,7 +415,12 @@
                 "file_op.redo",
                 "file_op.toggle_mark",
                 "file_op.clear_selections",
-                "file_op.copy_menu"
+                "file_op.copy.menu",
+                "file_op.copy.absolute_path",
+                "file_op.copy.relative_path",
+                "file_op.copy.file_name",
+                "file_op.copy.stem",
+                "file_op.copy.parent_dir"
               ]
             },
             {
@@ -405,6 +431,17 @@
         "key": {
           "description": "Key notation (e.g. \"j\", \"<C-a>\", \"G\", \"<CR>\")",
           "type": "string"
+        },
+        "menu": {
+          "description": "User-defined menu name to open",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "notify": {
           "description": "IPC notification method name",
@@ -477,6 +514,13 @@
             "disable_default": false
           }
         },
+        "key_sequence_timeout_ms": {
+          "description": "Timeout in milliseconds for multi-key sequences (default: 500).",
+          "type": "integer",
+          "format": "uint64",
+          "default": 500,
+          "minimum": 0
+        },
         "universal": {
           "description": "Bindings active regardless of context.",
           "$ref": "#/$defs/ContextBindings",
@@ -486,6 +530,69 @@
           }
         }
       }
+    },
+    "MenuDefinition": {
+      "description": "A user-defined menu definition.",
+      "type": "object",
+      "properties": {
+        "items": {
+          "description": "Menu items.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MenuItemDef"
+          }
+        },
+        "title": {
+          "description": "Display title for the menu.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ]
+    },
+    "MenuItemDef": {
+      "description": "A single item in a user-defined menu.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Built-in action name.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "key": {
+          "description": "Shortcut key character.",
+          "type": "string"
+        },
+        "label": {
+          "description": "Display label.",
+          "type": "string"
+        },
+        "notify": {
+          "description": "IPC notification method name.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "run": {
+          "description": "Shell command to execute (template string).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "key",
+        "label"
+      ]
     },
     "ModifiedAtColumnOptions": {
       "description": "Per-column options for the `ModifiedAt` column.",
@@ -573,7 +680,7 @@
           "default": 1000,
           "minimum": 0
         },
-        "narrow_split": {
+        "narrow_split_ratio": {
           "description": "Tree/preview split percentage in narrow layout (default: 60).",
           "type": "integer",
           "format": "uint16",
@@ -581,7 +688,7 @@
           "maximum": 65535,
           "minimum": 0
         },
-        "narrow_threshold": {
+        "narrow_width": {
           "description": "Width threshold for narrow layout in columns (default: 80).",
           "type": "integer",
           "format": "uint16",
@@ -589,7 +696,7 @@
           "maximum": 65535,
           "minimum": 0
         },
-        "split": {
+        "split_ratio": {
           "description": "Tree/preview split percentage in wide layout (default: 50).",
           "type": "integer",
           "format": "uint16",
