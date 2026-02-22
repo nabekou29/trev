@@ -194,8 +194,12 @@ fn dispatch_custom_action(action: crate::action::Action, state: &mut AppState, c
         Action::Preview(preview_action) => {
             super::preview::handle_preview_action(preview_action, state, ctx);
         }
-        Action::Shell(cmd) => {
-            super::handle_shell_action(&cmd, state);
+        Action::Shell { cmd, background } => {
+            if background {
+                super::handle_shell_background(&cmd, state);
+            } else {
+                super::handle_shell_action(&cmd, state);
+            }
         }
         Action::Notify(method) => {
             super::handle_notify_action(&method, state, ctx);

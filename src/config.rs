@@ -105,6 +105,9 @@ pub struct KeyBindingEntry {
     /// User-defined menu name to open.
     #[serde(default)]
     pub menu: Option<String>,
+    /// Run the shell command in the background without suspending the TUI.
+    #[serde(default)]
+    pub background: bool,
 }
 
 /// A user-defined menu definition.
@@ -133,6 +136,9 @@ pub struct MenuItemDef {
     /// IPC notification method name.
     #[serde(default)]
     pub notify: Option<String>,
+    /// Run the shell command in the background without suspending the TUI.
+    #[serde(default)]
+    pub background: bool,
 }
 
 impl JsonSchema for KeyBindingEntry {
@@ -189,6 +195,11 @@ impl JsonSchema for KeyBindingEntry {
                         { "type": "null" }
                     ],
                     "description": "User-defined menu name to open"
+                },
+                "background": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Run shell command in background without suspending TUI"
                 }
             },
             "additionalProperties": false

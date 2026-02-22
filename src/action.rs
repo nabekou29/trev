@@ -17,7 +17,12 @@ pub enum Action {
     /// Quit the application.
     Quit,
     /// Execute a shell command (template string).
-    Shell(String),
+    Shell {
+        /// The command template to execute.
+        cmd: String,
+        /// Whether to run in the background without suspending the TUI.
+        background: bool,
+    },
     /// Send an IPC notification with the given method name.
     Notify(String),
     /// Open a user-defined menu by name.
@@ -285,7 +290,7 @@ impl fmt::Display for Action {
             Self::Preview(a) => a.fmt(f),
             Self::FileOp(a) => a.fmt(f),
             Self::Quit => f.write_str("quit"),
-            Self::Shell(cmd) => write!(f, "shell:{cmd}"),
+            Self::Shell { cmd, .. } => write!(f, "shell:{cmd}"),
             Self::Notify(method) => write!(f, "notify:{method}"),
             Self::OpenMenu(name) => write!(f, "menu:{name}"),
             Self::Noop => f.write_str("noop"),
@@ -677,7 +682,7 @@ mod tests {
 
     #[rstest]
     fn shell_action_display() {
-        let action = Action::Shell("open {path}".to_string());
+        let action = Action::Shell { cmd: "open {path}".to_string(), background: false };
         assert_that!(action.to_string().as_str(), eq("shell:open {path}"));
     }
 

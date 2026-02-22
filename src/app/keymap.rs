@@ -440,7 +440,7 @@ fn resolve_entry_action(entry: &KeyBindingEntry) -> Result<Action, String> {
     }
 
     if let Some(ref cmd) = entry.run {
-        return Ok(Action::Shell(cmd.clone()));
+        return Ok(Action::Shell { cmd: cmd.clone(), background: entry.background });
     }
 
     if let Some(ref method) = entry.notify {
@@ -495,6 +495,7 @@ mod tests {
             run: None,
             notify: None,
             menu: None,
+            background: false,
         }
     }
 
@@ -754,6 +755,7 @@ mod tests {
                     run: Some("open {path}".to_string()),
                     notify: None,
                     menu: None,
+                    background: false,
                 }],
                 ..Default::default()
             },
@@ -761,7 +763,10 @@ mod tests {
         };
         let km = KeyMap::from_config(&config);
         let key = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE);
-        assert_eq!(km.resolve(key, &file_ctx()), Some(&Action::Shell("open {path}".to_string())));
+        assert_eq!(
+            km.resolve(key, &file_ctx()),
+            Some(&Action::Shell { cmd: "open {path}".to_string(), background: false })
+        );
     }
 
     #[rstest]
@@ -774,6 +779,7 @@ mod tests {
                     run: None,
                     notify: Some("open_file".to_string()),
                     menu: None,
+                    background: false,
                 }],
                 ..Default::default()
             },

@@ -92,6 +92,8 @@ pub struct AppState {
     pub layout_narrow_width: u16,
     /// Pending key presses for multi-key sequence resolution.
     pub pending_keys: PendingKeys,
+    /// Whether the terminal needs a full redraw (e.g. after shell command execution).
+    pub needs_redraw: bool,
 }
 
 impl AppState {

@@ -89,6 +89,7 @@ mod tests {
             pending_keys: crate::app::pending_keys::PendingKeys::new(
                 std::time::Duration::from_millis(500),
             ),
+            needs_redraw: false,
         }
     }
 

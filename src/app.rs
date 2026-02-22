@@ -185,6 +185,7 @@ fn init_app(
         pending_keys: PendingKeys::new(Duration::from_millis(
             config.keybindings.key_sequence_timeout_ms,
         )),
+        needs_redraw: false,
     };
 
     let (ctx, channels) = build_context_and_channels(
@@ -463,6 +464,12 @@ pub async fn run(args: &Args) -> Result<()> {
 
         if state.should_quit {
             break;
+        }
+
+        // Force full redraw after shell command execution (alternate screen re-enter).
+        if state.needs_redraw {
+            state.needs_redraw = false;
+            terminal.clear()?;
         }
 
         // Draw UI (once per frame, after all events are processed).

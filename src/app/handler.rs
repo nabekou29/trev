@@ -139,8 +139,12 @@ fn dispatch_action(action: &Action, state: &mut AppState, ctx: &AppContext) {
         Action::Filter(filter_action) => {
             handle_filter_action(*filter_action, state, ctx);
         }
-        Action::Shell(cmd) => {
-            handle_shell_action(cmd, state);
+        Action::Shell { cmd, background } => {
+            if *background {
+                handle_shell_background(cmd, state);
+            } else {
+                handle_shell_action(cmd, state);
+            }
         }
         Action::Notify(method) => {
             handle_notify_action(method, state, ctx);
@@ -230,7 +234,7 @@ fn resolve_menu_item_action(item: &crate::config::MenuItemDef) -> Option<Action>
         return action_str.parse::<Action>().ok();
     }
     if let Some(ref cmd) = item.run {
-        return Some(Action::Shell(cmd.clone()));
+        return Some(Action::Shell { cmd: cmd.clone(), background: item.background });
     }
     if let Some(ref method) = item.notify {
         return Some(Action::Notify(method.clone()));
@@ -240,31 +244,86 @@ fn resolve_menu_item_action(item: &crate::config::MenuItemDef) -> Option<Action>
 
 /// Execute a shell command with template variable substitution.
 ///
-/// Suspends the TUI, runs the command via `sh -c`, then resumes.
+/// Suspends the TUI (alternate screen + raw mode + keyboard enhancement),
+/// runs the command via `sh -c`, waits for the user to press Enter,
+/// then resumes the TUI and requests a full redraw.
+///
 /// Template variables: `{path}`, `{dir}`, `{name}`, `{root}`.
 fn handle_shell_action(cmd: &str, state: &mut AppState) {
+    use std::io::Write;
+
+    use crossterm::event::{
+        KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags,
+        PushKeyboardEnhancementFlags,
+    };
+
     let expanded = expand_shell_template(cmd, &state.tree_state);
 
     // Suspend TUI.
+    let _ = crossterm::execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
     let _ = crossterm::terminal::disable_raw_mode();
     let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
 
     // Execute command.
     let result = std::process::Command::new("sh").arg("-c").arg(&expanded).status();
 
+    // Show result and wait for user to press Enter.
+    match &result {
+        Ok(status) if !status.success() => {
+            let code = status.code().map_or_else(|| "unknown".to_string(), |c| c.to_string());
+            let _ = writeln!(std::io::stdout(), "\nProcess exited with code {code}");
+        }
+        Err(e) => {
+            let _ = writeln!(std::io::stdout(), "\nFailed to execute command: {e}");
+        }
+        Ok(_) => {}
+    }
+    let _ = write!(std::io::stdout(), "\nPress ENTER to continue...");
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stdin().read_line(&mut String::new());
+
     // Resume TUI.
     let _ = crossterm::terminal::enable_raw_mode();
     let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen);
+    let _ = crossterm::execute!(
+        std::io::stdout(),
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    );
 
-    match result {
-        Ok(status) if !status.success() => {
+    state.needs_redraw = true;
+
+    if let Ok(status) = &result {
+        if !status.success() {
             let code = status.code().map_or_else(|| "unknown".to_string(), |c| c.to_string());
             state.set_status(format!("Command exited with code {code}"));
+        }
+    } else if let Err(e) = &result {
+        state.set_status(format!("Failed to execute command: {e}"));
+    }
+}
+
+/// Execute a shell command in the background without suspending the TUI.
+///
+/// The command runs detached with stdout/stderr discarded. Success or failure
+/// is reported via the status bar message.
+fn handle_shell_background(cmd: &str, state: &mut AppState) {
+    let expanded = expand_shell_template(cmd, &state.tree_state);
+
+    match std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&expanded)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(_) => {
+            state.set_status(format!("Running: {expanded}"));
         }
         Err(e) => {
             state.set_status(format!("Failed to execute command: {e}"));
         }
-        Ok(_) => {}
     }
 }
 
@@ -459,6 +518,7 @@ mod tests {
             action: Some("tree.sort.by_name".to_string()),
             run: None,
             notify: None,
+            background: false,
         };
         let result = super::resolve_menu_item_action(&item);
         assert!(result.is_some());
@@ -474,6 +534,7 @@ mod tests {
             action: None,
             run: Some("git status".to_string()),
             notify: None,
+            background: false,
         };
         let result = super::resolve_menu_item_action(&item);
         assert!(result.is_some());
@@ -488,6 +549,7 @@ mod tests {
             action: None,
             run: None,
             notify: Some("open_file".to_string()),
+            background: false,
         };
         let result = super::resolve_menu_item_action(&item);
         assert!(result.is_some());
@@ -502,6 +564,7 @@ mod tests {
             action: Some("not_a_real_action".to_string()),
             run: None,
             notify: None,
+            background: false,
         };
         let result = super::resolve_menu_item_action(&item);
         assert!(result.is_none());
@@ -515,6 +578,7 @@ mod tests {
             action: None,
             run: None,
             notify: None,
+            background: false,
         };
         let result = super::resolve_menu_item_action(&item);
         assert!(result.is_none());
@@ -528,6 +592,7 @@ mod tests {
             action: Some("quit".to_string()),
             run: Some("echo hello".to_string()),
             notify: None,
+            background: false,
         };
         let result = super::resolve_menu_item_action(&item);
         assert!(result.is_some());
@@ -547,6 +612,7 @@ mod tests {
                     action: Some("quit".to_string()),
                     run: None,
                     notify: None,
+                    background: false,
                 },
                 crate::config::MenuItemDef {
                     key: "b".to_string(),
@@ -554,6 +620,7 @@ mod tests {
                     run: Some("echo beta".to_string()),
                     action: None,
                     notify: None,
+                    background: false,
                 },
                 crate::config::MenuItemDef {
                     key: "c".to_string(),
@@ -561,6 +628,7 @@ mod tests {
                     notify: Some("do_thing".to_string()),
                     action: None,
                     run: None,
+                    background: false,
                 },
             ],
         }
@@ -612,6 +680,7 @@ mod tests {
                     action: Some("quit".to_string()),
                     run: None,
                     notify: None,
+                    background: false,
                 },
                 crate::config::MenuItemDef {
                     key: "b".to_string(),
@@ -619,6 +688,7 @@ mod tests {
                     action: Some("not_real".to_string()),
                     run: None,
                     notify: None,
+                    background: false,
                 },
                 crate::config::MenuItemDef {
                     key: "c".to_string(),
@@ -626,6 +696,7 @@ mod tests {
                     run: Some("ls".to_string()),
                     action: None,
                     notify: None,
+                    background: false,
                 },
             ],
         };
