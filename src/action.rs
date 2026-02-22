@@ -109,6 +109,8 @@ pub enum PreviewAction {
     CyclePrevProvider,
     /// Toggle preview panel visibility.
     TogglePreview,
+    /// Toggle word wrap in preview.
+    ToggleWrap,
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +153,7 @@ impl fmt::Display for PreviewAction {
             Self::CycleNextProvider => "preview.cycle_next_provider",
             Self::CyclePrevProvider => "preview.cycle_prev_provider",
             Self::TogglePreview => "preview.toggle_preview",
+            Self::ToggleWrap => "preview.toggle_wrap",
         };
         f.write_str(s)
     }
@@ -234,6 +237,7 @@ impl FromStr for PreviewAction {
             "preview.cycle_next_provider" => Ok(Self::CycleNextProvider),
             "preview.cycle_prev_provider" => Ok(Self::CyclePrevProvider),
             "preview.toggle_preview" => Ok(Self::TogglePreview),
+            "preview.toggle_wrap" => Ok(Self::ToggleWrap),
             _ => Err(format!("unknown preview action: {s}")),
         }
     }
@@ -353,6 +357,7 @@ mod tests {
             PreviewAction::CycleNextProvider,
             PreviewAction::CyclePrevProvider,
             PreviewAction::TogglePreview,
+            PreviewAction::ToggleWrap,
         ];
         for action in actions {
             let s = action.to_string();

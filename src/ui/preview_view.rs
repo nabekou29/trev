@@ -18,6 +18,7 @@ use ratatui::widgets::{
     Block,
     Borders,
     Paragraph,
+    Wrap,
 };
 use ratatui_image::StatefulImage;
 
@@ -49,6 +50,8 @@ pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewStat
         .unwrap_or_default();
     let _span = tracing::info_span!("render_content", content_type, preview_path).entered();
 
+    let word_wrap = state.word_wrap;
+
     match &mut state.content {
         PreviewContent::HighlightedText { lines, truncated, .. } => {
             render_highlighted_text(
@@ -58,16 +61,15 @@ pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewStat
                 state.scroll_row,
                 state.scroll_col,
                 *truncated,
+                word_wrap,
             );
         }
         PreviewContent::PlainText { lines, truncated } => {
-            render_plain_text(frame, inner, lines, state.scroll_row, state.scroll_col, *truncated);
+            render_plain_text(frame, inner, lines, state.scroll_row, state.scroll_col, *truncated, word_wrap);
         }
         PreviewContent::AnsiText { text } => {
-            let paragraph = Paragraph::new(text.clone()).scroll((
-                u16::try_from(state.scroll_row).unwrap_or(u16::MAX),
-                u16::try_from(state.scroll_col).unwrap_or(u16::MAX),
-            ));
+            let paragraph = Paragraph::new(text.clone());
+            let paragraph = apply_scroll_or_wrap(paragraph, state.scroll_row, state.scroll_col, word_wrap);
             frame.render_widget(paragraph, inner);
         }
         PreviewContent::Loading => {
@@ -120,6 +122,21 @@ fn build_title(state: &PreviewState) -> Line<'static> {
     Line::from(spans)
 }
 
+/// Apply word wrap or horizontal scroll to a paragraph.
+fn apply_scroll_or_wrap(paragraph: Paragraph<'_>, scroll_row: usize, scroll_col: usize, word_wrap: bool) -> Paragraph<'_> {
+    if word_wrap {
+        paragraph.wrap(Wrap { trim: false }).scroll((
+            u16::try_from(scroll_row).unwrap_or(u16::MAX),
+            0,
+        ))
+    } else {
+        paragraph.scroll((
+            u16::try_from(scroll_row).unwrap_or(u16::MAX),
+            u16::try_from(scroll_col).unwrap_or(u16::MAX),
+        ))
+    }
+}
+
 /// Render syntax-highlighted text lines with scroll offset.
 fn render_highlighted_text(
     frame: &mut Frame<'_>,
@@ -128,6 +145,7 @@ fn render_highlighted_text(
     scroll_row: usize,
     scroll_col: usize,
     truncated: bool,
+    word_wrap: bool,
 ) {
     let height = area.height as usize;
     let end = (scroll_row + height).min(lines.len());
@@ -141,8 +159,12 @@ fn render_highlighted_text(
         ));
     }
 
-    let paragraph =
-        Paragraph::new(visible).scroll((0, u16::try_from(scroll_col).unwrap_or(u16::MAX)));
+    let paragraph = Paragraph::new(visible);
+    let paragraph = if word_wrap {
+        paragraph.wrap(Wrap { trim: false })
+    } else {
+        paragraph.scroll((0, u16::try_from(scroll_col).unwrap_or(u16::MAX)))
+    };
     frame.render_widget(paragraph, area);
 }
 
@@ -154,6 +176,7 @@ fn render_plain_text(
     scroll_row: usize,
     scroll_col: usize,
     truncated: bool,
+    word_wrap: bool,
 ) {
     let height = area.height as usize;
     let end = (scroll_row + height).min(lines.len());
@@ -172,8 +195,12 @@ fn render_plain_text(
         ));
     }
 
-    let paragraph =
-        Paragraph::new(visible).scroll((0, u16::try_from(scroll_col).unwrap_or(u16::MAX)));
+    let paragraph = Paragraph::new(visible);
+    let paragraph = if word_wrap {
+        paragraph.wrap(Wrap { trim: false })
+    } else {
+        paragraph.scroll((0, u16::try_from(scroll_col).unwrap_or(u16::MAX)))
+    };
     frame.render_widget(paragraph, area);
 }
 

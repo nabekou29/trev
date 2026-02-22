@@ -194,6 +194,7 @@ impl KeyMap {
         self.bind(KeyCode::Tab, KeyModifiers::NONE, &[], Action::Preview(PreviewAction::CycleNextProvider));
         self.bind(KeyCode::BackTab, KeyModifiers::SHIFT, &[], Action::Preview(PreviewAction::CyclePrevProvider));
         self.bind(KeyCode::Char('P'), KeyModifiers::SHIFT, &[], Action::Preview(PreviewAction::TogglePreview));
+        self.bind(KeyCode::Char('w'), KeyModifiers::NONE, &[], Action::Preview(PreviewAction::ToggleWrap));
     }
 
     /// Default display toggle bindings.

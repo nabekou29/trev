@@ -62,6 +62,17 @@ pub fn handle_preview_action(
                 trigger_preview(state, ctx);
             }
         }
+        PreviewAction::ToggleWrap => {
+            state.preview_state.word_wrap = !state.preview_state.word_wrap;
+            if state.preview_state.word_wrap {
+                state.preview_state.scroll_col = 0;
+            }
+            state.set_status(if state.preview_state.word_wrap {
+                "Wrap: on".to_string()
+            } else {
+                "Wrap: off".to_string()
+            });
+        }
     }
 }
 

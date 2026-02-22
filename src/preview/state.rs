@@ -26,6 +26,8 @@ pub struct PreviewState {
     pub active_provider_index: usize,
     /// Names of providers available for the current file.
     pub available_providers: Vec<String>,
+    /// Whether word wrap is enabled for text preview.
+    pub word_wrap: bool,
 }
 
 impl PreviewState {
@@ -39,6 +41,7 @@ impl PreviewState {
             cancel_token: CancellationToken::new(),
             active_provider_index: 0,
             available_providers: Vec::new(),
+            word_wrap: false,
         }
     }
 

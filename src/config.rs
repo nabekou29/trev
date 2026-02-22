@@ -134,7 +134,7 @@ impl JsonSchema for KeyBindingEntry {
                                 "preview.scroll_right", "preview.scroll_left",
                                 "preview.half_page_down", "preview.half_page_up",
                                 "preview.cycle_next_provider", "preview.cycle_prev_provider",
-                                "preview.toggle_preview",
+                                "preview.toggle_preview", "preview.toggle_wrap",
                                 "file_op.yank", "file_op.cut", "file_op.paste",
                                 "file_op.create_file", "file_op.rename",
                                 "file_op.delete", "file_op.system_trash",
@@ -249,6 +249,8 @@ pub struct PreviewConfig {
     pub narrow_split: u16,
     /// Width threshold for narrow layout in columns (default: 80).
     pub narrow_threshold: u16,
+    /// Enable word wrap in preview (default: false).
+    pub word_wrap: bool,
 }
 
 /// External command configuration for preview.
@@ -450,6 +452,7 @@ impl Default for PreviewConfig {
             split: 50,
             narrow_split: 60,
             narrow_threshold: 80,
+            word_wrap: false,
         }
     }
 }

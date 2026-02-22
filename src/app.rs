@@ -146,7 +146,11 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
     // Create app state.
     let mut state = AppState {
         tree_state,
-        preview_state: PreviewState::new(),
+        preview_state: {
+            let mut ps = PreviewState::new();
+            ps.word_wrap = config.preview.word_wrap;
+            ps
+        },
         preview_cache: PreviewCache::new(config.preview.cache_size),
         preview_registry,
         mode: AppMode::default(),
