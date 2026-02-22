@@ -84,7 +84,8 @@
         "max_lines": 1000,
         "narrow_split": 60,
         "narrow_threshold": 80,
-        "split": 50
+        "split": 50,
+        "word_wrap": false
       }
     },
     "session": {
@@ -381,6 +382,7 @@
                 "preview.cycle_next_provider",
                 "preview.cycle_prev_provider",
                 "preview.toggle_preview",
+                "preview.toggle_wrap",
                 "file_op.yank",
                 "file_op.cut",
                 "file_op.paste",
@@ -594,6 +596,11 @@
           "default": 50,
           "maximum": 65535,
           "minimum": 0
+        },
+        "word_wrap": {
+          "description": "Enable word wrap in preview (default: false).",
+          "type": "boolean",
+          "default": false
         }
       }
     },
