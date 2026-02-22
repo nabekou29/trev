@@ -30,7 +30,7 @@ local M = {}
 --- @field width number Side panel width (columns)
 --- @field auto_reveal boolean Auto-reveal on BufEnter
 --- @field action string Default editor action (edit/split/vsplit/tabedit)
---- @field adapter "auto"|"native"|"snacks"|"toggleterm" Terminal backend
+--- @field adapter "auto"|"native"|"snacks"|"toggleterm"|"tmux"|"zellij" Terminal backend
 --- @field handlers table<string, function> Notification handlers
 
 --- @type trev.Config
@@ -180,6 +180,8 @@ end
 
 --- Disconnect the JSON-RPC pipe.
 function M._disconnect()
+    local had_pipe = state.pipe ~= nil
+
     if state.pipe then
         if not state.pipe:is_closing() then
             state.pipe:read_stop()
@@ -190,6 +192,18 @@ function M._disconnect()
     state.socket_path = nil
     state.read_buf = ""
     state.pending = {}
+
+    -- For external panes (tmux split, Zellij): pipe EOF means trev exited.
+    -- Trigger cleanup since there is no on_exit callback from a Neovim job.
+    -- Only fires when: had an active pipe, handle exists, no Neovim job_id,
+    -- and no tmux popup job (_popup_job_id has its own on_exit callback).
+    if had_pipe and state.handle and not state.handle.job_id and not state.handle._popup_job_id then
+        vim.schedule(function()
+            if state.handle then
+                M._on_daemon_exit(0)
+            end
+        end)
+    end
 end
 
 --- Send a JSON-RPC notification (no response expected).
@@ -298,6 +312,10 @@ function M._handle_open_file(params)
         if target_win then
             vim.api.nvim_set_current_win(target_win)
         end
+        -- For tmux: switch tmux focus back to Neovim's pane.
+        if adapter and adapter.focus_editor then
+            adapter:focus_editor()
+        end
     end
 
     vim.cmd(action .. " " .. escape_path(path))
@@ -356,10 +374,9 @@ end
 -- Socket discovery
 ---------------------------------------------------------------------------
 
---- Build the expected socket path for a given pid.
---- @param pid number
---- @return string|nil
-local function find_socket_for_pid(pid)
+--- Get the trev runtime directory (matching Rust's runtime_dir()).
+--- @return string
+local function get_trev_runtime_dir()
     local runtime_dir = vim.env.XDG_RUNTIME_DIR
     local base
     if runtime_dir and runtime_dir ~= "" then
@@ -370,7 +387,14 @@ local function find_socket_for_pid(pid)
             base = "/tmp"
         end
     end
-    local trev_dir = base .. "/trev"
+    return base .. "/trev"
+end
+
+--- Build the expected socket path for a given pid.
+--- @param pid number
+--- @return string|nil
+local function find_socket_for_pid(pid)
+    local trev_dir = get_trev_runtime_dir()
     local pattern = trev_dir .. "/*-" .. pid .. ".sock"
     local matches = vim.fn.glob(pattern, false, true)
     if #matches > 0 then
@@ -386,6 +410,32 @@ local function find_socket_for_pid(pid)
         return matches[1]
     end
 
+    return nil
+end
+
+--- Compute the workspace key matching Rust's workspace_key() function.
+--- @param path string
+--- @return string
+local function compute_workspace_key(path)
+    local dir_name = vim.fn.fnamemodify(path, ":t")
+    if dir_name == "" then
+        dir_name = "trev"
+    end
+    local canonical = vim.fn.resolve(path)
+    local hash = vim.fn.sha256(canonical):sub(1, 8)
+    return dir_name .. "-" .. hash
+end
+
+--- Find a socket by workspace key (single check, no retry).
+--- @param workspace_key string
+--- @return string|nil
+local function find_socket_for_workspace(workspace_key)
+    local trev_dir = get_trev_runtime_dir()
+    local pattern = trev_dir .. "/" .. workspace_key .. "-*.sock"
+    local matches = vim.fn.glob(pattern, false, true)
+    if #matches > 0 then
+        return matches[1]
+    end
     return nil
 end
 
@@ -410,21 +460,47 @@ local function build_cmd(reveal)
 end
 
 --- Connect IPC after a short delay (daemon needs time to bind socket).
---- @param pid number daemon process ID
+--- @param pid number|nil daemon process ID (nil for workspace-key discovery)
 --- @param mode string "panel" | "float"
 local function connect_ipc(pid, mode)
-    vim.defer_fn(function()
-        local socket = find_socket_for_pid(pid)
-        if socket then
-            ipc_connect(socket, function()
-                if mode == "panel" then
-                    M._setup_auto_reveal()
-                end
-            end)
-        else
-            vim.notify("[trev] socket not found for pid " .. pid, vim.log.levels.WARN)
+    local on_connect = function()
+        if mode == "panel" then
+            M._setup_auto_reveal()
         end
-    end, 300)
+    end
+
+    if pid then
+        -- PID-based discovery: short delay + built-in retry.
+        vim.defer_fn(function()
+            local socket = find_socket_for_pid(pid)
+            if socket then
+                ipc_connect(socket, on_connect)
+            else
+                vim.notify("[trev] socket not found for pid " .. pid, vim.log.levels.WARN)
+            end
+        end, 300)
+    else
+        -- Workspace-key-based discovery (e.g., tmux popup where PID is unknown).
+        -- Non-blocking retry loop: trev in tmux popup may take longer to start.
+        local ws_key = compute_workspace_key(vim.fn.getcwd())
+        local attempts = 0
+        local max_attempts = 20
+        local interval = 250
+
+        local function try_connect()
+            attempts = attempts + 1
+            local socket = find_socket_for_workspace(ws_key)
+            if socket then
+                ipc_connect(socket, on_connect)
+            elseif attempts < max_attempts then
+                vim.defer_fn(try_connect, interval)
+            else
+                vim.notify("[trev] socket not found for workspace", vim.log.levels.WARN)
+            end
+        end
+
+        vim.defer_fn(try_connect, 500)
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -445,9 +521,8 @@ end
 local function make_on_ready(mode)
     return function(handle)
         state.handle = handle
-        if handle.pid then
-            connect_ipc(handle.pid, mode)
-        end
+        -- pid may be nil (e.g., tmux popup); connect_ipc handles both cases.
+        connect_ipc(handle.pid, mode)
     end
 end
 
@@ -662,7 +737,21 @@ local function resolve_adapter()
         end
     end
 
-    if choice == "snacks" then
+    if choice == "zellij" then
+        if not vim.env.ZELLIJ or vim.env.ZELLIJ == "" then
+            vim.notify("[trev] adapter 'zellij' requires running inside Zellij", vim.log.levels.ERROR)
+            adapter = require("trev.adapter.native").new()
+        else
+            adapter = require("trev.adapter.zellij").new()
+        end
+    elseif choice == "tmux" then
+        if not vim.env.TMUX or vim.env.TMUX == "" then
+            vim.notify("[trev] adapter 'tmux' requires running inside tmux", vim.log.levels.ERROR)
+            adapter = require("trev.adapter.native").new()
+        else
+            adapter = require("trev.adapter.tmux").new()
+        end
+    elseif choice == "snacks" then
         adapter = require("trev.adapter.snacks").new()
     elseif choice == "toggleterm" then
         adapter = require("trev.adapter.toggleterm").new()
