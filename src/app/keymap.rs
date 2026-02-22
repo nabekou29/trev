@@ -228,10 +228,6 @@ impl KeyMap {
     fn load_default_daemon(&mut self) {
         use KeyContext::{Daemon, File};
 
-        // q in daemon mode: notify the editor to close the panel/float
-        // (overrides universal quit so the plugin can handle cleanup properly).
-        self.bind(KeyCode::Char('q'), KeyModifiers::NONE, &[Daemon], Action::Notify("close".to_string()));
-
         // Enter on a file in daemon mode: send open_file notification to the editor.
         self.bind(KeyCode::Enter, KeyModifiers::NONE, &[Daemon, File], Action::Notify("open_file".to_string()));
     }
