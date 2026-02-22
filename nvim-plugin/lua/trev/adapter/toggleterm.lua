@@ -28,13 +28,10 @@ end
 --- @param opts trev.AdapterOpts
 --- @return trev.AdapterHandle|nil
 function M:open_float(cmd, opts)
-    local ui = vim.api.nvim_list_uis()[1]
     return self:_open(cmd, opts, {
         direction = "float",
         float_opts = {
             border = "rounded",
-            width = math.floor(ui.width * 0.6),
-            height = math.floor(ui.height * 0.7),
         },
     })
 end
