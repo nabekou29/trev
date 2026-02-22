@@ -115,6 +115,12 @@ pub fn handle_tree_action(
         TreeAction::CenterCursor => {
             state.scroll.center_on_cursor(state.tree_state.cursor(), state.viewport_height);
         }
+        TreeAction::ScrollCursorToTop => {
+            state.scroll.scroll_cursor_to_top(state.tree_state.cursor());
+        }
+        TreeAction::ScrollCursorToBottom => {
+            state.scroll.scroll_cursor_to_bottom(state.tree_state.cursor(), state.viewport_height);
+        }
         TreeAction::Sort(sort_action) => handle_sort_action(sort_action, state),
     }
 }

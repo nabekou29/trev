@@ -82,7 +82,9 @@ trev schema               # Print config JSON Schema
 | `G`           | Jump to last                      |
 | `Ctrl+d`      | Half page down                    |
 | `Ctrl+u`      | Half page up                      |
-| `z z`         | Center cursor in viewport         |
+| `zz`          | Center cursor in viewport         |
+| `zt`          | Scroll cursor to top of viewport  |
+| `zb`          | Scroll cursor to bottom of viewport |
 
 ### Preview
 
@@ -232,7 +234,7 @@ Keybindings use Vim-style notation: `j`, `G`, `<C-a>`, `<A-j>`, `<S-CR>`, `<Spac
 
 Modifiers: `C-` (Ctrl), `A-`/`M-` (Alt), `S-` (Shift).
 
-Multi-key sequences are written with spaces: `"z z"`, `"g g"`. When a prefix key is pressed, trev waits for the next key (timeout: `key_sequence_timeout_ms`, default 500ms). If only a single-key binding exists for the prefix, it fires on timeout.
+Multi-key sequences are written without spaces: `"zz"`, `"zt"`, `"zb"`. Angle-bracket keys can be mixed in: `"g<CR>"`. When a prefix key is pressed, trev waits for the next key (timeout: `key_sequence_timeout_ms`, default 500ms). If only a single-key binding exists for the prefix, it fires on timeout.
 
 Bindings are organized by context: `universal`, `file` (cursor on file), `directory` (cursor on directory), and `daemon.*` variants.
 
@@ -264,7 +266,7 @@ keybindings:
 **Available actions**:
 
 - **General**: `quit`, `noop`
-- **Tree**: `tree.move_down`, `tree.move_up`, `tree.expand`, `tree.collapse`, `tree.toggle_expand`, `tree.change_root`, `tree.change_root_up`, `tree.jump_first`, `tree.jump_last`, `tree.half_page_down`, `tree.half_page_up`, `tree.center_cursor`, `tree.expand_all`, `tree.collapse_all`, `tree.refresh`
+- **Tree**: `tree.move_down`, `tree.move_up`, `tree.expand`, `tree.collapse`, `tree.toggle_expand`, `tree.change_root`, `tree.change_root_up`, `tree.jump_first`, `tree.jump_last`, `tree.half_page_down`, `tree.half_page_up`, `tree.center_cursor`, `tree.scroll_cursor_to_top`, `tree.scroll_cursor_to_bottom`, `tree.expand_all`, `tree.collapse_all`, `tree.refresh`
 - **Sort**: `tree.sort.menu`, `tree.sort.toggle_direction`, `tree.sort.by_name`, `tree.sort.by_size`, `tree.sort.by_mtime`, `tree.sort.by_type`, `tree.sort.by_extension`, `tree.sort.by_smart`
 - **Filter**: `filter.hidden`, `filter.ignored`
 - **Preview**: `preview.scroll_down`, `preview.scroll_up`, `preview.scroll_right`, `preview.scroll_left`, `preview.half_page_down`, `preview.half_page_up`, `preview.cycle_next_provider`, `preview.cycle_prev_provider`, `preview.toggle_preview`, `preview.toggle_wrap`
@@ -308,8 +310,12 @@ keybindings:
         action: tree.half_page_down
       - key: "<C-u>"
         action: tree.half_page_up
-      - key: "z z"
+      - key: "zz"
         action: tree.center_cursor
+      - key: "zt"
+        action: tree.scroll_cursor_to_top
+      - key: "zb"
+        action: tree.scroll_cursor_to_bottom
 
       # --- Display & Filter ---
       - key: E

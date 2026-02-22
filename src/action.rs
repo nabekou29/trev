@@ -107,6 +107,10 @@ pub enum TreeAction {
     ChangeRootUp,
     /// Center cursor in viewport.
     CenterCursor,
+    /// Scroll so the cursor is at the top of the viewport.
+    ScrollCursorToTop,
+    /// Scroll so the cursor is at the bottom of the viewport.
+    ScrollCursorToBottom,
     /// Sort-related actions.
     Sort(SortAction),
 }
@@ -228,6 +232,8 @@ impl fmt::Display for TreeAction {
             Self::ChangeRoot => f.write_str("tree.change_root"),
             Self::ChangeRootUp => f.write_str("tree.change_root_up"),
             Self::CenterCursor => f.write_str("tree.center_cursor"),
+            Self::ScrollCursorToTop => f.write_str("tree.scroll_cursor_to_top"),
+            Self::ScrollCursorToBottom => f.write_str("tree.scroll_cursor_to_bottom"),
             Self::Sort(action) => action.fmt(f),
         }
     }
@@ -360,6 +366,8 @@ impl FromStr for TreeAction {
             "tree.change_root" => Ok(Self::ChangeRoot),
             "tree.change_root_up" => Ok(Self::ChangeRootUp),
             "tree.center_cursor" => Ok(Self::CenterCursor),
+            "tree.scroll_cursor_to_top" => Ok(Self::ScrollCursorToTop),
+            "tree.scroll_cursor_to_bottom" => Ok(Self::ScrollCursorToBottom),
             _ => Err(format!("unknown tree action: {s}")),
         }
     }
@@ -494,6 +502,8 @@ impl TreeAction {
             "tree.change_root",
             "tree.change_root_up",
             "tree.center_cursor",
+            "tree.scroll_cursor_to_top",
+            "tree.scroll_cursor_to_bottom",
         ];
         names.extend(SortAction::action_names());
         names
@@ -588,6 +598,8 @@ mod tests {
             TreeAction::CollapseAll,
             TreeAction::Refresh,
             TreeAction::CenterCursor,
+            TreeAction::ScrollCursorToTop,
+            TreeAction::ScrollCursorToBottom,
             TreeAction::Sort(SortAction::Menu),
             TreeAction::Sort(SortAction::ToggleDirection),
             TreeAction::Sort(SortAction::ByName),

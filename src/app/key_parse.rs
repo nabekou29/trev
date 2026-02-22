@@ -113,21 +113,58 @@ pub fn parse_key_expanded(s: &str) -> Result<Vec<KeyBinding>, String> {
     Ok(vec![(code, modifiers)])
 }
 
-/// Parse a key sequence string (space-separated key notations) into a `Vec<KeyBinding>`.
+/// Tokenize a key sequence string into individual key notation tokens.
 ///
-/// For example, `"z z"` produces two bindings for `z` and `z`.
-/// Single keys like `"j"` produce a one-element vector.
-#[cfg(test)]
-pub fn parse_key_sequence(s: &str) -> Result<Vec<KeyBinding>, String> {
+/// Tokens are either angle-bracket groups (`<C-a>`, `<CR>`) or single characters.
+/// Multi-character sequences without angle brackets are split per character:
+/// `"zz"` → `["z", "z"]`, `"g<CR>"` → `["g", "<CR>"]`.
+fn tokenize_key_sequence(s: &str) -> Result<Vec<String>, String> {
     let s = s.trim();
     if s.is_empty() {
         return Err("empty key sequence".to_string());
     }
 
-    let parts: Vec<&str> = s.split_whitespace().collect();
-    let mut sequence = Vec::with_capacity(parts.len());
-    for part in parts {
-        sequence.push(parse_key(part)?);
+    let mut tokens = Vec::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(&c) = chars.peek() {
+        if c == '<' {
+            // Consume until matching '>'.
+            let mut token = String::new();
+            for ch in chars.by_ref() {
+                token.push(ch);
+                if ch == '>' {
+                    break;
+                }
+            }
+            if !token.ends_with('>') {
+                return Err(format!("unclosed angle bracket in: {s}"));
+            }
+            tokens.push(token);
+        } else if c.is_whitespace() {
+            return Err(format!(
+                "unexpected space in key sequence: {s:?} (use concatenated form, e.g. \"zz\" not \"z z\")"
+            ));
+        } else {
+            tokens.push(c.to_string());
+            chars.next();
+        }
+    }
+
+    Ok(tokens)
+}
+
+/// Parse a key sequence string into a `Vec<KeyBinding>`.
+///
+/// For example, `"zz"` produces two bindings for `z` and `z`.
+/// Single keys like `"j"` produce a one-element vector.
+/// Angle-bracket tokens are supported: `"g<CR>"` → `g`, `Enter`.
+#[cfg(test)]
+pub fn parse_key_sequence(s: &str) -> Result<Vec<KeyBinding>, String> {
+    let tokens = tokenize_key_sequence(s)?;
+    let mut sequence = Vec::with_capacity(tokens.len());
+    for token in &tokens {
+        sequence.push(parse_key(token)?);
     }
     Ok(sequence)
 }
@@ -137,17 +174,12 @@ pub fn parse_key_sequence(s: &str) -> Result<Vec<KeyBinding>, String> {
 /// Each key in the sequence is expanded via [`parse_key_expanded`], then a Cartesian product
 /// is computed so that every terminal-compatible combination is covered.
 ///
-/// For example, `"G g"` expands to `[(G,SHIFT), g], [(G,NONE), g]`.
+/// For example, `"Gg"` expands to `[(G,SHIFT), g], [(G,NONE), g]`.
 pub fn parse_key_sequence_expanded(s: &str) -> Result<Vec<Vec<KeyBinding>>, String> {
-    let s = s.trim();
-    if s.is_empty() {
-        return Err("empty key sequence".to_string());
-    }
-
-    let parts: Vec<&str> = s.split_whitespace().collect();
-    let mut expanded_parts: Vec<Vec<KeyBinding>> = Vec::with_capacity(parts.len());
-    for part in parts {
-        expanded_parts.push(parse_key_expanded(part)?);
+    let tokens = tokenize_key_sequence(s)?;
+    let mut expanded_parts: Vec<Vec<KeyBinding>> = Vec::with_capacity(tokens.len());
+    for token in &tokens {
+        expanded_parts.push(parse_key_expanded(token)?);
     }
 
     // Compute Cartesian product.
@@ -348,22 +380,31 @@ mod tests {
         assert_eq!(seq[0], (KeyCode::Char('j'), KeyModifiers::NONE));
     }
 
-    // --- parse_key_sequence: multi-key ---
+    // --- parse_key_sequence: multi-key (space-free notation) ---
 
     #[rstest]
     fn sequence_two_keys() {
-        let seq = parse_key_sequence("z z").unwrap();
+        let seq = parse_key_sequence("zz").unwrap();
         assert_that!(seq.len(), eq(2));
         assert_eq!(seq[0], (KeyCode::Char('z'), KeyModifiers::NONE));
         assert_eq!(seq[1], (KeyCode::Char('z'), KeyModifiers::NONE));
     }
 
     #[rstest]
-    fn sequence_mixed_keys() {
-        let seq = parse_key_sequence("g <CR>").unwrap();
+    fn sequence_mixed_char_and_bracket() {
+        let seq = parse_key_sequence("g<CR>").unwrap();
         assert_that!(seq.len(), eq(2));
         assert_eq!(seq[0], (KeyCode::Char('g'), KeyModifiers::NONE));
         assert_eq!(seq[1], (KeyCode::Enter, KeyModifiers::NONE));
+    }
+
+    #[rstest]
+    fn sequence_three_chars() {
+        let seq = parse_key_sequence("abc").unwrap();
+        assert_that!(seq.len(), eq(3));
+        assert_eq!(seq[0], (KeyCode::Char('a'), KeyModifiers::NONE));
+        assert_eq!(seq[1], (KeyCode::Char('b'), KeyModifiers::NONE));
+        assert_eq!(seq[2], (KeyCode::Char('c'), KeyModifiers::NONE));
     }
 
     // --- parse_key_sequence: errors ---
@@ -375,15 +416,20 @@ mod tests {
     }
 
     #[rstest]
-    fn sequence_invalid_part_is_error() {
-        assert!(parse_key_sequence("z nonexistent").is_err());
+    fn sequence_space_is_error() {
+        assert!(parse_key_sequence("z z").is_err());
+    }
+
+    #[rstest]
+    fn sequence_unclosed_bracket_is_error() {
+        assert!(parse_key_sequence("z<CR").is_err());
     }
 
     // --- parse_key_sequence_expanded: lowercase produces single sequence ---
 
     #[rstest]
     fn sequence_expanded_lowercase_single() {
-        let seqs = parse_key_sequence_expanded("z z").unwrap();
+        let seqs = parse_key_sequence_expanded("zz").unwrap();
         assert_that!(seqs.len(), eq(1));
         assert_that!(seqs[0].len(), eq(2));
     }
@@ -392,7 +438,7 @@ mod tests {
 
     #[rstest]
     fn sequence_expanded_uppercase_produces_product() {
-        let seqs = parse_key_sequence_expanded("G g").unwrap();
+        let seqs = parse_key_sequence_expanded("Gg").unwrap();
         // G expands to 2 variants, g to 1 → 2 * 1 = 2 sequences.
         assert_that!(seqs.len(), eq(2));
         assert_eq!(seqs[0][0], (KeyCode::Char('G'), KeyModifiers::SHIFT));
@@ -403,8 +449,19 @@ mod tests {
 
     #[rstest]
     fn sequence_expanded_two_uppercase_produces_four() {
-        let seqs = parse_key_sequence_expanded("G G").unwrap();
+        let seqs = parse_key_sequence_expanded("GG").unwrap();
         // 2 * 2 = 4 sequences.
         assert_that!(seqs.len(), eq(4));
+    }
+
+    // --- parse_key_sequence_expanded: bracket in sequence ---
+
+    #[rstest]
+    fn sequence_expanded_with_bracket_key() {
+        let seqs = parse_key_sequence_expanded("z<C-a>").unwrap();
+        assert_that!(seqs.len(), eq(1));
+        assert_that!(seqs[0].len(), eq(2));
+        assert_eq!(seqs[0][0], (KeyCode::Char('z'), KeyModifiers::NONE));
+        assert_eq!(seqs[0][1], (KeyCode::Char('a'), KeyModifiers::CONTROL));
     }
 }

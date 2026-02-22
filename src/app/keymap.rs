@@ -216,11 +216,23 @@ impl KeyMap {
             &[],
             Action::Tree(TreeAction::HalfPageUp),
         );
-        // z z → center cursor in viewport.
+        // zz → center cursor in viewport.
         self.bind_sequence(
             &[(KeyCode::Char('z'), KeyModifiers::NONE), (KeyCode::Char('z'), KeyModifiers::NONE)],
             &[],
             Action::Tree(TreeAction::CenterCursor),
+        );
+        // zt → scroll cursor to top of viewport.
+        self.bind_sequence(
+            &[(KeyCode::Char('z'), KeyModifiers::NONE), (KeyCode::Char('t'), KeyModifiers::NONE)],
+            &[],
+            Action::Tree(TreeAction::ScrollCursorToTop),
+        );
+        // zb → scroll cursor to bottom of viewport.
+        self.bind_sequence(
+            &[(KeyCode::Char('z'), KeyModifiers::NONE), (KeyCode::Char('b'), KeyModifiers::NONE)],
+            &[],
+            Action::Tree(TreeAction::ScrollCursorToBottom),
         );
     }
 
@@ -889,7 +901,7 @@ mod tests {
         let config = KeybindingConfig {
             disable_default: true,
             universal: ContextBindings {
-                bindings: vec![entry("g g", "tree.jump_last")],
+                bindings: vec![entry("gg", "tree.jump_last")],
                 ..Default::default()
             },
             ..KeybindingConfig::default()

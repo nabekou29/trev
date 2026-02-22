@@ -159,6 +159,20 @@ impl ScrollState {
         self.offset = cursor.saturating_sub(viewport_height / 2);
     }
 
+    /// Set the scroll offset so the cursor is at the top of the viewport.
+    pub const fn scroll_cursor_to_top(&mut self, cursor: usize) {
+        self.offset = cursor;
+    }
+
+    /// Set the scroll offset so the cursor is at the bottom of the viewport.
+    pub const fn scroll_cursor_to_bottom(&mut self, cursor: usize, viewport_height: usize) {
+        if viewport_height == 0 {
+            self.offset = 0;
+            return;
+        }
+        self.offset = cursor.saturating_sub(viewport_height - 1);
+    }
+
     /// Set the scroll offset directly.
     pub const fn set_offset(&mut self, offset: usize) {
         self.offset = offset;
@@ -326,6 +340,43 @@ mod tests {
     fn scroll_state_center_on_cursor_zero_viewport() {
         let mut scroll = ScrollState { offset: 5 };
         scroll.center_on_cursor(10, 0);
+        assert_that!(scroll.offset(), eq(0));
+    }
+
+    #[rstest]
+    fn scroll_cursor_to_top_sets_offset_to_cursor() {
+        let mut scroll = ScrollState::new();
+        scroll.scroll_cursor_to_top(15);
+        assert_that!(scroll.offset(), eq(15));
+    }
+
+    #[rstest]
+    fn scroll_cursor_to_top_at_zero() {
+        let mut scroll = ScrollState { offset: 10 };
+        scroll.scroll_cursor_to_top(0);
+        assert_that!(scroll.offset(), eq(0));
+    }
+
+    #[rstest]
+    fn scroll_cursor_to_bottom_normal() {
+        let mut scroll = ScrollState::new();
+        // Cursor at 20, viewport 10 → offset = 20 - 9 = 11.
+        scroll.scroll_cursor_to_bottom(20, 10);
+        assert_that!(scroll.offset(), eq(11));
+    }
+
+    #[rstest]
+    fn scroll_cursor_to_bottom_near_top() {
+        let mut scroll = ScrollState::new();
+        // Cursor at 3, viewport 10 → offset = 0 (saturating_sub).
+        scroll.scroll_cursor_to_bottom(3, 10);
+        assert_that!(scroll.offset(), eq(0));
+    }
+
+    #[rstest]
+    fn scroll_cursor_to_bottom_zero_viewport() {
+        let mut scroll = ScrollState { offset: 5 };
+        scroll.scroll_cursor_to_bottom(10, 0);
         assert_that!(scroll.offset(), eq(0));
     }
 
