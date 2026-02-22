@@ -272,10 +272,24 @@ Add the plugin directory to your Neovim config (e.g. with lazy.nvim):
       width = 30,               -- Side panel width
       auto_reveal = true,       -- Sync tree with current buffer
       action = "edit",          -- edit | split | vsplit | tabedit
+      adapter = "auto",         -- auto | native | snacks | toggleterm | tmux
     })
   end,
 }
 ```
+
+#### Adapter Options
+
+| Adapter      | Description                                          |
+| ------------ | ---------------------------------------------------- |
+| `auto`       | Auto-detect: snacks > toggleterm > native             |
+| `native`     | Built-in Neovim terminal (no plugin dependencies)     |
+| `snacks`     | Uses snacks.nvim terminal                             |
+| `toggleterm`  | Uses toggleterm.nvim                                  |
+| `tmux`       | Uses tmux split-window (panel) and display-popup (float) |
+| `zellij`     | Uses Zellij directional pane (panel) and floating pane (float) |
+
+The `tmux` and `zellij` adapters require Neovim to be running inside the respective multiplexer. They provide native terminal rendering without Neovim terminal emulation overhead. Falls back to `native` if not inside the multiplexer.
 
 ### Commands
 
