@@ -10,6 +10,7 @@ use std::time::{
 };
 
 use super::keymap::KeyMap;
+use super::pending_keys::PendingKeys;
 use crate::config::{
     FileOpConfig,
     MenuDefinition,
@@ -89,6 +90,8 @@ pub struct AppState {
     pub layout_narrow_split_ratio: u16,
     /// Width threshold for narrow layout (columns).
     pub layout_narrow_width: u16,
+    /// Pending key presses for multi-key sequence resolution.
+    pub pending_keys: PendingKeys,
 }
 
 impl AppState {

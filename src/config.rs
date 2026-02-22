@@ -48,11 +48,13 @@ pub struct Config {
 /// Each section groups bindings by context: `universal` (always active),
 /// `file` (cursor on file), `directory` (cursor on directory), and
 /// `daemon.*` (daemon mode variants).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct KeybindingConfig {
     /// Disable all default keybindings.
     pub disable_default: bool,
+    /// Timeout in milliseconds for multi-key sequences (default: 500).
+    pub key_sequence_timeout_ms: u64,
     /// Bindings active regardless of context.
     pub universal: ContextBindings,
     /// Bindings active when cursor is on a file.
@@ -454,6 +456,19 @@ pub struct WatcherConfig {
     pub enabled: bool,
     /// Debounce interval in milliseconds.
     pub debounce_ms: u64,
+}
+
+impl Default for KeybindingConfig {
+    fn default() -> Self {
+        Self {
+            disable_default: false,
+            key_sequence_timeout_ms: 500,
+            universal: ContextBindings::default(),
+            file: ContextBindings::default(),
+            directory: ContextBindings::default(),
+            daemon: DaemonBindings::default(),
+        }
+    }
 }
 
 impl Default for FileOpConfig {
@@ -969,6 +984,7 @@ preview:
     fn keybinding_config_defaults() {
         let config = KeybindingConfig::default();
         assert!(!config.disable_default);
+        assert_that!(config.key_sequence_timeout_ms, eq(500));
         assert!(config.universal.bindings.is_empty());
         assert!(config.file.bindings.is_empty());
         assert!(config.directory.bindings.is_empty());

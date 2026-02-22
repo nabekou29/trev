@@ -2,7 +2,9 @@
 
 mod handler;
 mod key_parse;
+mod key_trie;
 mod keymap;
+mod pending_keys;
 mod state;
 
 use std::collections::HashSet;
@@ -30,6 +32,7 @@ pub use keymap::{
     KeyContext,
     KeyMap,
 };
+pub use pending_keys::PendingKeys;
 use ratatui_image::picker::Picker;
 pub use state::*;
 
@@ -179,6 +182,9 @@ fn init_app(
         layout_split_ratio: config.preview.split_ratio,
         layout_narrow_split_ratio: config.preview.narrow_split_ratio,
         layout_narrow_width: config.preview.narrow_width,
+        pending_keys: PendingKeys::new(Duration::from_millis(
+            config.keybindings.key_sequence_timeout_ms,
+        )),
     };
 
     let (ctx, channels) = build_context_and_channels(
@@ -309,6 +315,94 @@ fn trigger_initial_loads(state: &mut AppState, ctx: &AppContext, root_path: &Pat
     trigger_preview(state, ctx);
 }
 
+/// Process all async channel results: children loads, watcher, IPC, git, rebuild, preview.
+///
+/// Returns the updated `last_cursor` value (may change when preview is triggered).
+fn process_async_events(
+    state: &mut AppState,
+    ctx: &AppContext,
+    channels: &mut EventReceivers,
+    mut last_cursor: usize,
+) -> usize {
+    // Receive async children load results.
+    {
+        let _span = tracing::info_span!("process_children").entered();
+        while let Ok(result) = channels.children.try_recv() {
+            match result.children {
+                Ok(children) => {
+                    let loaded_path = result.path.clone();
+                    let is_prefetch = result.prefetch;
+                    {
+                        let _span = tracing::info_span!(
+                            "set_children",
+                            path = %result.path.display(),
+                            child_count = children.len(),
+                            is_prefetch,
+                        )
+                        .entered();
+                        state.tree_state.set_children(&result.path, children, !is_prefetch);
+                    }
+
+                    // Prefetch child directories one level ahead (user-initiated loads only).
+                    if !is_prefetch {
+                        let _span = tracing::info_span!("trigger_prefetch_in_process").entered();
+                        trigger_prefetch(
+                            &mut state.tree_state,
+                            &loaded_path,
+                            ctx,
+                            state.show_hidden,
+                            state.show_ignored,
+                        );
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(?result.path, %err, "failed to load children");
+                    state.tree_state.set_children_error(&result.path);
+                }
+            }
+        }
+    }
+
+    // Receive watcher events (file system changes in watched directories).
+    {
+        let _span = tracing::info_span!("process_watcher").entered();
+        process_watcher_events(&mut channels.watcher, state, ctx);
+    }
+
+    // Receive IPC commands.
+    while let Ok(cmd) = channels.ipc.try_recv() {
+        handle_ipc_command(cmd, state);
+    }
+
+    // Receive async git status results.
+    while let Ok(result) = channels.git.try_recv() {
+        if let Ok(mut guard) = state.git_state.write() {
+            *guard = result.state;
+        }
+        tracing::debug!("git status updated");
+    }
+
+    // Receive async tree rebuild results.
+    process_rebuild_results(&mut channels.rebuild, state, ctx);
+
+    // Receive async preview load results.
+    {
+        let _span = tracing::info_span!("process_preview").entered();
+        process_preview_results(&mut channels.preview, state);
+    }
+
+    // Trigger preview when cursor changes.
+    let current_cursor = state.tree_state.cursor();
+    if current_cursor != last_cursor {
+        last_cursor = current_cursor;
+        if state.show_preview {
+            trigger_preview(state, ctx);
+        }
+    }
+
+    last_cursor
+}
+
 /// Run the application.
 #[expect(clippy::unused_async, reason = "Called from tokio async context")]
 pub async fn run(args: &Args) -> Result<()> {
@@ -323,23 +417,37 @@ pub async fn run(args: &Args) -> Result<()> {
 
     // Main event loop.
     //
-    // Order: poll → drain all key events → process async results → preview → scroll → draw.
-    // Draining all pending key events before drawing avoids input lag when
-    // the terminal buffers key repeats faster than the frame rate.
+    // Order: poll → drain key events → process async results → preview → scroll → draw.
+    // When keys are pending (multi-key sequence), the poll timeout is shortened
+    // to the remaining sequence timeout so fallback actions fire promptly.
     loop {
         let _frame_span = tracing::info_span!("frame").entered();
 
         // Clear expired status messages.
         state.clear_expired_status();
 
-        // Poll for events (50ms timeout for responsive async result handling).
-        // Drain ALL pending key events so buffered key repeats are processed in
-        // a single frame rather than one-per-frame.
-        if crossterm::event::poll(Duration::from_millis(50))? {
+        // Check pending key timeout before polling.
+        if state.pending_keys.is_pending() && state.pending_keys.is_timed_out() {
+            handler::handle_pending_timeout(&mut state, &ctx);
+        }
+
+        // Poll timeout: shorter when keys are pending so timeout fires quickly.
+        let poll_duration = if state.pending_keys.is_pending() {
+            state.pending_keys.remaining().min(Duration::from_millis(50))
+        } else {
+            Duration::from_millis(50)
+        };
+
+        // Drain key events. Break early if a key enters pending state
+        // (need to render the pending indicator and wait for timeout).
+        if crossterm::event::poll(poll_duration)? {
             let _span = tracing::info_span!("key_event").entered();
             loop {
                 if let Event::Key(key) = crossterm::event::read()? {
                     handle_key_event(key, &mut state, &ctx);
+                    if state.pending_keys.is_pending() {
+                        break;
+                    }
                 }
                 if !crossterm::event::poll(Duration::ZERO)? {
                     break;
@@ -347,82 +455,8 @@ pub async fn run(args: &Args) -> Result<()> {
             }
         }
 
-        // Receive async children load results.
-        {
-            let _span = tracing::info_span!("process_children").entered();
-            while let Ok(result) = channels.children.try_recv() {
-                match result.children {
-                    Ok(children) => {
-                        let loaded_path = result.path.clone();
-                        let is_prefetch = result.prefetch;
-                        {
-                            let _span = tracing::info_span!(
-                                "set_children",
-                                path = %result.path.display(),
-                                child_count = children.len(),
-                                is_prefetch,
-                            )
-                            .entered();
-                            state.tree_state.set_children(&result.path, children, !is_prefetch);
-                        }
-
-                        // Prefetch child directories one level ahead (user-initiated loads only).
-                        if !is_prefetch {
-                            let _span =
-                                tracing::info_span!("trigger_prefetch_in_process").entered();
-                            trigger_prefetch(
-                                &mut state.tree_state,
-                                &loaded_path,
-                                &ctx,
-                                state.show_hidden,
-                                state.show_ignored,
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        tracing::warn!(?result.path, %err, "failed to load children");
-                        state.tree_state.set_children_error(&result.path);
-                    }
-                }
-            }
-        }
-
-        // Receive watcher events (file system changes in watched directories).
-        {
-            let _span = tracing::info_span!("process_watcher").entered();
-            process_watcher_events(&mut channels.watcher, &mut state, &ctx);
-        }
-
-        // Receive IPC commands.
-        while let Ok(cmd) = channels.ipc.try_recv() {
-            handle_ipc_command(cmd, &mut state);
-        }
-
-        // Receive async git status results.
-        while let Ok(result) = channels.git.try_recv() {
-            if let Ok(mut guard) = state.git_state.write() {
-                *guard = result.state;
-            }
-            tracing::debug!("git status updated");
-        }
-
-        // Receive async tree rebuild results.
-        process_rebuild_results(&mut channels.rebuild, &mut state, &ctx);
-
-        // Receive async preview load results.
-        {
-            let _span = tracing::info_span!("process_preview").entered();
-            process_preview_results(&mut channels.preview, &mut state);
-        }
-
-        // Trigger preview when cursor changes.
-        let current_cursor = state.tree_state.cursor();
-        if current_cursor != last_cursor {
-            last_cursor = current_cursor;
-            if state.show_preview {
-                trigger_preview(&mut state, &ctx);
-            }
-        }
+        // Process all async channel results.
+        last_cursor = process_async_events(&mut state, &ctx, &mut channels, last_cursor);
 
         // Update scroll position.
         state.scroll.clamp_to_cursor(state.tree_state.cursor(), state.viewport_height);

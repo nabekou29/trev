@@ -101,7 +101,7 @@ fn build_indicator_spans(state: &AppState) -> Vec<Span<'static>> {
     spans
 }
 
-/// Determine the center text: processing > status message > file path.
+/// Determine the center text: processing > status message > pending keys > file path.
 fn build_center_text(state: &AppState) -> String {
     if state.processing {
         return " Processing...".to_string();
@@ -109,6 +109,11 @@ fn build_center_text(state: &AppState) -> String {
 
     if let Some(msg) = &state.status_message {
         return format!(" {}", msg.text);
+    }
+
+    // Show pending key sequence indicator.
+    if state.pending_keys.is_pending() {
+        return format!(" {}", state.pending_keys.display_string());
     }
 
     // Default: file path.

@@ -91,6 +91,7 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
         layout_split_ratio: 50,
         layout_narrow_split_ratio: 60,
         layout_narrow_width: 80,
+        pending_keys: trev::app::PendingKeys::new(std::time::Duration::from_millis(500)),
     }
 }
 

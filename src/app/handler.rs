@@ -25,6 +25,8 @@ pub use tree::{
 };
 
 use crate::action::Action;
+use crate::app::key_parse::KeyBinding;
+use crate::app::key_trie::TrieLookup;
 use crate::app::keymap::KeyContext;
 use crate::app::state::{
     AppContext,
@@ -46,45 +48,107 @@ pub fn handle_key_event(key: crossterm::event::KeyEvent, state: &mut AppState, c
             handle_menu_mode_key(key, state, ctx);
         }
         AppMode::Normal => {
-            let mut active_contexts = BTreeSet::new();
-            if ctx.ipc_server.is_some() {
-                active_contexts.insert(KeyContext::Daemon);
-            }
-            let node_ctx = state.tree_state.current_node_info().map_or(KeyContext::File, |info| {
-                if info.is_dir { KeyContext::Directory } else { KeyContext::File }
-            });
-            active_contexts.insert(node_ctx);
-            let Some(action) = ctx.keymap.resolve(key, &active_contexts) else {
-                return;
-            };
-            match action {
-                Action::Quit => {
-                    state.should_quit = true;
+            handle_normal_mode_key(key, state, ctx);
+        }
+    }
+}
+
+/// Handle a key event in Normal mode with multi-key sequence support.
+fn handle_normal_mode_key(key: crossterm::event::KeyEvent, state: &mut AppState, ctx: &AppContext) {
+    let active_contexts = build_active_contexts(state, ctx);
+    let kb: KeyBinding = (key.code, key.modifiers);
+
+    state.pending_keys.push(kb);
+
+    match ctx.keymap.lookup(state.pending_keys.keys(), &active_contexts) {
+        TrieLookup::Resolved(action) => {
+            let action = action.clone();
+            state.pending_keys.clear();
+            dispatch_action(&action, state, ctx);
+        }
+        TrieLookup::PendingWithFallback(_) | TrieLookup::Pending => {
+            // Wait for more keys or timeout.
+        }
+        TrieLookup::NoMatch => {
+            // Current sequence doesn't match. Clear and retry the new key alone.
+            state.pending_keys.clear();
+            // Only retry if the failed sequence had more than 1 key.
+            let single = ctx.keymap.lookup(&[kb], &active_contexts);
+            match single {
+                TrieLookup::Resolved(action) => {
+                    let action = action.clone();
+                    dispatch_action(&action, state, ctx);
                 }
-                Action::Tree(tree_action) => {
-                    handle_tree_action(*tree_action, state, ctx);
+                TrieLookup::PendingWithFallback(_) | TrieLookup::Pending => {
+                    state.pending_keys.push(kb);
                 }
-                Action::Preview(preview_action) => {
-                    handle_preview_action(*preview_action, state, ctx);
-                }
-                Action::FileOp(file_op_action) => {
-                    handle_file_op_action(*file_op_action, state, ctx);
-                }
-                Action::Filter(filter_action) => {
-                    handle_filter_action(*filter_action, state, ctx);
-                }
-                Action::Shell(cmd) => {
-                    handle_shell_action(cmd, state);
-                }
-                Action::Notify(method) => {
-                    handle_notify_action(method, state, ctx);
-                }
-                Action::OpenMenu(name) => {
-                    handle_open_menu(name, state, ctx);
-                }
-                Action::Noop => {}
+                TrieLookup::NoMatch => {}
             }
         }
+    }
+}
+
+/// Handle a pending key sequence timeout.
+///
+/// If the pending sequence has a fallback action, execute it.
+/// Otherwise, clear the pending state.
+pub fn handle_pending_timeout(state: &mut AppState, ctx: &AppContext) {
+    let active_contexts = build_active_contexts(state, ctx);
+    let lookup = ctx.keymap.lookup(state.pending_keys.keys(), &active_contexts);
+
+    match lookup {
+        TrieLookup::PendingWithFallback(action) => {
+            let action = action.clone();
+            state.pending_keys.clear();
+            dispatch_action(&action, state, ctx);
+        }
+        _ => {
+            state.pending_keys.clear();
+        }
+    }
+}
+
+/// Build the set of active key contexts from the current state.
+fn build_active_contexts(state: &AppState, ctx: &AppContext) -> BTreeSet<KeyContext> {
+    let mut active_contexts = BTreeSet::new();
+    if ctx.ipc_server.is_some() {
+        active_contexts.insert(KeyContext::Daemon);
+    }
+    let node_ctx = state.tree_state.current_node_info().map_or(KeyContext::File, |info| {
+        if info.is_dir { KeyContext::Directory } else { KeyContext::File }
+    });
+    active_contexts.insert(node_ctx);
+    active_contexts
+}
+
+/// Dispatch a resolved action.
+fn dispatch_action(action: &Action, state: &mut AppState, ctx: &AppContext) {
+    match action {
+        Action::Quit => {
+            state.should_quit = true;
+        }
+        Action::Tree(tree_action) => {
+            handle_tree_action(*tree_action, state, ctx);
+        }
+        Action::Preview(preview_action) => {
+            handle_preview_action(*preview_action, state, ctx);
+        }
+        Action::FileOp(file_op_action) => {
+            handle_file_op_action(*file_op_action, state, ctx);
+        }
+        Action::Filter(filter_action) => {
+            handle_filter_action(*filter_action, state, ctx);
+        }
+        Action::Shell(cmd) => {
+            handle_shell_action(cmd, state);
+        }
+        Action::Notify(method) => {
+            handle_notify_action(method, state, ctx);
+        }
+        Action::OpenMenu(name) => {
+            handle_open_menu(name, state, ctx);
+        }
+        Action::Noop => {}
     }
 }
 

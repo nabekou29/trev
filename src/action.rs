@@ -105,6 +105,8 @@ pub enum TreeAction {
     ChangeRoot,
     /// Change root to the parent of the current root.
     ChangeRootUp,
+    /// Center cursor in viewport.
+    CenterCursor,
     /// Sort-related actions.
     Sort(SortAction),
 }
@@ -225,6 +227,7 @@ impl fmt::Display for TreeAction {
             Self::Refresh => f.write_str("tree.refresh"),
             Self::ChangeRoot => f.write_str("tree.change_root"),
             Self::ChangeRootUp => f.write_str("tree.change_root_up"),
+            Self::CenterCursor => f.write_str("tree.center_cursor"),
             Self::Sort(action) => action.fmt(f),
         }
     }
@@ -356,6 +359,7 @@ impl FromStr for TreeAction {
             "tree.refresh" => Ok(Self::Refresh),
             "tree.change_root" => Ok(Self::ChangeRoot),
             "tree.change_root_up" => Ok(Self::ChangeRootUp),
+            "tree.center_cursor" => Ok(Self::CenterCursor),
             _ => Err(format!("unknown tree action: {s}")),
         }
     }
@@ -489,6 +493,7 @@ impl TreeAction {
             "tree.refresh",
             "tree.change_root",
             "tree.change_root_up",
+            "tree.center_cursor",
         ];
         names.extend(SortAction::action_names());
         names
@@ -582,6 +587,7 @@ mod tests {
             TreeAction::ExpandAll,
             TreeAction::CollapseAll,
             TreeAction::Refresh,
+            TreeAction::CenterCursor,
             TreeAction::Sort(SortAction::Menu),
             TreeAction::Sort(SortAction::ToggleDirection),
             TreeAction::Sort(SortAction::ByName),

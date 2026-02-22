@@ -113,6 +113,60 @@ pub fn parse_key_expanded(s: &str) -> Result<Vec<KeyBinding>, String> {
     Ok(vec![(code, modifiers)])
 }
 
+/// Parse a key sequence string (space-separated key notations) into a `Vec<KeyBinding>`.
+///
+/// For example, `"z z"` produces two bindings for `z` and `z`.
+/// Single keys like `"j"` produce a one-element vector.
+#[cfg(test)]
+pub fn parse_key_sequence(s: &str) -> Result<Vec<KeyBinding>, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty key sequence".to_string());
+    }
+
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    let mut sequence = Vec::with_capacity(parts.len());
+    for part in parts {
+        sequence.push(parse_key(part)?);
+    }
+    Ok(sequence)
+}
+
+/// Parse a key sequence with uppercase SHIFT expansion, producing all variant combinations.
+///
+/// Each key in the sequence is expanded via [`parse_key_expanded`], then a Cartesian product
+/// is computed so that every terminal-compatible combination is covered.
+///
+/// For example, `"G g"` expands to `[(G,SHIFT), g], [(G,NONE), g]`.
+pub fn parse_key_sequence_expanded(s: &str) -> Result<Vec<Vec<KeyBinding>>, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty key sequence".to_string());
+    }
+
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    let mut expanded_parts: Vec<Vec<KeyBinding>> = Vec::with_capacity(parts.len());
+    for part in parts {
+        expanded_parts.push(parse_key_expanded(part)?);
+    }
+
+    // Compute Cartesian product.
+    let mut result: Vec<Vec<KeyBinding>> = vec![Vec::new()];
+    for variants in &expanded_parts {
+        let mut new_result = Vec::with_capacity(result.len() * variants.len());
+        for prefix in &result {
+            for variant in variants {
+                let mut seq = prefix.clone();
+                seq.push(*variant);
+                new_result.push(seq);
+            }
+        }
+        result = new_result;
+    }
+
+    Ok(result)
+}
+
 /// Parse a special key name (case-insensitive).
 fn parse_key_name(s: &str) -> Result<KeyCode, String> {
     match s.to_lowercase().as_str() {
@@ -283,5 +337,74 @@ mod tests {
     fn expanded_special_key_produces_one_binding() {
         let bindings = parse_key_expanded("<CR>").unwrap();
         assert_that!(bindings.len(), eq(1));
+    }
+
+    // --- parse_key_sequence: single key ---
+
+    #[rstest]
+    fn sequence_single_key() {
+        let seq = parse_key_sequence("j").unwrap();
+        assert_that!(seq.len(), eq(1));
+        assert_eq!(seq[0], (KeyCode::Char('j'), KeyModifiers::NONE));
+    }
+
+    // --- parse_key_sequence: multi-key ---
+
+    #[rstest]
+    fn sequence_two_keys() {
+        let seq = parse_key_sequence("z z").unwrap();
+        assert_that!(seq.len(), eq(2));
+        assert_eq!(seq[0], (KeyCode::Char('z'), KeyModifiers::NONE));
+        assert_eq!(seq[1], (KeyCode::Char('z'), KeyModifiers::NONE));
+    }
+
+    #[rstest]
+    fn sequence_mixed_keys() {
+        let seq = parse_key_sequence("g <CR>").unwrap();
+        assert_that!(seq.len(), eq(2));
+        assert_eq!(seq[0], (KeyCode::Char('g'), KeyModifiers::NONE));
+        assert_eq!(seq[1], (KeyCode::Enter, KeyModifiers::NONE));
+    }
+
+    // --- parse_key_sequence: errors ---
+
+    #[rstest]
+    fn sequence_empty_is_error() {
+        assert!(parse_key_sequence("").is_err());
+        assert!(parse_key_sequence("   ").is_err());
+    }
+
+    #[rstest]
+    fn sequence_invalid_part_is_error() {
+        assert!(parse_key_sequence("z nonexistent").is_err());
+    }
+
+    // --- parse_key_sequence_expanded: lowercase produces single sequence ---
+
+    #[rstest]
+    fn sequence_expanded_lowercase_single() {
+        let seqs = parse_key_sequence_expanded("z z").unwrap();
+        assert_that!(seqs.len(), eq(1));
+        assert_that!(seqs[0].len(), eq(2));
+    }
+
+    // --- parse_key_sequence_expanded: uppercase produces cartesian product ---
+
+    #[rstest]
+    fn sequence_expanded_uppercase_produces_product() {
+        let seqs = parse_key_sequence_expanded("G g").unwrap();
+        // G expands to 2 variants, g to 1 → 2 * 1 = 2 sequences.
+        assert_that!(seqs.len(), eq(2));
+        assert_eq!(seqs[0][0], (KeyCode::Char('G'), KeyModifiers::SHIFT));
+        assert_eq!(seqs[0][1], (KeyCode::Char('g'), KeyModifiers::NONE));
+        assert_eq!(seqs[1][0], (KeyCode::Char('G'), KeyModifiers::NONE));
+        assert_eq!(seqs[1][1], (KeyCode::Char('g'), KeyModifiers::NONE));
+    }
+
+    #[rstest]
+    fn sequence_expanded_two_uppercase_produces_four() {
+        let seqs = parse_key_sequence_expanded("G G").unwrap();
+        // 2 * 2 = 4 sequences.
+        assert_that!(seqs.len(), eq(4));
     }
 }

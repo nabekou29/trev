@@ -4,10 +4,7 @@
 //! Supports context-based binding sections: universal, file, directory, and daemon variants.
 //! More specific context sets take priority over less specific ones.
 
-use std::collections::{
-    BTreeSet,
-    HashMap,
-};
+use std::collections::BTreeSet;
 
 use crossterm::event::{
     KeyCode,
@@ -24,22 +21,23 @@ use crate::action::{
     SortAction,
     TreeAction,
 };
-use crate::app::key_parse;
+use crate::app::key_parse::{
+    self,
+    KeyBinding,
+};
+use crate::app::key_trie::{
+    KeyTrie,
+    TrieLookup,
+};
 use crate::config::{
     ContextBindings,
     KeyBindingEntry,
     KeybindingConfig,
 };
 
-/// Key binding type alias: `(KeyCode, KeyModifiers)`.
-type KeyBinding = (KeyCode, KeyModifiers);
-
 /// A set of required contexts for a keybinding to match.
 /// Empty set means "matches always" (universal fallback).
 type WhenSet = BTreeSet<KeyContext>;
-
-/// Composite key: `(KeyBinding, WhenSet)`.
-type BindingKey = (KeyBinding, WhenSet);
 
 /// Context in which a key event occurs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -54,32 +52,40 @@ pub enum KeyContext {
 
 /// Maps key events to application actions with context-aware resolution.
 ///
-/// Resolution: among all registered bindings for a key whose `when` set is
-/// a subset of the active contexts, the one with the largest (most specific)
-/// `when` set wins. `Noop` actions are filtered out.
+/// Supports both single-key and multi-key sequence bindings via a trie.
+/// Resolution: among all registered bindings whose `when` set is a subset of
+/// the active contexts, the one with the largest (most specific) `when` set wins.
+/// `Noop` actions are filtered out.
 #[derive(Debug)]
 pub struct KeyMap {
-    /// All bindings indexed by `(key, when-set)`.
-    bindings: HashMap<BindingKey, Action>,
+    /// Trie-based key binding storage.
+    trie: KeyTrie,
 }
 
 impl KeyMap {
-    /// Resolve a key event to an action using context-aware lookup.
+    /// Resolve a single key event to an action using context-aware lookup.
     ///
-    /// `active_contexts` describes the current runtime state
-    /// (e.g. `{Daemon, File}` or `{Directory}`).
+    /// This is a convenience for single-key resolution. For multi-key sequences,
+    /// use [`lookup`] with a sequence slice.
     pub fn resolve(
         &self,
         key: KeyEvent,
         active_contexts: &BTreeSet<KeyContext>,
     ) -> Option<&Action> {
         let kb: KeyBinding = (key.code, key.modifiers);
-        self.bindings
-            .iter()
-            .filter(|((k, when), _)| *k == kb && when.is_subset(active_contexts))
-            .max_by_key(|((_, when), _)| when.len())
-            .map(|(_, action)| action)
-            .filter(|a| !matches!(a, Action::Noop))
+        match self.trie.lookup(&[kb], active_contexts) {
+            TrieLookup::Resolved(action) | TrieLookup::PendingWithFallback(action) => Some(action),
+            TrieLookup::Pending | TrieLookup::NoMatch => None,
+        }
+    }
+
+    /// Look up a key sequence in the trie.
+    pub fn lookup<'a>(
+        &'a self,
+        sequence: &[KeyBinding],
+        active_contexts: &BTreeSet<KeyContext>,
+    ) -> TrieLookup<'a> {
+        self.trie.lookup(sequence, active_contexts)
     }
 
     /// Build a `KeyMap` from configuration.
@@ -117,22 +123,22 @@ impl KeyMap {
 
     /// Create an empty `KeyMap` with no bindings.
     fn empty() -> Self {
-        Self { bindings: HashMap::new() }
+        Self { trie: KeyTrie::new() }
     }
 
     /// Apply a single keybinding entry with the given context set.
     fn apply_entry(&mut self, entry: &KeyBindingEntry, when_set: &WhenSet) -> Result<(), String> {
         let action = resolve_entry_action(entry)?;
-        let expanded = key_parse::parse_key_expanded(&entry.key)?;
+        let expanded_sequences = key_parse::parse_key_sequence_expanded(&entry.key)?;
 
-        for binding in expanded {
-            self.bindings.insert((binding, when_set.clone()), action.clone());
+        for sequence in expanded_sequences {
+            self.trie.insert(&sequence, when_set.clone(), action.clone());
         }
 
         Ok(())
     }
 
-    /// Register a key binding.
+    /// Register a single-key binding.
     ///
     /// - `when` slice specifies required contexts (empty = universal).
     /// - Uppercase chars with SHIFT auto-register a NONE variant
@@ -149,9 +155,15 @@ impl KeyMap {
             && c.is_ascii_uppercase()
             && modifiers.contains(KeyModifiers::SHIFT)
         {
-            self.bindings.insert(((code, KeyModifiers::NONE), when_set.clone()), action.clone());
+            self.trie.insert(&[(code, KeyModifiers::NONE)], when_set.clone(), action.clone());
         }
-        self.bindings.insert(((code, modifiers), when_set), action);
+        self.trie.insert(&[(code, modifiers)], when_set, action);
+    }
+
+    /// Register a multi-key sequence binding.
+    fn bind_sequence(&mut self, sequence: &[KeyBinding], when: &[KeyContext], action: Action) {
+        let when_set: WhenSet = when.iter().copied().collect();
+        self.trie.insert(sequence, when_set, action);
     }
 
     /// Load default vim-style universal keybindings.
@@ -203,6 +215,12 @@ impl KeyMap {
             KeyModifiers::CONTROL,
             &[],
             Action::Tree(TreeAction::HalfPageUp),
+        );
+        // z z → center cursor in viewport.
+        self.bind_sequence(
+            &[(KeyCode::Char('z'), KeyModifiers::NONE), (KeyCode::Char('z'), KeyModifiers::NONE)],
+            &[],
+            Action::Tree(TreeAction::CenterCursor),
         );
     }
 
@@ -846,5 +864,39 @@ mod tests {
         );
         // daemon+file → does NOT match (Directory not in active set).
         assert_eq!(km.resolve(key, &daemon_file_ctx()), None);
+    }
+
+    // --- Sequence bindings ---
+
+    #[rstest]
+    fn lookup_z_z_sequence_resolves_to_center_cursor() {
+        let km = default_keymap();
+        let z = (KeyCode::Char('z'), KeyModifiers::NONE);
+        let result = km.lookup(&[z, z], &file_ctx());
+        assert_eq!(result, TrieLookup::Resolved(&Action::Tree(TreeAction::CenterCursor)));
+    }
+
+    #[rstest]
+    fn lookup_z_prefix_is_pending() {
+        let km = default_keymap();
+        let z = (KeyCode::Char('z'), KeyModifiers::NONE);
+        let result = km.lookup(&[z], &file_ctx());
+        assert_eq!(result, TrieLookup::Pending);
+    }
+
+    #[rstest]
+    fn from_config_sequence_binding() {
+        let config = KeybindingConfig {
+            disable_default: true,
+            universal: ContextBindings {
+                bindings: vec![entry("g g", "tree.jump_last")],
+                ..Default::default()
+            },
+            ..KeybindingConfig::default()
+        };
+        let km = KeyMap::from_config(&config);
+        let g = (KeyCode::Char('g'), KeyModifiers::NONE);
+        let result = km.lookup(&[g, g], &file_ctx());
+        assert_eq!(result, TrieLookup::Resolved(&Action::Tree(TreeAction::JumpLast)));
     }
 }

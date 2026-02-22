@@ -112,6 +112,9 @@ pub fn handle_tree_action(
                 change_root(state, ctx, parent);
             }
         }
+        TreeAction::CenterCursor => {
+            state.scroll.center_on_cursor(state.tree_state.cursor(), state.viewport_height);
+        }
         TreeAction::Sort(sort_action) => handle_sort_action(sort_action, state),
     }
 }
