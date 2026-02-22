@@ -16,8 +16,8 @@ use tokio::io::{
     AsyncWriteExt,
     BufReader,
 };
-use tokio::net::unix::OwnedWriteHalf;
 use tokio::net::UnixListener;
+use tokio::net::unix::OwnedWriteHalf;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{
     Mutex,
@@ -189,11 +189,7 @@ async fn handle_connection(
 }
 
 /// Parse and dispatch a single JSON-RPC message line.
-async fn dispatch_message(
-    line: &str,
-    writer: &SharedWriter,
-    ipc_tx: &UnboundedSender<IpcCommand>,
-) {
+async fn dispatch_message(line: &str, writer: &SharedWriter, ipc_tx: &UnboundedSender<IpcCommand>) {
     let msg: JsonRpcMessage = match serde_json::from_str(line) {
         Ok(m) => m,
         Err(e) => {
@@ -206,14 +202,10 @@ async fn dispatch_message(
     };
 
     match msg {
-        JsonRpcMessage::Request {
-            method, params, id, ..
-        } => {
+        JsonRpcMessage::Request { method, params, id, .. } => {
             dispatch_request(&method, params, id, writer, ipc_tx).await;
         }
-        JsonRpcMessage::Notification {
-            method, params, ..
-        } => {
+        JsonRpcMessage::Notification { method, params, .. } => {
             dispatch_notification(&method, params.as_ref(), ipc_tx);
         }
         JsonRpcMessage::Response { .. } => {
@@ -232,8 +224,7 @@ async fn dispatch_request(
 ) {
     match method {
         "ping" => {
-            let resp =
-                JsonRpcMessage::success_response(id, serde_json::json!({"ok": true}));
+            let resp = JsonRpcMessage::success_response(id, serde_json::json!({"ok": true}));
             write_message(writer, &resp).await;
         }
         "reveal" => {
@@ -245,10 +236,7 @@ async fn dispatch_request(
 
             if let Some(path) = path {
                 let (tx, rx) = oneshot::channel();
-                let cmd = IpcCommand::Reveal {
-                    path,
-                    response_tx: tx,
-                };
+                let cmd = IpcCommand::Reveal { path, response_tx: tx };
                 if ipc_tx.send(cmd).is_ok()
                     && let Ok(result) = rx.await
                 {
@@ -289,18 +277,13 @@ fn dispatch_notification(
 ) {
     match method {
         "reveal" => {
-            let path = params
-                .and_then(|p| p.get("path"))
-                .and_then(Value::as_str)
-                .map(PathBuf::from);
+            let path =
+                params.and_then(|p| p.get("path")).and_then(Value::as_str).map(PathBuf::from);
 
             if let Some(path) = path {
                 // For notifications, we don't need a response — use a dummy channel
                 let (tx, _rx) = oneshot::channel();
-                let cmd = IpcCommand::Reveal {
-                    path,
-                    response_tx: tx,
-                };
+                let cmd = IpcCommand::Reveal { path, response_tx: tx };
                 let _ = ipc_tx.send(cmd);
             }
         }
@@ -342,14 +325,9 @@ mod tests {
         let (ipc_tx, _ipc_rx) = mpsc::unbounded_channel::<IpcCommand>();
         let server = IpcServer::start_on_path(temp_socket_path(), ipc_tx).unwrap();
 
-        let mut stream = tokio::net::UnixStream::connect(server.socket_path())
-            .await
-            .unwrap();
+        let mut stream = tokio::net::UnixStream::connect(server.socket_path()).await.unwrap();
         let request = r#"{"jsonrpc":"2.0","method":"ping","id":1}"#;
-        stream
-            .write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
+        stream.write_all(format!("{request}\n").as_bytes()).await.unwrap();
 
         let mut reader = BufReader::new(&mut stream);
         let mut line = String::new();
@@ -366,20 +344,13 @@ mod tests {
         let (ipc_tx, mut ipc_rx) = mpsc::unbounded_channel::<IpcCommand>();
         let server = IpcServer::start_on_path(temp_socket_path(), ipc_tx).unwrap();
 
-        let mut stream = tokio::net::UnixStream::connect(server.socket_path())
-            .await
-            .unwrap();
+        let mut stream = tokio::net::UnixStream::connect(server.socket_path()).await.unwrap();
         let request = r#"{"jsonrpc":"2.0","method":"quit","id":2}"#;
-        stream
-            .write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
+        stream.write_all(format!("{request}\n").as_bytes()).await.unwrap();
 
         // Receive the command on the main loop side
-        let cmd = tokio::time::timeout(Duration::from_secs(1), ipc_rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
+        let cmd =
+            tokio::time::timeout(Duration::from_secs(1), ipc_rx.recv()).await.unwrap().unwrap();
 
         // Respond via oneshot
         let IpcCommand::Quit { response_tx } = cmd else {
@@ -403,20 +374,13 @@ mod tests {
         let (ipc_tx, mut ipc_rx) = mpsc::unbounded_channel::<IpcCommand>();
         let server = IpcServer::start_on_path(temp_socket_path(), ipc_tx).unwrap();
 
-        let mut stream = tokio::net::UnixStream::connect(server.socket_path())
-            .await
-            .unwrap();
+        let mut stream = tokio::net::UnixStream::connect(server.socket_path()).await.unwrap();
         let request =
             r#"{"jsonrpc":"2.0","method":"reveal","params":{"path":"/tmp/test.rs"},"id":3}"#;
-        stream
-            .write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
+        stream.write_all(format!("{request}\n").as_bytes()).await.unwrap();
 
-        let cmd = tokio::time::timeout(Duration::from_secs(1), ipc_rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
+        let cmd =
+            tokio::time::timeout(Duration::from_secs(1), ipc_rx.recv()).await.unwrap().unwrap();
 
         let IpcCommand::Reveal { path, response_tx } = cmd else {
             unreachable!("Expected Reveal command");
@@ -439,14 +403,9 @@ mod tests {
         let (ipc_tx, _ipc_rx) = mpsc::unbounded_channel::<IpcCommand>();
         let server = IpcServer::start_on_path(temp_socket_path(), ipc_tx).unwrap();
 
-        let mut stream = tokio::net::UnixStream::connect(server.socket_path())
-            .await
-            .unwrap();
+        let mut stream = tokio::net::UnixStream::connect(server.socket_path()).await.unwrap();
         let request = r#"{"jsonrpc":"2.0","method":"unknown_method","id":4}"#;
-        stream
-            .write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
+        stream.write_all(format!("{request}\n").as_bytes()).await.unwrap();
 
         let mut reader = BufReader::new(&mut stream);
         let mut line = String::new();
@@ -463,9 +422,7 @@ mod tests {
         let (ipc_tx, _ipc_rx) = mpsc::unbounded_channel::<IpcCommand>();
         let server = IpcServer::start_on_path(temp_socket_path(), ipc_tx).unwrap();
 
-        let stream = tokio::net::UnixStream::connect(server.socket_path())
-            .await
-            .unwrap();
+        let stream = tokio::net::UnixStream::connect(server.socket_path()).await.unwrap();
 
         // Wait for the server to register the client writer
         tokio::time::sleep(Duration::from_millis(50)).await;

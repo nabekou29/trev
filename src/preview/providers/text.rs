@@ -194,10 +194,7 @@ mod tests {
     #[rstest]
     fn can_handle_fifo_returns_false(temp_dir: TempDir) {
         let fifo_path = temp_dir.path().join("test.pipe");
-        std::process::Command::new("mkfifo")
-            .arg(&fifo_path)
-            .status()
-            .unwrap();
+        std::process::Command::new("mkfifo").arg(&fifo_path).status().unwrap();
 
         let provider = TextPreviewProvider::new();
         assert_that!(provider.can_handle(&fifo_path, false), eq(false));

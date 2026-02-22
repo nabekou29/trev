@@ -81,7 +81,10 @@ pub fn highlight_lines(code: &str, extension: &str) -> Vec<Line<'static>> {
     let _span = tracing::info_span!("highlight", extension, line_count).entered();
     let ss = &*SYNTAX_SET;
     // Index is safe: EmbeddedLazyThemeSet always contains all EmbeddedThemeName variants.
-    #[expect(clippy::indexing_slicing, reason = "EmbeddedLazyThemeSet always contains all EmbeddedThemeName variants")]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "EmbeddedLazyThemeSet always contains all EmbeddedThemeName variants"
+    )]
     let theme = &THEME_SET[*AUTO_THEME];
 
     let syntax = ss

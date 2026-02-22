@@ -475,10 +475,8 @@ mod tests {
 
     #[rstest]
     fn smart_sort_three_dot_files() -> Result<()> {
-        let mut nodes = vec![
-            file_node("foo.bar.test.ts", 0, None),
-            file_node("foo.bar.ts", 0, None),
-        ];
+        let mut nodes =
+            vec![file_node("foo.bar.test.ts", 0, None), file_node("foo.bar.ts", 0, None)];
         sort_children(&mut nodes, SortOrder::Smart, SortDirection::Asc, false);
         verify_that!(names(&nodes), eq(&vec!["foo.bar.ts", "foo.bar.test.ts"]))?;
         Ok(())
@@ -493,10 +491,7 @@ mod tests {
             dir_node_sort("utils"),
         ];
         sort_children(&mut nodes, SortOrder::Smart, SortDirection::Asc, true);
-        verify_that!(
-            names(&nodes),
-            eq(&vec!["components", "utils", "user.ts", "user.test.ts"])
-        )?;
+        verify_that!(names(&nodes), eq(&vec!["components", "utils", "user.ts", "user.test.ts"]))?;
         Ok(())
     }
 
@@ -533,17 +528,13 @@ mod tests {
     #[rstest]
     #[ignore = "performance test: run with --ignored"]
     fn smart_sort_100k_nodes_under_1_second() {
-        let mut nodes: Vec<TreeNode> = (0..100_000)
-            .map(|i| file_node(&format!("component{i}.test.tsx"), 0, None))
-            .collect();
+        let mut nodes: Vec<TreeNode> =
+            (0..100_000).map(|i| file_node(&format!("component{i}.test.tsx"), 0, None)).collect();
 
         let start = std::time::Instant::now();
         sort_children(&mut nodes, SortOrder::Smart, SortDirection::Asc, true);
         let elapsed = start.elapsed();
 
-        assert!(
-            elapsed.as_secs() < 1,
-            "smart sort of 100k nodes took {elapsed:?}, expected < 1s"
-        );
+        assert!(elapsed.as_secs() < 1, "smart sort of 100k nodes took {elapsed:?}, expected < 1s");
     }
 }

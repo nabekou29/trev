@@ -88,9 +88,9 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
             &trev::ui::column::default_columns(),
             &trev::ui::column::ColumnOptionsConfig::default(),
         ),
-        layout_split: 50,
-        layout_narrow_split: 60,
-        layout_narrow_threshold: 80,
+        layout_split_ratio: 50,
+        layout_narrow_split_ratio: 60,
+        layout_narrow_width: 80,
     }
 }
 

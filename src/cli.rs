@@ -35,7 +35,7 @@ pub struct Args {
 
     /// Show root directory as a tree node.
     #[arg(long)]
-    pub show_root: bool,
+    pub show_root_entry: bool,
 
     /// Sort order (name, size, mtime, type, extension).
     #[arg(long)]
@@ -187,7 +187,7 @@ impl Default for Args {
             show_hidden: false,
             show_ignored: false,
             no_preview: false,
-            show_root: false,
+            show_root_entry: false,
             sort_order: None,
             sort_direction: None,
             no_directories_first: false,

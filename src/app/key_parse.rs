@@ -62,9 +62,8 @@ fn parse_angle_bracket(inner: &str) -> Result<KeyBinding, String> {
         if let Some(rest) = remaining.strip_prefix("C-") {
             modifiers |= KeyModifiers::CONTROL;
             remaining = rest;
-        } else if let Some(rest) = remaining
-            .strip_prefix("A-")
-            .or_else(|| remaining.strip_prefix("M-"))
+        } else if let Some(rest) =
+            remaining.strip_prefix("A-").or_else(|| remaining.strip_prefix("M-"))
         {
             modifiers |= KeyModifiers::ALT;
             remaining = rest;
@@ -285,5 +284,4 @@ mod tests {
         let bindings = parse_key_expanded("<CR>").unwrap();
         assert_that!(bindings.len(), eq(1));
     }
-
 }

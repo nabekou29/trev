@@ -334,10 +334,7 @@ mod tests {
 
     #[rstest]
     fn resolve_columns_default_options() {
-        let cols = resolve_columns(
-            &[ColumnKind::ModifiedAt],
-            &ColumnOptionsConfig::default(),
-        );
+        let cols = resolve_columns(&[ColumnKind::ModifiedAt], &ColumnOptionsConfig::default());
         assert_that!(cols.len(), eq(1));
         assert_that!(cols[0].kind, eq(ColumnKind::ModifiedAt));
         assert_that!(cols[0].mtime_format, eq(MtimeFormat::Relative));

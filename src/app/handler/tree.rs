@@ -7,6 +7,8 @@ use std::path::{
     PathBuf,
 };
 
+use rayon::prelude::*;
+
 use crate::app::state::{
     AppContext,
     AppState,
@@ -17,8 +19,6 @@ use crate::state::tree::{
     ExpandResult,
     TreeState,
 };
-use rayon::prelude::*;
-
 use crate::tree::builder::TreeBuilder;
 
 /// Handle a tree action.
@@ -89,18 +89,6 @@ pub fn handle_tree_action(
         TreeAction::CollapseAll => {
             handle_collapse_all(state);
         }
-        TreeAction::ToggleHidden => {
-            state.show_hidden = !state.show_hidden;
-            rebuild_tree(state, ctx);
-            let label = if state.show_hidden { "shown" } else { "hidden" };
-            state.set_status(format!("Hidden files: {label}"));
-        }
-        TreeAction::ToggleIgnored => {
-            state.show_ignored = !state.show_ignored;
-            rebuild_tree(state, ctx);
-            let label = if state.show_ignored { "shown" } else { "hidden" };
-            state.set_status(format!("Ignored files: {label}"));
-        }
         TreeAction::Refresh => {
             rebuild_tree(state, ctx);
             // Re-fetch git status.
@@ -109,12 +97,22 @@ pub fn handle_tree_action(
             }
             state.set_status("Refreshed");
         }
-        TreeAction::SortMenu => {
-            open_sort_menu(state);
+        TreeAction::ChangeRoot => {
+            if let Some(info) = state.tree_state.current_node_info()
+                && info.is_dir
+            {
+                change_root(state, ctx, &info.path);
+            }
         }
-        TreeAction::ToggleSortDirection => {
-            toggle_sort_direction(state);
+        TreeAction::ChangeRootUp => {
+            let root = state.tree_state.root_path().to_path_buf();
+            if let Some(parent) = root.parent()
+                && parent != root
+            {
+                change_root(state, ctx, parent);
+            }
         }
+        TreeAction::Sort(sort_action) => handle_sort_action(sort_action, state),
     }
 }
 
@@ -187,11 +185,30 @@ fn handle_collapse_all(state: &mut AppState) {
     }
 }
 
+/// Handle a sort sub-action.
+fn handle_sort_action(sort_action: crate::action::SortAction, state: &mut AppState) {
+    use crate::action::SortAction;
+
+    match sort_action {
+        SortAction::Menu => open_sort_menu(state),
+        SortAction::ToggleDirection => toggle_sort_direction(state),
+        SortAction::ByName => apply_sort_order(state, crate::state::tree::SortOrder::Name),
+        SortAction::BySize => apply_sort_order(state, crate::state::tree::SortOrder::Size),
+        SortAction::ByMtime => apply_sort_order(state, crate::state::tree::SortOrder::Modified),
+        SortAction::ByType => apply_sort_order(state, crate::state::tree::SortOrder::Type),
+        SortAction::ByExtension => {
+            apply_sort_order(state, crate::state::tree::SortOrder::Extension);
+        }
+        SortAction::BySmart => apply_sort_order(state, crate::state::tree::SortOrder::Smart),
+    }
+}
+
 /// Open the sort order selection menu.
 ///
 /// Lists all sort order variants with the current one marked with `●`.
 fn open_sort_menu(state: &mut AppState) {
     use clap::ValueEnum;
+
     use crate::input::{
         AppMode,
         MenuAction,
@@ -215,11 +232,7 @@ fn open_sort_menu(state: &mut AppState) {
         if is_current {
             current_idx = i;
         }
-        let label = if is_current {
-            format!("● {name}")
-        } else {
-            format!("  {name}")
-        };
+        let label = if is_current { format!("● {name}") } else { format!("  {name}") };
         // Use first character as shortcut key.
         let key = name.chars().next().unwrap_or(' ');
         items.push(MenuItem { key, label, value: name.to_string() });
@@ -230,7 +243,16 @@ fn open_sort_menu(state: &mut AppState) {
         items,
         cursor: current_idx,
         on_select: MenuAction::SelectSortOrder,
+        item_actions: Vec::new(),
     });
+}
+
+/// Apply a specific sort order directly (without opening the menu).
+fn apply_sort_order(state: &mut AppState, order: crate::state::tree::SortOrder) {
+    let direction = state.tree_state.sort_direction();
+    let dirs_first = state.tree_state.directories_first();
+    state.tree_state.apply_sort(order, direction, dirs_first);
+    state.set_status(format!("Sort: {order:?}"));
 }
 
 /// Toggle sort direction between ascending and descending.
@@ -256,7 +278,7 @@ fn toggle_sort_direction(state: &mut AppState) {
 /// Captures sort/display state, builds the tree on a background thread,
 /// and sends the result through the rebuild channel. The event loop
 /// applies the result when it arrives.
-fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
+pub(super) fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
     // Increment generation so any in-flight rebuild is discarded.
     state.rebuild_generation = state.rebuild_generation.wrapping_add(1);
     let generation = state.rebuild_generation;
@@ -276,12 +298,9 @@ fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
     let tx = ctx.rebuild_tx.clone();
 
     tokio::task::spawn_blocking(move || {
-        let _span = tracing::info_span!(
-            "rebuild_tree",
-            expanded_count = expanded.len(),
-            generation,
-        )
-        .entered();
+        let _span =
+            tracing::info_span!("rebuild_tree", expanded_count = expanded.len(), generation,)
+                .entered();
 
         let builder = TreeBuilder::new(show_hidden, show_ignored);
         let Ok(root) = builder.build(&root_path) else {
@@ -309,12 +328,7 @@ fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
         // Load children in parallel (each load_children is independent FS I/O).
         let loaded: Vec<_> = sorted_expanded
             .par_iter()
-            .filter_map(|path| {
-                builder
-                    .load_children(path)
-                    .ok()
-                    .map(|children| (path, children))
-            })
+            .filter_map(|path| builder.load_children(path).ok().map(|children| (path, children)))
             .collect();
 
         // Apply results sequentially (parent→child order preserved by par_iter).
@@ -345,6 +359,66 @@ fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
             visual_row,
         });
     });
+}
+
+/// Change the tree root to a new directory.
+///
+/// Builds a new tree from `new_root` asynchronously and sends the result
+/// through the rebuild channel. Updates the file system watcher to monitor
+/// the new root.
+fn change_root(state: &mut AppState, ctx: &AppContext, new_root: &Path) {
+    // Increment generation so any in-flight rebuild is discarded.
+    state.rebuild_generation = state.rebuild_generation.wrapping_add(1);
+    let generation = state.rebuild_generation;
+
+    let show_hidden = state.show_hidden;
+    let show_ignored = state.show_ignored;
+    let order = state.tree_state.sort_order();
+    let direction = state.tree_state.sort_direction();
+    let dirs_first = state.tree_state.directories_first();
+    let show_root = state.tree_state.show_root();
+
+    let tx = ctx.rebuild_tx.clone();
+    let root_path = new_root.to_path_buf();
+
+    tokio::task::spawn_blocking(move || {
+        let builder = TreeBuilder::new(show_hidden, show_ignored);
+        let Ok(root) = builder.build(&root_path) else {
+            tracing::warn!("change_root: failed to build root");
+            return;
+        };
+
+        let options = crate::state::tree::TreeOptions {
+            sort_order: order,
+            sort_direction: direction,
+            directories_first: dirs_first,
+            show_root,
+        };
+        let mut new_tree = TreeState::new(root, options);
+        new_tree.apply_sort(order, direction, dirs_first);
+
+        let _ = tx.blocking_send(TreeRebuildResult {
+            tree_state: new_tree,
+            root_path,
+            show_hidden,
+            show_ignored,
+            generation,
+            visual_row: 0,
+        });
+    });
+
+    // Update watcher to monitor the new root.
+    if let Some(ref mut watcher) = state.watcher
+        && let Err(e) = watcher.watch_root(new_root)
+    {
+        tracing::warn!(%e, "failed to watch new root directory");
+    }
+
+    let name = new_root.file_name().map_or_else(
+        || new_root.to_string_lossy().into_owned(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    state.set_status(format!("Root: {name}"));
 }
 
 /// Handle an expand result: spawn loads or prefetch as appropriate.

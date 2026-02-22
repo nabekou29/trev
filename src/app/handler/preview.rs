@@ -87,8 +87,7 @@ pub fn trigger_preview(state: &mut AppState, ctx: &AppContext) {
     state.preview_state.request_preview(path.clone());
 
     let cache_hit = try_load_from_cache(state, &path, &providers);
-    let _span =
-        tracing::info_span!("trigger_preview", path = %path.display(), cache_hit).entered();
+    let _span = tracing::info_span!("trigger_preview", path = %path.display(), cache_hit).entered();
 
     if !cache_hit {
         spawn_preview_for(state, &path, &providers, ctx, false);
@@ -200,8 +199,7 @@ fn prefetch_adjacent(state: &mut AppState, ctx: &AppContext) {
         let path = &vn.node.path;
         let providers = state.preview_registry.resolve(path, vn.node.is_dir);
         let Some(provider) = providers.first() else { continue };
-        let key =
-            CacheKey { path: path.clone(), provider_name: provider.name().to_string() };
+        let key = CacheKey { path: path.clone(), provider_name: provider.name().to_string() };
         if state.preview_cache.get(&key).is_some() {
             tracing::debug!(path = %path.display(), "prefetch skipped (already cached)");
             continue;
@@ -279,8 +277,6 @@ fn spawn_preview_load(params: PreviewLoadParams) {
         };
 
         // Ignore send error (receiver dropped = app shutting down).
-        let _ = tx
-            .send(PreviewLoadResult { path, provider_name, content, prefetch })
-            .await;
+        let _ = tx.send(PreviewLoadResult { path, provider_name, content, prefetch }).await;
     });
 }

@@ -5,6 +5,7 @@
 
 use super::file_op::{
     execute_create,
+    execute_create_directory,
     execute_delete,
     execute_rename,
 };
@@ -74,7 +75,11 @@ pub fn handle_input_mode_key(
 /// Handle key events in Menu mode (selection menu overlay).
 ///
 /// Supports both direct shortcut keys and j/k/arrow navigation with Enter to confirm.
-pub fn handle_menu_mode_key(key: crossterm::event::KeyEvent, state: &mut AppState) {
+pub fn handle_menu_mode_key(
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+    ctx: &AppContext,
+) {
     use crossterm::event::KeyCode;
 
     let AppMode::Menu(ref mut menu) = state.mode else {
@@ -101,20 +106,48 @@ pub fn handle_menu_mode_key(key: crossterm::event::KeyEvent, state: &mut AppStat
         }
         // Confirm current selection.
         KeyCode::Enter => {
-            let selected = menu.items.get(menu.cursor).map(|i| (i.label.clone(), i.value.clone()));
+            let selected_idx = menu.cursor;
+            let selected = menu.items.get(selected_idx).map(|i| (i.label.clone(), i.value.clone()));
             let on_select = menu.on_select;
-            state.mode = AppMode::Normal;
-            if let Some((label, value)) = selected {
-                dispatch_menu_action(on_select, state, &label, &value);
+
+            if matches!(on_select, crate::input::MenuAction::Custom) {
+                let action = menu.item_actions.get(selected_idx).cloned();
+                state.mode = AppMode::Normal;
+                if let Some(action) = action {
+                    dispatch_custom_action(action, state, ctx);
+                }
+            } else {
+                state.mode = AppMode::Normal;
+                if let Some((label, value)) = selected {
+                    dispatch_menu_action(on_select, state, &label, &value);
+                }
             }
         }
         // Direct shortcut key.
         KeyCode::Char(ch) => {
-            let matched = menu.items.iter().find(|i| i.key == ch).map(|i| (i.label.clone(), i.value.clone()));
-            if let Some((label, value)) = matched {
-                let on_select = menu.on_select;
-                state.mode = AppMode::Normal;
-                dispatch_menu_action(on_select, state, &label, &value);
+            let on_select = menu.on_select;
+
+            if matches!(on_select, crate::input::MenuAction::Custom) {
+                let matched = menu
+                    .items
+                    .iter()
+                    .zip(menu.item_actions.iter())
+                    .find(|(item, _)| item.key == ch)
+                    .map(|(_, action)| action.clone());
+                if let Some(action) = matched {
+                    state.mode = AppMode::Normal;
+                    dispatch_custom_action(action, state, ctx);
+                }
+            } else {
+                let matched = menu
+                    .items
+                    .iter()
+                    .find(|i| i.key == ch)
+                    .map(|i| (i.label.clone(), i.value.clone()));
+                if let Some((label, value)) = matched {
+                    state.mode = AppMode::Normal;
+                    dispatch_menu_action(on_select, state, &label, &value);
+                }
             }
         }
         _ => {}
@@ -137,6 +170,40 @@ fn dispatch_menu_action(
         MenuAction::SelectSortOrder => {
             apply_sort_from_menu(state, value);
         }
+        MenuAction::Custom => {
+            // Custom menu actions are dispatched via dispatch_custom_menu_item.
+            // This case should not be reached through the normal flow.
+        }
+    }
+}
+
+/// Dispatch a custom menu action by re-using the main action handlers.
+fn dispatch_custom_action(action: crate::action::Action, state: &mut AppState, ctx: &AppContext) {
+    use crate::action::Action;
+
+    match action {
+        Action::Tree(tree_action) => {
+            super::tree::handle_tree_action(tree_action, state, ctx);
+        }
+        Action::FileOp(file_op_action) => {
+            super::file_op::handle_file_op_action(file_op_action, state, ctx);
+        }
+        Action::Filter(filter_action) => {
+            super::handle_filter_action(filter_action, state, ctx);
+        }
+        Action::Preview(preview_action) => {
+            super::preview::handle_preview_action(preview_action, state, ctx);
+        }
+        Action::Shell(cmd) => {
+            super::handle_shell_action(&cmd, state);
+        }
+        Action::Notify(method) => {
+            super::handle_notify_action(&method, state, ctx);
+        }
+        Action::Quit => {
+            state.should_quit = true;
+        }
+        Action::OpenMenu(_) | Action::Noop => {}
     }
 }
 
@@ -145,6 +212,7 @@ fn dispatch_menu_action(
 /// Parses the value as a `SortOrder`, updates the tree state, and re-sorts.
 fn apply_sort_from_menu(state: &mut AppState, value: &str) {
     use clap::ValueEnum;
+
     use crate::state::tree::SortOrder;
 
     let Ok(config_order) = crate::config::SortOrder::from_str(value, true) else {
@@ -159,7 +227,7 @@ fn apply_sort_from_menu(state: &mut AppState, value: &str) {
 }
 
 /// Copy text to the system clipboard and set a status message.
-fn copy_to_clipboard(state: &mut AppState, label: &str, value: &str) {
+pub(super) fn copy_to_clipboard(state: &mut AppState, label: &str, value: &str) {
     match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(value)) {
         Ok(()) => {
             state.set_status(format!("Copied {label}: {value}"));
@@ -181,6 +249,7 @@ fn status_message_for(input: &crate::input::InputState) -> Option<String> {
 
     match &input.on_confirm {
         InputAction::Create { .. } => Some(format!("Created {}", input.value)),
+        InputAction::CreateDirectory { .. } => Some(format!("Created directory {}", input.value)),
         InputAction::Rename { .. } => Some(format!("Renamed to {}", input.value)),
     }
 }
@@ -196,6 +265,9 @@ fn execute_input_confirm(state: &mut AppState, input: crate::input::InputState, 
     match input.on_confirm {
         InputAction::Create { parent_dir } => {
             execute_create(&parent_dir, &input.value, state, ctx);
+        }
+        InputAction::CreateDirectory { parent_dir } => {
+            execute_create_directory(&parent_dir, &input.value, state, ctx);
         }
         InputAction::Rename { target } => {
             execute_rename(&target, &input.value, state, ctx);

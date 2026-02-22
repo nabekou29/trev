@@ -42,6 +42,8 @@ src/
 - N/A (ソートはインメモリ操作) (016-smart-sort)
 - Rust 2024 edition, nightly-2026-01-24 + ratatui 0.30, crossterm 0.29, tokio (full), clap 4, serde, schemars (016-smart-sort)
 - N/A (インメモリ) (016-smart-sort)
+- Rust 2024 edition, nightly-2026-01-24 + ratatui 0.30, crossterm 0.29, tokio (full), serde, schemars, clap 4, arboard (clipboard) (017-config-refinement)
+- YAML config (`~/.config/trev/config.yml`), JSON Schema (on-demand generation) (017-config-refinement)
 
 ## Recent Changes
 - 014-git-integration: Added Rust 2024 edition, nightly-2026-01-24 + ratatui 0.30, crossterm 0.29, tokio (full), ignore 0.4

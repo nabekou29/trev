@@ -16,6 +16,11 @@ pub enum InputAction {
         /// Parent directory for the new entry.
         parent_dir: PathBuf,
     },
+    /// Create a new directory at the given parent.
+    CreateDirectory {
+        /// Parent directory for the new entry.
+        parent_dir: PathBuf,
+    },
     /// Rename the target file/directory.
     Rename {
         /// Path of the file/directory to rename.
@@ -48,6 +53,17 @@ impl InputState {
         }
     }
 
+    /// Create a new input state for directory creation.
+    #[must_use]
+    pub fn for_create_directory(parent_dir: PathBuf) -> Self {
+        Self {
+            prompt: "Create directory: ".to_string(),
+            value: String::new(),
+            cursor_pos: 0,
+            on_confirm: InputAction::CreateDirectory { parent_dir },
+        }
+    }
+
     /// Create a new input state for renaming.
     ///
     /// Pre-fills the value with the existing name and places cursor before the extension.
@@ -74,6 +90,7 @@ impl InputState {
     pub fn title(&self) -> String {
         match &self.on_confirm {
             InputAction::Create { .. } => "Create".to_string(),
+            InputAction::CreateDirectory { .. } => "Create directory".to_string(),
             InputAction::Rename { target } => {
                 let name = target.file_name().unwrap_or_default().to_string_lossy();
                 format!("Rename: {name}")
@@ -319,6 +336,8 @@ pub enum MenuAction {
     CopyToClipboard,
     /// Apply the selected item's value as the new sort order.
     SelectSortOrder,
+    /// Execute the resolved action from a user-defined menu.
+    Custom,
 }
 
 /// State for a selection menu overlay.
@@ -332,6 +351,10 @@ pub struct MenuState {
     pub cursor: usize,
     /// Action to perform on item selection.
     pub on_select: MenuAction,
+    /// Resolved actions for custom menu items (indexed by item position).
+    ///
+    /// Only populated when `on_select` is `MenuAction::Custom`.
+    pub item_actions: Vec<crate::action::Action>,
 }
 
 /// Application mode state machine.

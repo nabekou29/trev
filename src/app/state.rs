@@ -1,5 +1,6 @@
 //! Application state, context, and result types.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -11,6 +12,7 @@ use std::time::{
 use super::keymap::KeyMap;
 use crate::config::{
     FileOpConfig,
+    MenuDefinition,
     PreviewConfig,
 };
 use crate::file_op::selection::SelectionBuffer;
@@ -20,7 +22,6 @@ use crate::git::{
     GitStatusResult,
 };
 use crate::input::AppMode;
-use crate::ui::column::ResolvedColumn;
 use crate::preview::cache::PreviewCache;
 use crate::preview::content::PreviewContent;
 use crate::preview::provider::PreviewRegistry;
@@ -29,6 +30,7 @@ use crate::state::tree::{
     TreeNode,
     TreeState,
 };
+use crate::ui::column::ResolvedColumn;
 use crate::watcher::FsWatcher;
 
 /// Application-wide state wrapping tree state and UI settings.
@@ -82,11 +84,11 @@ pub struct AppState {
     /// Resolved column definitions for the metadata columns display.
     pub columns: Vec<ResolvedColumn>,
     /// Tree/preview split percentage in wide layout.
-    pub layout_split: u16,
+    pub layout_split_ratio: u16,
     /// Tree/preview split percentage in narrow layout.
-    pub layout_narrow_split: u16,
+    pub layout_narrow_split_ratio: u16,
     /// Width threshold for narrow layout (columns).
-    pub layout_narrow_threshold: u16,
+    pub layout_narrow_width: u16,
 }
 
 impl AppState {
@@ -208,6 +210,8 @@ pub struct AppContext {
     pub root_path: PathBuf,
     /// Sender for async tree rebuild results.
     pub rebuild_tx: tokio::sync::mpsc::Sender<TreeRebuildResult>,
+    /// User-defined menu definitions (from config).
+    pub menus: HashMap<String, MenuDefinition>,
 }
 
 /// Result of an async directory children load operation.

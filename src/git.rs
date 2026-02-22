@@ -220,10 +220,7 @@ mod tests {
             eq(GitFileStatus::Modified.priority())
         );
         // Staged has same priority as Added
-        assert_that!(
-            GitFileStatus::Staged.priority(),
-            eq(GitFileStatus::Added.priority())
-        );
+        assert_that!(GitFileStatus::Staged.priority(), eq(GitFileStatus::Added.priority()));
     }
 
     // --- T003: from_porcelain parser ---
@@ -329,10 +326,7 @@ mod tests {
     #[rstest]
     fn from_porcelain_empty_output() {
         let state = GitState::from_porcelain("", Path::new("/repo"));
-        assert_that!(
-            state.file_status(Path::new("/repo/anything")),
-            none()
-        );
+        assert_that!(state.file_status(Path::new("/repo/anything")), none());
     }
 
     // --- T004: file_status lookup ---
@@ -351,10 +345,7 @@ mod tests {
     fn file_status_missing_returns_none() {
         let output = " M src/main.rs\n";
         let state = GitState::from_porcelain(output, Path::new("/repo"));
-        assert_that!(
-            state.file_status(Path::new("/repo/src/other.rs")),
-            none()
-        );
+        assert_that!(state.file_status(Path::new("/repo/src/other.rs")), none());
     }
 
     // --- T005: dir_status aggregation ---
@@ -363,10 +354,7 @@ mod tests {
     fn dir_status_single_child() {
         let output = " M src/main.rs\n";
         let state = GitState::from_porcelain(output, Path::new("/repo"));
-        assert_that!(
-            state.dir_status(Path::new("/repo/src")),
-            some(eq(GitFileStatus::Modified))
-        );
+        assert_that!(state.dir_status(Path::new("/repo/src")), some(eq(GitFileStatus::Modified)));
     }
 
     #[rstest]
@@ -374,10 +362,7 @@ mod tests {
         let output = " M src/main.rs\n?? src/draft.txt\n";
         let state = GitState::from_porcelain(output, Path::new("/repo"));
         // Modified (priority 6) > Untracked (priority 2)
-        assert_that!(
-            state.dir_status(Path::new("/repo/src")),
-            some(eq(GitFileStatus::Modified))
-        );
+        assert_that!(state.dir_status(Path::new("/repo/src")), some(eq(GitFileStatus::Modified)));
     }
 
     #[rstest]
@@ -385,24 +370,15 @@ mod tests {
         let output = "A  src/sub/deep/file.rs\n";
         let state = GitState::from_porcelain(output, Path::new("/repo"));
         // Parent directories should aggregate from nested children
-        assert_that!(
-            state.dir_status(Path::new("/repo/src")),
-            some(eq(GitFileStatus::Added))
-        );
-        assert_that!(
-            state.dir_status(Path::new("/repo/src/sub")),
-            some(eq(GitFileStatus::Added))
-        );
+        assert_that!(state.dir_status(Path::new("/repo/src")), some(eq(GitFileStatus::Added)));
+        assert_that!(state.dir_status(Path::new("/repo/src/sub")), some(eq(GitFileStatus::Added)));
     }
 
     #[rstest]
     fn dir_status_empty_directory() {
         let output = " M other/file.rs\n";
         let state = GitState::from_porcelain(output, Path::new("/repo"));
-        assert_that!(
-            state.dir_status(Path::new("/repo/src")),
-            none()
-        );
+        assert_that!(state.dir_status(Path::new("/repo/src")), none());
     }
 
     // --- T006: rename handling ---
@@ -417,10 +393,7 @@ mod tests {
             some(eq(&GitFileStatus::Renamed))
         );
         // Old path should not have a status
-        assert_that!(
-            state.file_status(Path::new("/repo/old_name.rs")),
-            none()
-        );
+        assert_that!(state.file_status(Path::new("/repo/old_name.rs")), none());
     }
 
     #[rstest]

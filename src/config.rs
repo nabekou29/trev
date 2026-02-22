@@ -3,6 +3,7 @@
 //! Loads settings from `$XDG_CONFIG_HOME/trev/config.yml` (or `~/.config/trev/config.yml`),
 //! warns about unknown keys, and supports CLI argument overrides.
 
+use std::collections::HashMap;
 use std::path::{
     Path,
     PathBuf,
@@ -28,7 +29,7 @@ pub struct Config {
     /// Preview settings.
     pub preview: PreviewConfig,
     /// File operation settings.
-    pub file_operations: FileOpConfig,
+    pub file_op: FileOpConfig,
     /// Session persistence settings.
     pub session: SessionConfig,
     /// File system watcher settings.
@@ -37,6 +38,9 @@ pub struct Config {
     pub keybindings: KeybindingConfig,
     /// Git integration settings.
     pub git: GitConfig,
+    /// User-defined menus.
+    #[serde(default)]
+    pub menus: HashMap<String, MenuDefinition>,
 }
 
 /// Keybinding configuration with context-based sections.
@@ -96,6 +100,37 @@ pub struct KeyBindingEntry {
     /// IPC notification method name.
     #[serde(default)]
     pub notify: Option<String>,
+    /// User-defined menu name to open.
+    #[serde(default)]
+    pub menu: Option<String>,
+}
+
+/// A user-defined menu definition.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MenuDefinition {
+    /// Display title for the menu.
+    pub title: String,
+    /// Menu items.
+    #[serde(default)]
+    pub items: Vec<MenuItemDef>,
+}
+
+/// A single item in a user-defined menu.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MenuItemDef {
+    /// Shortcut key character.
+    pub key: String,
+    /// Display label.
+    pub label: String,
+    /// Built-in action name.
+    #[serde(default)]
+    pub action: Option<String>,
+    /// Shell command to execute (template string).
+    #[serde(default)]
+    pub run: Option<String>,
+    /// IPC notification method name.
+    #[serde(default)]
+    pub notify: Option<String>,
 }
 
 impl JsonSchema for KeyBindingEntry {
@@ -108,9 +143,14 @@ impl JsonSchema for KeyBindingEntry {
     }
 
     fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let action_names: Vec<serde_json::Value> = crate::action::Action::all_action_names()
+            .into_iter()
+            .map(|s| serde_json::Value::String(s.to_string()))
+            .collect();
+
         schemars::json_schema!({
             "type": "object",
-            "description": "A keybinding entry. Exactly one of 'action', 'run', or 'notify' must be set.",
+            "description": "A keybinding entry. Exactly one of 'action', 'run', 'notify', or 'menu' must be set.",
             "required": ["key"],
             "properties": {
                 "key": {
@@ -121,27 +161,7 @@ impl JsonSchema for KeyBindingEntry {
                     "anyOf": [
                         {
                             "type": "string",
-                            "enum": [
-                                "quit", "noop",
-                                "tree.move_down", "tree.move_up",
-                                "tree.expand", "tree.collapse", "tree.toggle_expand",
-                                "tree.jump_first", "tree.jump_last",
-                                "tree.half_page_down", "tree.half_page_up",
-                                "tree.expand_all", "tree.collapse_all",
-                                "tree.toggle_hidden", "tree.toggle_ignored", "tree.refresh",
-                                "tree.sort_menu", "tree.toggle_sort_direction",
-                                "preview.scroll_down", "preview.scroll_up",
-                                "preview.scroll_right", "preview.scroll_left",
-                                "preview.half_page_down", "preview.half_page_up",
-                                "preview.cycle_next_provider", "preview.cycle_prev_provider",
-                                "preview.toggle_preview", "preview.toggle_wrap",
-                                "file_op.yank", "file_op.cut", "file_op.paste",
-                                "file_op.create_file", "file_op.rename",
-                                "file_op.delete", "file_op.system_trash",
-                                "file_op.undo", "file_op.redo",
-                                "file_op.toggle_mark", "file_op.clear_selections",
-                                "file_op.copy_menu"
-                            ]
+                            "enum": action_names
                         },
                         { "type": "null" }
                     ],
@@ -160,13 +180,19 @@ impl JsonSchema for KeyBindingEntry {
                         { "type": "null" }
                     ],
                     "description": "IPC notification method name"
+                },
+                "menu": {
+                    "anyOf": [
+                        { "type": "string" },
+                        { "type": "null" }
+                    ],
+                    "description": "User-defined menu name to open"
                 }
             },
             "additionalProperties": false
         })
     }
 }
-
 
 /// Sort configuration.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
@@ -183,7 +209,10 @@ pub struct SortConfig {
 /// Display configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
-#[expect(clippy::struct_excessive_bools, reason = "DisplayConfig aggregates independent display flags")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "DisplayConfig aggregates independent display flags"
+)]
 pub struct DisplayConfig {
     /// Show hidden files.
     pub show_hidden: bool,
@@ -192,7 +221,7 @@ pub struct DisplayConfig {
     /// Show preview panel.
     pub show_preview: bool,
     /// Show root directory as a tree node.
-    pub show_root: bool,
+    pub show_root_entry: bool,
     /// Columns to display in the tree view (ordered list of column kinds).
     pub columns: Vec<crate::ui::column::ColumnKind>,
     /// Per-column options (e.g., format and mode for `modified_at`).
@@ -200,7 +229,9 @@ pub struct DisplayConfig {
 }
 
 /// Sort order variants.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, clap::ValueEnum)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, clap::ValueEnum,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum SortOrder {
     /// Natural sort with suffix grouping (test files after their base).
@@ -219,7 +250,9 @@ pub enum SortOrder {
 }
 
 /// Sort direction.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, clap::ValueEnum)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, clap::ValueEnum,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum SortDirection {
     /// Ascending order.
@@ -244,11 +277,11 @@ pub struct PreviewConfig {
     /// Timeout for external commands in seconds (default: 3).
     pub command_timeout: u64,
     /// Tree/preview split percentage in wide layout (default: 50).
-    pub split: u16,
+    pub split_ratio: u16,
     /// Tree/preview split percentage in narrow layout (default: 60).
-    pub narrow_split: u16,
+    pub narrow_split_ratio: u16,
     /// Width threshold for narrow layout in columns (default: 80).
-    pub narrow_threshold: u16,
+    pub narrow_width: u16,
     /// Enable word wrap in preview (default: false).
     pub word_wrap: bool,
 }
@@ -449,9 +482,9 @@ impl Default for PreviewConfig {
             cache_size: 50,
             commands: Vec::new(),
             command_timeout: 3,
-            split: 50,
-            narrow_split: 60,
-            narrow_threshold: 80,
+            split_ratio: 50,
+            narrow_split_ratio: 60,
+            narrow_width: 80,
             word_wrap: false,
         }
     }
@@ -473,7 +506,7 @@ impl Default for DisplayConfig {
             show_hidden: false,
             show_ignored: false,
             show_preview: true,
-            show_root: false,
+            show_root_entry: false,
             columns: crate::ui::column::default_columns(),
             column_options: crate::ui::column::ColumnOptionsConfig::default(),
         }
@@ -562,8 +595,8 @@ impl Config {
         if args.no_directories_first {
             self.sort.directories_first = false;
         }
-        if args.show_root {
-            self.display.show_root = true;
+        if args.show_root_entry {
+            self.display.show_root_entry = true;
         }
         if args.no_git {
             self.git.enabled = false;
@@ -1069,7 +1102,9 @@ keybindings:
         let json = serde_json::to_value(&schema).unwrap();
         let props = json["properties"].as_object().unwrap();
 
-        for key in ["sort", "display", "preview", "file_operations", "session", "watcher", "keybindings", "git"] {
+        for key in
+            ["sort", "display", "preview", "file_op", "session", "watcher", "keybindings", "git"]
+        {
             assert!(props.contains_key(key), "missing top-level property: {key}");
         }
     }
@@ -1093,7 +1128,15 @@ keybindings:
         let entry = &json["$defs"]["KeyBindingEntry"];
         let json_str = entry.to_string();
 
-        for action in ["quit", "tree.move_down", "preview.scroll_down", "file_op.yank"] {
+        for action in [
+            "quit",
+            "tree.move_down",
+            "preview.scroll_down",
+            "file_op.yank",
+            "filter.hidden",
+            "tree.sort.menu",
+            "file_op.copy.menu",
+        ] {
             assert!(json_str.contains(action), "action enum missing: {action}");
         }
     }
@@ -1251,7 +1294,10 @@ preview:
 
     #[rstest]
     fn display_column_options_yaml() {
-        use crate::ui::column::{MtimeFormat, MtimeMode};
+        use crate::ui::column::{
+            MtimeFormat,
+            MtimeMode,
+        };
 
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("config.yml");
@@ -1269,7 +1315,10 @@ preview:
 
     #[rstest]
     fn display_column_options_defaults_when_omitted() {
-        use crate::ui::column::{MtimeFormat, MtimeMode};
+        use crate::ui::column::{
+            MtimeFormat,
+            MtimeMode,
+        };
 
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("config.yml");
@@ -1305,9 +1354,9 @@ preview:
     #[rstest]
     fn preview_split_defaults() {
         let config = PreviewConfig::default();
-        assert_that!(config.split, eq(50));
-        assert_that!(config.narrow_split, eq(60));
-        assert_that!(config.narrow_threshold, eq(80));
+        assert_that!(config.split_ratio, eq(50));
+        assert_that!(config.narrow_split_ratio, eq(60));
+        assert_that!(config.narrow_width, eq(80));
     }
 
     #[rstest]
@@ -1316,34 +1365,166 @@ preview:
         let path = tmp.path().join("config.yml");
         std::fs::write(
             &path,
-            "preview:\n  split: 40\n  narrow_split: 70\n  narrow_threshold: 100\n",
+            "preview:\n  split_ratio: 40\n  narrow_split_ratio: 70\n  narrow_width: 100\n",
         )
         .unwrap();
         let result = Config::load_from(&path).unwrap();
-        assert_that!(result.config.preview.split, eq(40));
-        assert_that!(result.config.preview.narrow_split, eq(70));
-        assert_that!(result.config.preview.narrow_threshold, eq(100));
+        assert_that!(result.config.preview.split_ratio, eq(40));
+        assert_that!(result.config.preview.narrow_split_ratio, eq(70));
+        assert_that!(result.config.preview.narrow_width, eq(100));
     }
 
     #[rstest]
     fn preview_split_partial_override_preserves_defaults() {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("config.yml");
-        std::fs::write(&path, "preview:\n  split: 35\n").unwrap();
+        std::fs::write(&path, "preview:\n  split_ratio: 35\n").unwrap();
         let result = Config::load_from(&path).unwrap();
-        assert_that!(result.config.preview.split, eq(35));
-        assert_that!(result.config.preview.narrow_split, eq(60));
-        assert_that!(result.config.preview.narrow_threshold, eq(80));
+        assert_that!(result.config.preview.split_ratio, eq(35));
+        assert_that!(result.config.preview.narrow_split_ratio, eq(60));
+        assert_that!(result.config.preview.narrow_width, eq(80));
     }
 
     #[rstest]
     fn preview_split_does_not_affect_existing_fields() {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("config.yml");
-        std::fs::write(&path, "preview:\n  max_lines: 500\n  split: 40\n").unwrap();
+        std::fs::write(&path, "preview:\n  max_lines: 500\n  split_ratio: 40\n").unwrap();
         let result = Config::load_from(&path).unwrap();
         assert_that!(result.config.preview.max_lines, eq(500));
-        assert_that!(result.config.preview.split, eq(40));
+        assert_that!(result.config.preview.split_ratio, eq(40));
         assert_that!(result.config.preview.cache_size, eq(50));
+    }
+
+    // --- T036: MenuDefinition and MenuItemDef deserialization ---
+
+    #[rstest]
+    fn menu_definition_from_yaml() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(
+            &path,
+            r#"
+menus:
+  my_menu:
+    title: My Custom Menu
+    items:
+      - key: a
+        label: Sort by name
+        action: tree.sort.by_name
+      - key: b
+        label: Run command
+        run: "echo hello"
+      - key: c
+        label: Notify
+        notify: open_file
+"#,
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        let menu = result.config.menus.get("my_menu").unwrap();
+
+        assert_that!(menu.title.as_str(), eq("My Custom Menu"));
+        assert_that!(menu.items.len(), eq(3));
+
+        assert_that!(menu.items[0].key.as_str(), eq("a"));
+        assert_that!(menu.items[0].label.as_str(), eq("Sort by name"));
+        assert_that!(menu.items[0].action.as_deref(), some(eq("tree.sort.by_name")));
+        assert!(menu.items[0].run.is_none());
+        assert!(menu.items[0].notify.is_none());
+
+        assert_that!(menu.items[1].key.as_str(), eq("b"));
+        assert_that!(menu.items[1].run.as_deref(), some(eq("echo hello")));
+
+        assert_that!(menu.items[2].key.as_str(), eq("c"));
+        assert_that!(menu.items[2].notify.as_deref(), some(eq("open_file")));
+    }
+
+    #[rstest]
+    fn menu_definition_defaults_to_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(&path, "").unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        assert!(result.config.menus.is_empty());
+    }
+
+    #[rstest]
+    fn menu_definition_multiple_menus() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(
+            &path,
+            r#"
+menus:
+  sort:
+    title: Sort Menu
+    items:
+      - key: n
+        label: By name
+        action: tree.sort.by_name
+  tools:
+    title: Tools
+    items:
+      - key: g
+        label: Git status
+        run: "git status"
+"#,
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        assert_that!(result.config.menus.len(), eq(2));
+        assert!(result.config.menus.contains_key("sort"));
+        assert!(result.config.menus.contains_key("tools"));
+    }
+
+    // --- T037: KeyBindingEntry with menu field ---
+
+    #[rstest]
+    fn keybinding_entry_with_menu_field() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("config.yml");
+        std::fs::write(
+            &path,
+            r"
+keybindings:
+  universal:
+    bindings:
+      - key: m
+        menu: my_menu
+",
+        )
+        .unwrap();
+
+        let result = Config::load_from(&path).unwrap();
+        let bindings = &result.config.keybindings.universal.bindings;
+        assert_that!(bindings.len(), eq(1));
+        assert_that!(bindings[0].key.as_str(), eq("m"));
+        assert_that!(bindings[0].menu.as_deref(), some(eq("my_menu")));
+        assert!(bindings[0].action.is_none());
+        assert!(bindings[0].run.is_none());
+        assert!(bindings[0].notify.is_none());
+    }
+
+    // --- T036/T037: Schema includes menus section ---
+
+    #[rstest]
+    fn schema_contains_menus_section() {
+        let schema = Config::generate_schema();
+        let json = serde_json::to_value(&schema).unwrap();
+        let props = json["properties"].as_object().unwrap();
+        assert!(props.contains_key("menus"), "schema missing menus property");
+    }
+
+    #[rstest]
+    fn schema_keybinding_entry_has_menu_field() {
+        let schema = Config::generate_schema();
+        let json = serde_json::to_value(&schema).unwrap();
+        let entry = &json["$defs"]["KeyBindingEntry"];
+        let json_str = entry.to_string();
+        assert!(json_str.contains("menu"), "KeyBindingEntry schema missing menu field");
     }
 }

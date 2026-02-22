@@ -56,12 +56,8 @@ impl PreviewCache {
 
     /// Remove all cache entries for the given file path (any provider).
     pub fn invalidate_path(&mut self, path: &Path) {
-        let keys: Vec<CacheKey> = self
-            .cache
-            .iter()
-            .filter(|(k, _)| k.path == path)
-            .map(|(k, _)| k.clone())
-            .collect();
+        let keys: Vec<CacheKey> =
+            self.cache.iter().filter(|(k, _)| k.path == path).map(|(k, _)| k.clone()).collect();
         for key in keys {
             self.cache.pop(&key);
         }

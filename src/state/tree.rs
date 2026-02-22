@@ -250,10 +250,7 @@ impl TreeState {
     pub fn paths_above_cursor(&self) -> Vec<PathBuf> {
         let visible = self.visible_nodes();
         let cursor = self.cursor.min(visible.len().saturating_sub(1));
-        (0..cursor)
-            .rev()
-            .filter_map(|i| visible.get(i).map(|vn| vn.node.path.clone()))
-            .collect()
+        (0..cursor).rev().filter_map(|i| visible.get(i).map(|vn| vn.node.path.clone())).collect()
     }
 
     /// Move the cursor to the node matching the given path.
@@ -312,11 +309,7 @@ impl TreeState {
     /// Ensure a directory node is loaded and expanded.
     ///
     /// Returns `false` if the node could not be found or children failed to load.
-    fn ensure_expanded(
-        &mut self,
-        dir: &Path,
-        builder: crate::tree::builder::TreeBuilder,
-    ) -> bool {
+    fn ensure_expanded(&mut self, dir: &Path, builder: crate::tree::builder::TreeBuilder) -> bool {
         let Some(node) = self.find_node_mut(dir) else {
             return false;
         };
@@ -903,11 +896,7 @@ fn compute_recursive_max_mtime(children: &[TreeNode]) -> Option<SystemTime> {
     children
         .iter()
         .filter_map(|child| {
-            if child.is_dir {
-                child.recursive_max_mtime.or(child.modified)
-            } else {
-                child.modified
-            }
+            if child.is_dir { child.recursive_max_mtime.or(child.modified) } else { child.modified }
         })
         .max()
 }
@@ -1189,11 +1178,8 @@ mod tests {
         let mut inner = dir_node("inner", &parent_path, vec![file_node("deep.txt", &inner_path)]);
         inner.is_expanded = true;
 
-        let mut parent = dir_node(
-            "parent",
-            root,
-            vec![inner, file_node("old_file.txt", &parent_path)],
-        );
+        let mut parent =
+            dir_node("parent", root, vec![inner, file_node("old_file.txt", &parent_path)]);
         parent.is_expanded = true;
 
         let mut state = state_with_children(vec![parent]);
@@ -1939,16 +1925,14 @@ mod tests {
     fn visible_nodes_in_range_matches_visible_nodes() -> Result<()> {
         let root = Path::new("/test/root");
         let sub_path = root.join("sub");
-        let mut sub = dir_node("sub", root, vec![
-            file_node("x.txt", &sub_path),
-            file_node("y.txt", &sub_path),
-        ]);
+        let mut sub = dir_node(
+            "sub",
+            root,
+            vec![file_node("x.txt", &sub_path), file_node("y.txt", &sub_path)],
+        );
         sub.is_expanded = true;
-        let state = state_with_children(vec![
-            file_node("a.txt", root),
-            sub,
-            file_node("z.txt", root),
-        ]);
+        let state =
+            state_with_children(vec![file_node("a.txt", root), sub, file_node("z.txt", root)]);
         // Full list: a.txt, sub, x.txt, y.txt, z.txt
         let all = state.visible_nodes();
         verify_that!(all.len(), eq(5))?;
@@ -2006,10 +1990,7 @@ mod tests {
     #[rstest]
     fn paths_above_cursor_empty_when_cursor_at_top() {
         let root = Path::new("/test/root");
-        let state = state_with_children(vec![
-            file_node("a.txt", root),
-            file_node("b.txt", root),
-        ]);
+        let state = state_with_children(vec![file_node("a.txt", root), file_node("b.txt", root)]);
         // cursor at 0
         let paths = state.paths_above_cursor();
         assert!(paths.is_empty());
@@ -2018,10 +1999,8 @@ mod tests {
     #[rstest]
     fn paths_above_cursor_single_node_above() {
         let root = Path::new("/test/root");
-        let mut state = state_with_children(vec![
-            file_node("a.txt", root),
-            file_node("b.txt", root),
-        ]);
+        let mut state =
+            state_with_children(vec![file_node("a.txt", root), file_node("b.txt", root)]);
         state.move_cursor_to(1); // cursor on b.txt
 
         let paths = state.paths_above_cursor();

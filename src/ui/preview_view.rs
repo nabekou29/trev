@@ -32,7 +32,12 @@ use crate::preview::state::PreviewState;
 ///
 /// When `is_narrow` is true, the preview is below the tree and uses a top border;
 /// otherwise it is beside the tree and uses a left border.
-pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewState, is_narrow: bool) {
+pub fn render_preview(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &mut PreviewState,
+    is_narrow: bool,
+) {
     let title = build_title(state);
 
     let border = if is_narrow { Borders::TOP } else { Borders::LEFT };
@@ -65,11 +70,20 @@ pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewStat
             );
         }
         PreviewContent::PlainText { lines, truncated } => {
-            render_plain_text(frame, inner, lines, state.scroll_row, state.scroll_col, *truncated, word_wrap);
+            render_plain_text(
+                frame,
+                inner,
+                lines,
+                state.scroll_row,
+                state.scroll_col,
+                *truncated,
+                word_wrap,
+            );
         }
         PreviewContent::AnsiText { text } => {
             let paragraph = Paragraph::new(text.clone());
-            let paragraph = apply_scroll_or_wrap(paragraph, state.scroll_row, state.scroll_col, word_wrap);
+            let paragraph =
+                apply_scroll_or_wrap(paragraph, state.scroll_row, state.scroll_col, word_wrap);
             frame.render_widget(paragraph, inner);
         }
         PreviewContent::Loading => {
@@ -123,12 +137,16 @@ fn build_title(state: &PreviewState) -> Line<'static> {
 }
 
 /// Apply word wrap or horizontal scroll to a paragraph.
-fn apply_scroll_or_wrap(paragraph: Paragraph<'_>, scroll_row: usize, scroll_col: usize, word_wrap: bool) -> Paragraph<'_> {
+fn apply_scroll_or_wrap(
+    paragraph: Paragraph<'_>,
+    scroll_row: usize,
+    scroll_col: usize,
+    word_wrap: bool,
+) -> Paragraph<'_> {
     if word_wrap {
-        paragraph.wrap(Wrap { trim: false }).scroll((
-            u16::try_from(scroll_row).unwrap_or(u16::MAX),
-            0,
-        ))
+        paragraph
+            .wrap(Wrap { trim: false })
+            .scroll((u16::try_from(scroll_row).unwrap_or(u16::MAX), 0))
     } else {
         paragraph.scroll((
             u16::try_from(scroll_row).unwrap_or(u16::MAX),

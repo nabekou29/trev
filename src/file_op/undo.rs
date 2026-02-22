@@ -124,10 +124,7 @@ impl UndoHistory {
 
     /// Export undo and redo stacks for serialization.
     pub fn export_stacks(&self) -> (Vec<OpGroup>, Vec<OpGroup>) {
-        (
-            self.undo_stack.iter().cloned().collect(),
-            self.redo_stack.iter().cloned().collect(),
-        )
+        (self.undo_stack.iter().cloned().collect(), self.redo_stack.iter().cloned().collect())
     }
 
     /// Reconstruct an `UndoHistory` from previously exported stacks.
@@ -136,11 +133,7 @@ impl UndoHistory {
         redo_stack: Vec<OpGroup>,
         max_size: usize,
     ) -> Self {
-        Self {
-            undo_stack: undo_stack.into(),
-            redo_stack: redo_stack.into(),
-            max_size,
-        }
+        Self { undo_stack: undo_stack.into(), redo_stack: redo_stack.into(), max_size }
     }
 }
 

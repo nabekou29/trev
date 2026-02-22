@@ -102,11 +102,7 @@ fn build_row_spans<'a>(
     // Indent + directory caret.
     let indent = "  ".repeat(vnode.depth);
     let indicator = if vnode.node.is_dir {
-        if vnode.node.is_expanded {
-            "\u{f0d7} "
-        } else {
-            "\u{f0da} "
-        }
+        if vnode.node.is_expanded { "\u{f0d7} " } else { "\u{f0da} " }
     } else {
         "  "
     };
@@ -136,22 +132,12 @@ fn build_row_spans<'a>(
 /// Push the file/directory icon span.
 fn push_icon_span(spans: &mut Vec<Span<'_>>, vnode: &VisibleNode<'_>) {
     if vnode.node.is_dir {
-        let folder_icon = if vnode.node.is_expanded {
-            "\u{f07c}"
-        } else {
-            "\u{f07b}"
-        };
-        spans.push(Span::styled(
-            format!("{folder_icon} "),
-            Style::default().fg(Color::Blue),
-        ));
+        let folder_icon = if vnode.node.is_expanded { "\u{f07c}" } else { "\u{f07b}" };
+        spans.push(Span::styled(format!("{folder_icon} "), Style::default().fg(Color::Blue)));
     } else {
         let icon = devicons::icon_for_file(&vnode.node.path, &None);
         let icon_color = parse_hex_color(icon.color);
-        spans.push(Span::styled(
-            format!("{} ", icon.icon),
-            Style::default().fg(icon_color),
-        ));
+        spans.push(Span::styled(format!("{} ", icon.icon), Style::default().fg(icon_color)));
     }
 }
 
@@ -168,11 +154,8 @@ fn push_name_and_columns(
     let name = &vnode.node.name;
 
     // Symlink indicator: " → target".
-    let symlink_suffix = vnode
-        .node
-        .symlink_target
-        .as_ref()
-        .map(|target| format!(" \u{2192} {target}"));
+    let symlink_suffix =
+        vnode.node.symlink_target.as_ref().map(|target| format!(" \u{2192} {target}"));
 
     // Directory status indicator (loading or empty).
     let dir_suffix = if vnode.node.is_dir && vnode.node.is_expanded {
@@ -185,10 +168,7 @@ fn push_name_and_columns(
         ""
     };
 
-    let full_name = format!(
-        "{name}{}{dir_suffix}",
-        symlink_suffix.as_deref().unwrap_or("")
-    );
+    let full_name = format!("{name}{}{dir_suffix}", symlink_suffix.as_deref().unwrap_or(""));
 
     let name_width = area_width.saturating_sub(left_prefix_width + columns_width);
     let truncated_name = truncate_to_width(&full_name, name_width);
@@ -204,10 +184,7 @@ fn push_name_and_columns(
         spans.push(Span::styled(name.clone(), name_style));
         let remaining = &truncated_name[name.len()..];
         if !remaining.is_empty() {
-            spans.push(Span::styled(
-                remaining.to_string(),
-                Style::default().fg(Color::DarkGray),
-            ));
+            spans.push(Span::styled(remaining.to_string(), Style::default().fg(Color::DarkGray)));
         }
     }
 
@@ -255,11 +232,7 @@ fn resolve_name_style(is_dir: bool, git_status: Option<GitFileStatus>) -> Style 
         Style::default()
     };
 
-    if is_dir {
-        base
-    } else {
-        git_status.map_or(base, |status| base.fg(status.color()))
-    }
+    if is_dir { base } else { git_status.map_or(base, |status| base.fg(status.color())) }
 }
 
 /// Resolve the git status for a node (file or directory).
@@ -270,11 +243,8 @@ fn resolve_git_status(
 ) -> Option<GitFileStatus> {
     let guard = state.git_state.read().ok()?;
     let git_state = guard.as_ref()?;
-    let result = if is_dir {
-        git_state.dir_status(path)
-    } else {
-        git_state.file_status(path).copied()
-    };
+    let result =
+        if is_dir { git_state.dir_status(path) } else { git_state.file_status(path).copied() };
     drop(guard);
     result
 }

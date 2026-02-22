@@ -76,12 +76,7 @@ pub enum JsonRpcMessage {
 impl JsonRpcMessage {
     /// Create a success response.
     pub fn success_response(id: Value, result: Value) -> Self {
-        Self::Response {
-            jsonrpc: "2.0".to_owned(),
-            result: Some(result),
-            error: None,
-            id,
-        }
+        Self::Response { jsonrpc: "2.0".to_owned(), result: Some(result), error: None, id }
     }
 
     /// Create an error response.
@@ -89,10 +84,7 @@ impl JsonRpcMessage {
         Self::Response {
             jsonrpc: "2.0".to_owned(),
             result: None,
-            error: Some(JsonRpcError {
-                code,
-                message: message.to_owned(),
-            }),
+            error: Some(JsonRpcError { code, message: message.to_owned() }),
             id,
         }
     }
@@ -169,8 +161,7 @@ mod tests {
 
     #[rstest]
     fn deserialize_request_with_params() {
-        let json_str =
-            r#"{"jsonrpc":"2.0","method":"reveal","params":{"path":"/tmp/foo"},"id":2}"#;
+        let json_str = r#"{"jsonrpc":"2.0","method":"reveal","params":{"path":"/tmp/foo"},"id":2}"#;
         let msg: JsonRpcMessage = serde_json::from_str(json_str).unwrap();
         assert_eq!(
             msg,
@@ -222,10 +213,7 @@ mod tests {
             JsonRpcMessage::Response {
                 jsonrpc: "2.0".to_owned(),
                 result: None,
-                error: Some(JsonRpcError {
-                    code: -32601,
-                    message: "Method not found".to_owned(),
-                }),
+                error: Some(JsonRpcError { code: -32601, message: "Method not found".to_owned() }),
                 id: json!(1),
             }
         );

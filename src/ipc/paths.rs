@@ -23,9 +23,8 @@ pub fn workspace_key(path: &Path) -> String {
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let path_str = canonical.to_string_lossy();
 
-    let dir_name = path
-        .file_name()
-        .map_or_else(|| "trev".to_owned(), |n| n.to_string_lossy().into_owned());
+    let dir_name =
+        path.file_name().map_or_else(|| "trev".to_owned(), |n| n.to_string_lossy().into_owned());
 
     let mut hasher = Sha256::new();
     hasher.update(path_str.as_bytes());
@@ -70,7 +69,8 @@ pub fn meta_path(sock_path: &Path) -> PathBuf {
 /// Returns an error if the metadata file cannot be written.
 pub fn write_meta(sock_path: &Path, workspace_dir: &Path) -> std::io::Result<()> {
     let meta = meta_path(sock_path);
-    let canonical = std::fs::canonicalize(workspace_dir).unwrap_or_else(|_| workspace_dir.to_path_buf());
+    let canonical =
+        std::fs::canonicalize(workspace_dir).unwrap_or_else(|_| workspace_dir.to_path_buf());
     let content = serde_json::json!({ "path": canonical.to_string_lossy() });
     std::fs::write(meta, content.to_string())
 }

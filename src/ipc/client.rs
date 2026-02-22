@@ -58,10 +58,7 @@ pub async fn send_request(
 
     let mut serialized = serde_json::to_string(&request)?;
     serialized.push('\n');
-    write_half
-        .write_all(serialized.as_bytes())
-        .await
-        .context("failed to write request")?;
+    write_half.write_all(serialized.as_bytes()).await.context("failed to write request")?;
 
     // Read response with timeout.
     let mut reader = BufReader::new(read_half);
@@ -102,14 +99,10 @@ mod tests {
         let (ipc_tx, _ipc_rx) = mpsc::unbounded_channel::<IpcCommand>();
         let server = IpcServer::start_on_path(temp_socket_path(), ipc_tx).unwrap();
 
-        let response = super::send_request(
-            server.socket_path(),
-            "ping",
-            None,
-            Duration::from_secs(2),
-        )
-        .await
-        .unwrap();
+        let response =
+            super::send_request(server.socket_path(), "ping", None, Duration::from_secs(2))
+                .await
+                .unwrap();
 
         assert_eq!(response["result"]["ok"], true);
     }
@@ -146,13 +139,9 @@ mod tests {
         let server = IpcServer::start_on_path(temp_socket_path(), ipc_tx).unwrap();
 
         // Send a quit request but don't respond — should timeout.
-        let result = super::send_request(
-            server.socket_path(),
-            "quit",
-            None,
-            Duration::from_millis(100),
-        )
-        .await;
+        let result =
+            super::send_request(server.socket_path(), "quit", None, Duration::from_millis(100))
+                .await;
 
         assert!(result.is_err());
     }

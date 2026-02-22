@@ -160,20 +160,20 @@ pub fn render_menu(frame: &mut Frame<'_>, area: Rect, menu: &MenuState) {
             } else {
                 Style::default().fg(Color::White)
             };
-            let bg_style = if is_selected {
-                Style::default().bg(Color::DarkGray)
-            } else {
-                Style::default()
-            };
-            ListItem::new(Line::from(vec![
-                Span::raw(format!(" {marker} ")),
-                Span::styled(
-                    format!("[{}]", item.key),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" "),
-                Span::styled(&item.label, label_style),
-            ]).style(bg_style))
+            let bg_style =
+                if is_selected { Style::default().bg(Color::DarkGray) } else { Style::default() };
+            ListItem::new(
+                Line::from(vec![
+                    Span::raw(format!(" {marker} ")),
+                    Span::styled(
+                        format!("[{}]", item.key),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(&item.label, label_style),
+                ])
+                .style(bg_style),
+            )
         })
         .collect();
 

@@ -56,10 +56,7 @@ mod tests {
         let builder = TreeBuilder::new(true, true);
         let root_node = builder.build(root).unwrap();
         let tree_state = TreeState::new(root_node, TreeOptions::default());
-        let registry = PreviewRegistry::new(vec![
-            Arc::new(FallbackProvider::new()),
-        ])
-        .unwrap();
+        let registry = PreviewRegistry::new(vec![Arc::new(FallbackProvider::new())]).unwrap();
 
         AppState {
             tree_state,
@@ -86,9 +83,9 @@ mod tests {
                 &crate::ui::column::default_columns(),
                 &crate::ui::column::ColumnOptionsConfig::default(),
             ),
-            layout_split: 50,
-            layout_narrow_split: 60,
-            layout_narrow_threshold: 80,
+            layout_split_ratio: 50,
+            layout_narrow_split_ratio: 60,
+            layout_narrow_width: 80,
         }
     }
 
@@ -110,10 +107,8 @@ mod tests {
     fn reveal_nonexistent_path_returns_false() {
         let tmp = TempDir::new().unwrap();
         let (tx, mut rx) = oneshot::channel();
-        let cmd = IpcCommand::Reveal {
-            path: PathBuf::from("/nonexistent/file.rs"),
-            response_tx: tx,
-        };
+        let cmd =
+            IpcCommand::Reveal { path: PathBuf::from("/nonexistent/file.rs"), response_tx: tx };
 
         let mut state = test_state(tmp.path());
         super::handle_ipc_command(cmd, &mut state);
@@ -133,10 +128,7 @@ mod tests {
         std::fs::write(&target, "hello").unwrap();
 
         let (tx, mut rx) = oneshot::channel();
-        let cmd = IpcCommand::Reveal {
-            path: target.clone(),
-            response_tx: tx,
-        };
+        let cmd = IpcCommand::Reveal { path: target.clone(), response_tx: tx };
 
         let mut state = test_state(tmp.path());
         // Initially cursor is at 0, subdir is not expanded.

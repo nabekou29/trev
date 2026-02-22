@@ -78,12 +78,10 @@ impl PreviewProvider for ExternalCmdProvider {
         let ext_match = if is_dir {
             self.command.directories
         } else {
-            path.extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|ext| {
-                    let ext_lower = ext.to_ascii_lowercase();
-                    self.command.extensions.iter().any(|e| e.to_ascii_lowercase() == ext_lower)
-                })
+            path.extension().and_then(|e| e.to_str()).is_some_and(|ext| {
+                let ext_lower = ext.to_ascii_lowercase();
+                self.command.extensions.iter().any(|e| e.to_ascii_lowercase() == ext_lower)
+            })
         };
         if !ext_match {
             return false;
@@ -91,22 +89,18 @@ impl PreviewProvider for ExternalCmdProvider {
 
         // Check git_status condition (empty = no filter, always matches).
         if !self.command.git_status.is_empty() {
-            let matches = self
-                .git_state
-                .read()
-                .ok()
-                .as_ref()
-                .and_then(|guard| guard.as_ref())
-                .and_then(|gs| {
-                    if is_dir {
-                        gs.dir_status(path)
-                    } else {
-                        gs.file_status(path).copied()
-                    }
-                })
-                .is_some_and(|status| {
-                    self.command.git_status.iter().any(|s| s == status.config_name())
-                });
+            let matches =
+                self.git_state
+                    .read()
+                    .ok()
+                    .as_ref()
+                    .and_then(|guard| guard.as_ref())
+                    .and_then(|gs| {
+                        if is_dir { gs.dir_status(path) } else { gs.file_status(path).copied() }
+                    })
+                    .is_some_and(|status| {
+                        self.command.git_status.iter().any(|s| s == status.config_name())
+                    });
             if !matches {
                 return false;
             }
@@ -352,10 +346,7 @@ mod tests {
             3,
             git_state,
         );
-        assert_that!(
-            provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false),
-            eq(true)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false), eq(true));
     }
 
     #[rstest]
@@ -378,10 +369,7 @@ mod tests {
             git_state,
         );
         // File is untracked, not modified — should not match.
-        assert_that!(
-            provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false),
-            eq(false)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false), eq(false));
     }
 
     #[rstest]
@@ -394,10 +382,8 @@ mod tests {
     #[rstest]
     fn can_handle_git_status_file_has_no_status() {
         // File exists but has no git status — should not match when filter is set.
-        let git_state = Arc::new(RwLock::new(Some(GitState::from_porcelain(
-            "",
-            Path::new("/repo"),
-        ))));
+        let git_state =
+            Arc::new(RwLock::new(Some(GitState::from_porcelain("", Path::new("/repo")))));
         let provider = ExternalCmdProvider::new(
             ExternalCommand {
                 name: None,
@@ -411,10 +397,7 @@ mod tests {
             3,
             git_state,
         );
-        assert_that!(
-            provider.can_handle(&PathBuf::from("/repo/src/clean.rs"), false),
-            eq(false)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/clean.rs"), false), eq(false));
     }
 
     #[rstest]
@@ -437,10 +420,7 @@ mod tests {
             git_state,
         );
         // File is "added" which is in the filter list.
-        assert_that!(
-            provider.can_handle(&PathBuf::from("/repo/src/new.rs"), false),
-            eq(true)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/new.rs"), false), eq(true));
     }
 
     // --- load tests ---

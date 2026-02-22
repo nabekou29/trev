@@ -13,7 +13,6 @@ use crate::app::state::{
     AppContext,
     AppState,
 };
-use crate::watcher::SuppressGuard;
 use crate::file_op::executor::{
     FsOp,
     execute,
@@ -26,6 +25,7 @@ use crate::file_op::undo::{
     reverse_for_copy,
 };
 use crate::input::AppMode;
+use crate::watcher::SuppressGuard;
 
 /// Handle a file operation action.
 pub fn handle_file_op_action(
@@ -52,14 +52,13 @@ pub fn handle_file_op_action(
             state.selection.clear();
         }
         FileOpAction::CreateFile => {
-            if let Some(info) = state.tree_state.current_node_info() {
-                // If cursor is on a directory, create inside it. Otherwise, use parent.
-                let parent_dir = if info.is_dir {
-                    info.path
-                } else {
-                    info.path.parent().map_or_else(|| info.path.clone(), Path::to_path_buf)
-                };
-                state.mode = AppMode::Input(InputState::for_create(parent_dir));
+            if let Some(dir) = cursor_parent_dir(state) {
+                state.mode = AppMode::Input(InputState::for_create(dir));
+            }
+        }
+        FileOpAction::CreateDirectory => {
+            if let Some(dir) = cursor_parent_dir(state) {
+                state.mode = AppMode::Input(InputState::for_create_directory(dir));
             }
         }
         FileOpAction::Rename => {
@@ -118,10 +117,33 @@ pub fn handle_file_op_action(
         FileOpAction::Redo => {
             execute_redo(state, ctx);
         }
-        FileOpAction::CopyMenu => {
-            open_copy_menu(state);
+        FileOpAction::Copy(copy_action) => {
+            use crate::action::CopyAction;
+            match copy_action {
+                CopyAction::Menu => open_copy_menu(state),
+                CopyAction::AbsolutePath
+                | CopyAction::RelativePath
+                | CopyAction::FileName
+                | CopyAction::Stem
+                | CopyAction::ParentDir => {
+                    copy_direct(state, copy_action);
+                }
+            }
         }
     }
+}
+
+/// Get the parent directory for the cursor node.
+///
+/// If the cursor is on a directory, returns that directory.
+/// Otherwise, returns the parent directory of the file.
+fn cursor_parent_dir(state: &AppState) -> Option<PathBuf> {
+    let info = state.tree_state.current_node_info()?;
+    Some(if info.is_dir {
+        info.path
+    } else {
+        info.path.parent().map_or_else(|| info.path.clone(), Path::to_path_buf)
+    })
 }
 
 /// Build and open the copy-to-clipboard menu for the current cursor node.
@@ -144,18 +166,9 @@ fn open_copy_menu(state: &mut AppState) {
         .to_string_lossy()
         .to_string();
     let file_name = info.name.clone();
-    let stem = info
-        .path
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-    let parent_dir = info
-        .path
-        .parent()
-        .unwrap_or_else(|| Path::new(""))
-        .to_string_lossy()
-        .to_string();
+    let stem = info.path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+    let parent_dir =
+        info.path.parent().unwrap_or_else(|| Path::new("")).to_string_lossy().to_string();
 
     state.mode = AppMode::Menu(MenuState {
         title: "Copy to clipboard".to_string(),
@@ -168,7 +181,43 @@ fn open_copy_menu(state: &mut AppState) {
         ],
         cursor: 0,
         on_select: MenuAction::CopyToClipboard,
+        item_actions: Vec::new(),
     });
+}
+
+/// Copy a specific value to the clipboard directly (without opening the menu).
+fn copy_direct(state: &mut AppState, action: crate::action::CopyAction) {
+    use crate::action::CopyAction;
+
+    let Some(info) = state.tree_state.current_node_info() else {
+        return;
+    };
+
+    let (label, value) = match action {
+        CopyAction::AbsolutePath => ("absolute path", info.path.to_string_lossy().to_string()),
+        CopyAction::RelativePath => {
+            let rel = info
+                .path
+                .strip_prefix(state.tree_state.root_path())
+                .unwrap_or(&info.path)
+                .to_string_lossy()
+                .to_string();
+            ("relative path", rel)
+        }
+        CopyAction::FileName => ("file name", info.name),
+        CopyAction::Stem => {
+            let stem = info.path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            ("stem", stem)
+        }
+        CopyAction::ParentDir => {
+            let parent =
+                info.path.parent().unwrap_or_else(|| Path::new("")).to_string_lossy().to_string();
+            ("parent directory", parent)
+        }
+        CopyAction::Menu => return, // Handled separately.
+    };
+
+    super::input::copy_to_clipboard(state, label, &value);
 }
 
 /// Execute the confirmed delete operation.
@@ -291,6 +340,34 @@ pub fn execute_create(parent_dir: &Path, name: &str, state: &mut AppState, ctx: 
     }
 
     // Refresh the parent directory in the tree.
+    refresh_directory(state, parent_dir, ctx);
+}
+
+/// Execute directory creation.
+///
+/// Always creates a directory regardless of trailing slash.
+pub fn execute_create_directory(
+    parent_dir: &Path,
+    name: &str,
+    state: &mut AppState,
+    ctx: &AppContext,
+) {
+    let _guard = SuppressGuard::new(&ctx.suppressed);
+    let new_path = parent_dir.join(name);
+
+    let op = FsOp::CreateDir { path: new_path };
+
+    if let Err(e) = execute(&op) {
+        tracing::error!(%e, "failed to create directory");
+        return;
+    }
+
+    if let Some(undo_op) = build_undo_op(op) {
+        state
+            .undo_history
+            .push(OpGroup { description: format!("Create directory {name}"), ops: vec![undo_op] });
+    }
+
     refresh_directory(state, parent_dir, ctx);
 }
 

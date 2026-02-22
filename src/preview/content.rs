@@ -80,13 +80,11 @@ impl PreviewContent {
     /// All other variants are cloned successfully.
     pub fn try_clone(&self) -> Option<Self> {
         match self {
-            Self::HighlightedText { lines, language, truncated } => {
-                Some(Self::HighlightedText {
-                    lines: lines.clone(),
-                    language: language.clone(),
-                    truncated: *truncated,
-                })
-            }
+            Self::HighlightedText { lines, language, truncated } => Some(Self::HighlightedText {
+                lines: lines.clone(),
+                language: language.clone(),
+                truncated: *truncated,
+            }),
             Self::PlainText { lines, truncated } => {
                 Some(Self::PlainText { lines: lines.clone(), truncated: *truncated })
             }

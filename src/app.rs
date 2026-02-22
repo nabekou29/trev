@@ -10,11 +10,11 @@ use std::path::{
     Path,
     PathBuf,
 };
+use std::sync::atomic::AtomicBool;
 use std::sync::{
     Arc,
     RwLock,
 };
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -35,18 +35,14 @@ pub use state::*;
 
 use crate::cli::Args;
 use crate::config::Config;
+use crate::file_op::selection::SelectionBuffer;
+use crate::file_op::undo::UndoHistory;
 use crate::git::{
     GitState,
     GitStatusResult,
 };
-use crate::file_op::selection::SelectionBuffer;
-use crate::file_op::undo::UndoHistory;
-use crate::ipc::types::IpcCommand;
-use crate::ui::column::{
-    ColumnKind,
-    resolve_columns,
-};
 use crate::input::AppMode;
+use crate::ipc::types::IpcCommand;
 use crate::preview::cache::PreviewCache;
 use crate::preview::provider::{
     PreviewProvider,
@@ -60,6 +56,10 @@ use crate::preview::state::PreviewState;
 use crate::session;
 use crate::state::tree::TreeState;
 use crate::tree::builder::TreeBuilder;
+use crate::ui::column::{
+    ColumnKind,
+    resolve_columns,
+};
 use crate::watcher::FsWatcher;
 
 /// Async event channel receivers consumed by the main event loop.
@@ -83,7 +83,9 @@ struct EventReceivers {
 /// Must be called before entering the event loop. Handles config loading,
 /// tree construction, session restore, reveal, preview/watcher/IPC setup,
 /// and terminal initialization with scroll pre-centering.
-fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatui::DefaultTerminal)> {
+fn init_app(
+    args: &Args,
+) -> Result<(AppState, AppContext, EventReceivers, ratatui::DefaultTerminal)> {
     let _span = tracing::info_span!("init_app").entered();
 
     let (config, root_path) = load_config(args)?;
@@ -101,10 +103,14 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
         sort_order: config.sort.order.into(),
         sort_direction: config.sort.direction.into(),
         directories_first: config.sort.directories_first,
-        show_root: config.display.show_root,
+        show_root: config.display.show_root_entry,
     };
     let mut tree_state = TreeState::new(root, tree_options);
-    tree_state.apply_sort(tree_options.sort_order, tree_options.sort_direction, tree_options.directories_first);
+    tree_state.apply_sort(
+        tree_options.sort_order,
+        tree_options.sort_direction,
+        tree_options.directories_first,
+    );
 
     let (git_state, preview_registry) = detect_terminal_and_build_registry(&config)?;
     let show_preview = config.display.show_preview;
@@ -170,13 +176,20 @@ fn init_app(args: &Args) -> Result<(AppState, AppContext, EventReceivers, ratatu
         git_state: Arc::clone(&git_state),
         rebuild_generation: 0,
         columns,
-        layout_split: config.preview.split,
-        layout_narrow_split: config.preview.narrow_split,
-        layout_narrow_threshold: config.preview.narrow_threshold,
+        layout_split_ratio: config.preview.split_ratio,
+        layout_narrow_split_ratio: config.preview.narrow_split_ratio,
+        layout_narrow_width: config.preview.narrow_width,
     };
 
     let (ctx, channels) = build_context_and_channels(
-        &config, args, suppressed, ipc_server, git_enabled, &root_path, watcher_rx, ipc_rx,
+        &config,
+        args,
+        suppressed,
+        ipc_server,
+        git_enabled,
+        &root_path,
+        watcher_rx,
+        ipc_rx,
     );
 
     trigger_initial_loads(&mut state, &ctx, &root_path);
@@ -210,7 +223,7 @@ fn build_context_and_channels(
         children_tx,
         preview_tx,
         preview_config: config.preview.clone(),
-        file_op_config: config.file_operations,
+        file_op_config: config.file_op,
         keymap: KeyMap::from_config(&config.keybindings),
         suppressed,
         ipc_server,
@@ -219,6 +232,7 @@ fn build_context_and_channels(
         git_enabled,
         root_path: root_path.to_path_buf(),
         rebuild_tx,
+        menus: config.menus.clone(),
     };
 
     let channels = EventReceivers {
@@ -243,7 +257,7 @@ fn setup_terminal(state: &mut AppState, needs_center: bool) -> ratatui::DefaultT
     // Pre-compute viewport height and auto-hide preview on narrow terminals
     // before first draw, so session-restore / reveal can center without a flash.
     if let Ok((width, height)) = crossterm::terminal::size() {
-        if width <= state.layout_narrow_threshold {
+        if width <= state.layout_narrow_width {
             state.show_preview = false;
         }
         state.viewport_height = height.saturating_sub(1) as usize;
@@ -251,9 +265,7 @@ fn setup_terminal(state: &mut AppState, needs_center: bool) -> ratatui::DefaultT
 
     // Center scroll before first draw to prevent flash on session restore.
     if needs_center {
-        state
-            .scroll
-            .center_on_cursor(state.tree_state.cursor(), state.viewport_height);
+        state.scroll.center_on_cursor(state.tree_state.cursor(), state.viewport_height);
     }
 
     terminal
@@ -290,13 +302,7 @@ fn detect_terminal_and_build_registry(
 
 /// Trigger initial async operations: prefetch, git status, preview.
 fn trigger_initial_loads(state: &mut AppState, ctx: &AppContext, root_path: &Path) {
-    trigger_prefetch(
-        &mut state.tree_state,
-        root_path,
-        ctx,
-        state.show_hidden,
-        state.show_ignored,
-    );
+    trigger_prefetch(&mut state.tree_state, root_path, ctx, state.show_hidden, state.show_ignored);
     if ctx.git_enabled {
         trigger_git_status(ctx);
     }
@@ -357,9 +363,7 @@ pub async fn run(args: &Args) -> Result<()> {
                                 is_prefetch,
                             )
                             .entered();
-                            state
-                                .tree_state
-                                .set_children(&result.path, children, !is_prefetch);
+                            state.tree_state.set_children(&result.path, children, !is_prefetch);
                         }
 
                         // Prefetch child directories one level ahead (user-initiated loads only).
@@ -511,7 +515,7 @@ fn restore_session_if_needed(
     };
 
     let mut selection = SelectionBuffer::new();
-    let mut undo_history = UndoHistory::new(config.file_operations.undo_stack_size);
+    let mut undo_history = UndoHistory::new(config.file_op.undo_stack_size);
     let mut restored = false;
 
     if should_restore {
@@ -541,7 +545,7 @@ fn restore_session_if_needed(
                 undo_history = UndoHistory::from_stacks(
                     session_state.undo_stack,
                     session_state.redo_stack,
-                    config.file_operations.undo_stack_size,
+                    config.file_op.undo_stack_size,
                 );
 
                 restored = true;
@@ -620,10 +624,7 @@ fn emit_paths(paths: &[PathBuf], format: crate::cli::EmitFormat) {
             }
         }
         EmitFormat::Json => {
-            let json: Vec<&str> = paths
-                .iter()
-                .filter_map(|p| p.to_str())
-                .collect();
+            let json: Vec<&str> = paths.iter().filter_map(|p| p.to_str()).collect();
             if let Ok(output) = serde_json::to_string(&json) {
                 println!("{output}");
             }
@@ -638,10 +639,8 @@ fn emit_paths(paths: &[PathBuf], format: crate::cli::EmitFormat) {
 fn start_ipc_if_daemon(
     daemon: bool,
     root_path: &Path,
-) -> (
-    Option<Arc<crate::ipc::server::IpcServer>>,
-    tokio::sync::mpsc::UnboundedReceiver<IpcCommand>,
-) {
+) -> (Option<Arc<crate::ipc::server::IpcServer>>, tokio::sync::mpsc::UnboundedReceiver<IpcCommand>)
+{
     let (ipc_tx, ipc_rx) = tokio::sync::mpsc::unbounded_channel::<IpcCommand>();
     let server = if daemon {
         // Clean up stale sockets from crashed processes in the background.
@@ -805,10 +804,8 @@ fn process_watcher_events(
             state.preview_cache.invalidate_path(&event.path);
         }
 
-        let affected_dirs: HashSet<PathBuf> = events
-            .iter()
-            .filter_map(|event| event.path.parent().map(Path::to_path_buf))
-            .collect();
+        let affected_dirs: HashSet<PathBuf> =
+            events.iter().filter_map(|event| event.path.parent().map(Path::to_path_buf)).collect();
 
         for dir in &affected_dirs {
             if state.tree_state.handle_fs_change(dir) {

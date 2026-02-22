@@ -20,7 +20,7 @@ use crate::input::AppMode;
 /// Render the entire UI.
 ///
 /// Layout adapts to terminal width using configurable thresholds and split ratios
-/// from `AppState` (`layout_narrow_threshold`, `layout_split`, `layout_narrow_split`).
+/// from `AppState` (`layout_narrow_width`, `layout_split_ratio`, `layout_narrow_split_ratio`).
 ///
 /// - Wide (> threshold): horizontal split — tree | preview
 /// - Narrow (<= threshold): vertical split — tree / preview
@@ -40,20 +40,18 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     };
 
     if state.show_preview {
-        let is_narrow = main_area.width <= state.layout_narrow_threshold;
+        let is_narrow = main_area.width <= state.layout_narrow_width;
 
         let (direction, tree_pct) = if is_narrow {
-            (Direction::Vertical, state.layout_narrow_split)
+            (Direction::Vertical, state.layout_narrow_split_ratio)
         } else {
-            (Direction::Horizontal, state.layout_split)
+            (Direction::Horizontal, state.layout_split_ratio)
         };
         let preview_pct = 100_u16.saturating_sub(tree_pct);
         let constraints = [Constraint::Percentage(tree_pct), Constraint::Percentage(preview_pct)];
 
-        let content_chunks = Layout::default()
-            .direction(direction)
-            .constraints(constraints)
-            .split(main_area);
+        let content_chunks =
+            Layout::default().direction(direction).constraints(constraints).split(main_area);
 
         let Some(&tree_area) = content_chunks.first() else {
             return;

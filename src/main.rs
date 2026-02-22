@@ -52,24 +52,14 @@ async fn main() -> Result<()> {
             None
         };
 
-        tracing_subscriber::registry()
-            .with(fmt_layer)
-            .with(chrome_layer)
-            .init();
+        tracing_subscriber::registry().with(fmt_layer).with(chrome_layer).init();
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .init();
+        tracing_subscriber::fmt().with_env_filter(env_filter).init();
     }
 
     // Handle subcommands before entering TUI mode.
     match &args.command {
-        Some(trev::cli::Command::Ctl {
-            socket,
-            pid,
-            workspace,
-            action,
-        }) => {
+        Some(trev::cli::Command::Ctl { socket, pid, workspace, action }) => {
             return handle_ctl(action, socket.as_deref(), *pid, workspace.as_deref()).await;
         }
         Some(trev::cli::Command::SocketPath { workspace }) => {
@@ -211,16 +201,13 @@ fn find_socket(
                 return false;
             }
             // Filter by PID (from socket filename).
-            if !pid_str
-                .as_deref()
-                .is_none_or(|pid| stem.ends_with(&format!("-{pid}")))
-            {
+            if !pid_str.as_deref().is_none_or(|pid| stem.ends_with(&format!("-{pid}"))) {
                 return false;
             }
             // Filter by workspace (from metadata file).
             if let Some(ws) = workspace {
-                let workspace_path = trev::ipc::paths::read_meta(p)
-                    .map(|path| path.to_string_lossy().into_owned());
+                let workspace_path =
+                    trev::ipc::paths::read_meta(p).map(|path| path.to_string_lossy().into_owned());
                 return workspace_path.is_some_and(|path| path.contains(ws));
             }
             true
@@ -230,8 +217,6 @@ fn find_socket(
     match entries.len() {
         0 => bail!("no trev daemon found (try --socket, --pid, or --workspace to target)"),
         1 => Ok(entries.swap_remove(0)),
-        n => bail!(
-            "{n} trev daemons found; specify --socket, --pid, or --workspace to target one"
-        ),
+        n => bail!("{n} trev daemons found; specify --socket, --pid, or --workspace to target one"),
     }
 }

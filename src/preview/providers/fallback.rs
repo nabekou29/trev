@@ -64,9 +64,7 @@ impl PreviewProvider for FallbackProvider {
         // Special files (FIFOs, sockets, device nodes) — describe without opening.
         if !metadata.is_file() {
             let kind = describe_special_file(&metadata);
-            return Ok(PreviewContent::Error {
-                message: format!("Special file ({kind})"),
-            });
+            return Ok(PreviewContent::Error { message: format!("Special file ({kind})") });
         }
 
         let size = metadata.len();
@@ -206,10 +204,7 @@ mod tests {
         use std::os::unix::fs::FileTypeExt;
 
         let fifo_path = temp_dir.path().join("test.pipe");
-        std::process::Command::new("mkfifo")
-            .arg(&fifo_path)
-            .status()
-            .unwrap();
+        std::process::Command::new("mkfifo").arg(&fifo_path).status().unwrap();
 
         // Verify it's actually a FIFO.
         let meta = fs::metadata(&fifo_path).unwrap();
