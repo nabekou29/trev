@@ -49,13 +49,7 @@ impl ExternalCmdProvider {
     ) -> Self {
         let name = command.display_name().to_string();
         let command_found = Self::command_exists(&command.command);
-        Self {
-            name,
-            command,
-            timeout: Duration::from_secs(timeout_secs),
-            git_state,
-            command_found,
-        }
+        Self { name, command, timeout: Duration::from_secs(timeout_secs), git_state, command_found }
     }
 
     /// Check if a command exists in PATH.

@@ -91,6 +91,11 @@ mod tests {
             ),
             needs_redraw: false,
             dirty: true,
+            file_style_matcher: crate::ui::file_style::FileStyleMatcher::new(
+                &[],
+                &crate::config::CategoryStyles::default(),
+            )
+            .unwrap(),
         }
     }
 

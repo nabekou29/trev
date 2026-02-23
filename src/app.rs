@@ -19,7 +19,10 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{
+    Context as _,
+    Result,
+};
 use crossterm::event::Event;
 use handler::{
     handle_ipc_command,
@@ -86,6 +89,7 @@ struct EventReceivers {
 /// Must be called before entering the event loop. Handles config loading,
 /// tree construction, session restore, reveal, preview/watcher/IPC setup,
 /// and terminal initialization with scroll pre-centering.
+#[expect(clippy::too_many_lines, reason = "init_app is a single sequential setup flow")]
 fn init_app(
     args: &Args,
 ) -> Result<(AppState, AppContext, EventReceivers, ratatui::DefaultTerminal)> {
@@ -152,6 +156,13 @@ fn init_app(
         columns.retain(|c| c.kind != ColumnKind::GitStatus);
     }
 
+    // Compile file style matcher from display config.
+    let file_style_matcher = crate::ui::file_style::FileStyleMatcher::new(
+        &config.display.file_styles,
+        &config.display.styles,
+    )
+    .context("Failed to compile file style rules")?;
+
     // Create app state.
     let mut state = AppState {
         tree_state,
@@ -187,6 +198,7 @@ fn init_app(
         )),
         needs_redraw: false,
         dirty: true,
+        file_style_matcher,
     };
 
     let (ctx, channels) = build_context_and_channels(

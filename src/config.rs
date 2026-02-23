@@ -239,6 +239,315 @@ pub struct DisplayConfig {
     pub columns: Vec<crate::ui::column::ColumnKind>,
     /// Per-column options (e.g., format and mode for `modified_at`).
     pub column_options: crate::ui::column::ColumnOptionsConfig,
+    /// Category-based default styles (directory, symlink, gitignored, git status).
+    pub styles: CategoryStyles,
+    /// Per-file style rules matched by glob pattern (applied in order; later rules win).
+    #[serde(default)]
+    pub file_styles: Vec<FileStyleRule>,
+}
+
+/// Category-based default display styles.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct CategoryStyles {
+    /// Style for directory names.
+    pub directory: StyleConfig,
+    /// Style for symbolic link names.
+    pub symlink: StyleConfig,
+    /// Style for gitignored file names.
+    pub gitignored: StyleConfig,
+    /// Per-status styles for git-tracked files.
+    pub git_status: GitStatusStyles,
+}
+
+impl Default for CategoryStyles {
+    fn default() -> Self {
+        Self {
+            directory: StyleConfig {
+                fg: Some(ColorConfig(ratatui::style::Color::Blue)),
+                bold: true,
+                ..StyleConfig::default()
+            },
+            symlink: StyleConfig {
+                fg: Some(ColorConfig(ratatui::style::Color::Cyan)),
+                ..StyleConfig::default()
+            },
+            gitignored: StyleConfig {
+                fg: Some(ColorConfig(ratatui::style::Color::DarkGray)),
+                ..StyleConfig::default()
+            },
+            git_status: GitStatusStyles::default(),
+        }
+    }
+}
+
+/// Per-git-status display styles.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct GitStatusStyles {
+    /// Style for unstaged modifications.
+    pub modified: StyleConfig,
+    /// Style for staged-only changes.
+    pub staged: StyleConfig,
+    /// Style for staged changes with working tree modifications.
+    pub staged_modified: StyleConfig,
+    /// Style for newly added files.
+    pub added: StyleConfig,
+    /// Style for deleted files.
+    pub deleted: StyleConfig,
+    /// Style for renamed files.
+    pub renamed: StyleConfig,
+    /// Style for untracked files.
+    pub untracked: StyleConfig,
+    /// Style for conflicted files.
+    pub conflicted: StyleConfig,
+}
+
+impl Default for GitStatusStyles {
+    fn default() -> Self {
+        Self {
+            modified: StyleConfig {
+                fg: Some(ColorConfig(ratatui::style::Color::Yellow)),
+                ..StyleConfig::default()
+            },
+            staged: StyleConfig {
+                fg: Some(ColorConfig(ratatui::style::Color::Green)),
+                ..StyleConfig::default()
+            },
+            staged_modified: StyleConfig {
+                fg: Some(ColorConfig(ratatui::style::Color::Yellow)),
+                ..StyleConfig::default()
+            },
+            added: StyleConfig {
+                fg: Some(ColorConfig(ratatui::style::Color::Green)),
+                ..StyleConfig::default()
+            },
+            deleted: StyleConfig {
+                fg: Some(ColorConfig(ratatui::style::Color::Red)),
+                ..StyleConfig::default()
+            },
+            renamed: StyleConfig {
+                fg: Some(ColorConfig(ratatui::style::Color::Blue)),
+                ..StyleConfig::default()
+            },
+            untracked: StyleConfig {
+                fg: Some(ColorConfig(ratatui::style::Color::Magenta)),
+                ..StyleConfig::default()
+            },
+            conflicted: StyleConfig {
+                fg: Some(ColorConfig(ratatui::style::Color::Red)),
+                bold: true,
+                ..StyleConfig::default()
+            },
+        }
+    }
+}
+
+/// A per-file style rule: glob pattern(s) paired with a display style.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileStyleRule {
+    /// Glob pattern(s) to match against the file name.
+    ///
+    /// Accepts a single string (e.g., `"*.rs"`) or an array (e.g., `["*_test.go", "*_test.ts"]`).
+    #[serde(deserialize_with = "deserialize_one_or_many")]
+    pub pattern: Vec<String>,
+    /// Style to apply when any pattern matches.
+    pub style: StyleConfig,
+}
+
+impl JsonSchema for FileStyleRule {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("FileStyleRule")
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        use schemars::json_schema;
+
+        let pattern_schema = json_schema!({
+            "description": "A glob pattern or list of glob patterns",
+            "anyOf": [
+                { "type": "string" },
+                { "type": "array", "items": { "type": "string" } }
+            ]
+        });
+        let style_schema = generator.subschema_for::<StyleConfig>();
+
+        json_schema!({
+            "type": "object",
+            "properties": {
+                "pattern": pattern_schema,
+                "style": style_schema
+            },
+            "required": ["pattern", "style"]
+        })
+    }
+}
+
+/// Deserialize a value that can be either a single string or a list of strings.
+fn deserialize_one_or_many<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<String>, D::Error> {
+    use serde::de;
+
+    /// Visitor for deserializing a single string or a list of strings.
+    struct OneOrManyVisitor;
+
+    impl<'de> de::Visitor<'de> for OneOrManyVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a string or a list of strings")
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Vec<String>, E> {
+            Ok(vec![v.to_string()])
+        }
+
+        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<String>, A::Error> {
+            let mut vec = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+            while let Some(item) = seq.next_element()? {
+                vec.push(item);
+            }
+            Ok(vec)
+        }
+    }
+
+    deserializer.deserialize_any(OneOrManyVisitor)
+}
+
+
+/// Display style configuration for file names.
+///
+/// All fields are optional/defaulted so partial overrides work naturally in YAML.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "StyleConfig aggregates independent text modifier flags"
+)]
+pub struct StyleConfig {
+    /// Foreground color (named color or hex string like `"#D32F2F"`).
+    pub fg: Option<ColorConfig>,
+    /// Background color (named color or hex string like `"#D32F2F"`).
+    pub bg: Option<ColorConfig>,
+    /// Bold text modifier.
+    pub bold: bool,
+    /// Dim (reduced brightness) text modifier.
+    pub dim: bool,
+    /// Italic text modifier.
+    pub italic: bool,
+    /// Underlined text modifier.
+    pub underlined: bool,
+    /// Strikethrough text modifier.
+    pub crossed_out: bool,
+}
+
+/// A color value: named (e.g., `"red"`, `"blue"`) or hex (e.g., `"#D32F2F"`).
+#[derive(Debug, Clone, Copy)]
+pub struct ColorConfig(pub ratatui::style::Color);
+
+/// Named colors supported in configuration files.
+const NAMED_COLORS: &[(&str, ratatui::style::Color)] = &[
+    ("black", ratatui::style::Color::Black),
+    ("red", ratatui::style::Color::Red),
+    ("green", ratatui::style::Color::Green),
+    ("yellow", ratatui::style::Color::Yellow),
+    ("blue", ratatui::style::Color::Blue),
+    ("magenta", ratatui::style::Color::Magenta),
+    ("cyan", ratatui::style::Color::Cyan),
+    ("gray", ratatui::style::Color::Gray),
+    ("dark_gray", ratatui::style::Color::DarkGray),
+    ("light_red", ratatui::style::Color::LightRed),
+    ("light_green", ratatui::style::Color::LightGreen),
+    ("light_yellow", ratatui::style::Color::LightYellow),
+    ("light_blue", ratatui::style::Color::LightBlue),
+    ("light_magenta", ratatui::style::Color::LightMagenta),
+    ("light_cyan", ratatui::style::Color::LightCyan),
+    ("white", ratatui::style::Color::White),
+];
+
+impl Serialize for ColorConfig {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Try to serialize as a named color first, falling back to hex.
+        for &(name, color) in NAMED_COLORS {
+            if self.0 == color {
+                return serializer.serialize_str(name);
+            }
+        }
+        if let ratatui::style::Color::Rgb(r, g, b) = self.0 {
+            return serializer.serialize_str(&format!("#{r:02X}{g:02X}{b:02X}"));
+        }
+        serializer.serialize_str("white")
+    }
+}
+
+impl<'de> Deserialize<'de> for ColorConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de;
+
+        /// Visitor for deserializing `ColorConfig` from a named color or hex string.
+        struct ColorVisitor;
+
+        impl de::Visitor<'_> for ColorVisitor {
+            type Value = ColorConfig;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a named color (e.g. \"red\") or hex color (e.g. \"#D32F2F\")")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<ColorConfig, E> {
+                // Try named color first.
+                for &(name, color) in NAMED_COLORS {
+                    if v.eq_ignore_ascii_case(name) {
+                        return Ok(ColorConfig(color));
+                    }
+                }
+                // Try hex color.
+                let hex = v.strip_prefix('#').unwrap_or(v);
+                if hex.len() == 6 {
+                    let r = u8::from_str_radix(hex.get(..2).unwrap_or("ff"), 16);
+                    let g = u8::from_str_radix(hex.get(2..4).unwrap_or("ff"), 16);
+                    let b = u8::from_str_radix(hex.get(4..6).unwrap_or("ff"), 16);
+                    if let (Ok(r), Ok(g), Ok(b)) = (r, g, b) {
+                        return Ok(ColorConfig(ratatui::style::Color::Rgb(r, g, b)));
+                    }
+                }
+                let names: Vec<&str> = NAMED_COLORS.iter().map(|(n, _)| *n).collect();
+                Err(de::Error::custom(format!(
+                    "unknown color \"{v}\": expected a named color ({}) or hex (#RRGGBB)",
+                    names.join(", ")
+                )))
+            }
+        }
+
+        deserializer.deserialize_str(ColorVisitor)
+    }
+}
+
+impl JsonSchema for ColorConfig {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ColorConfig".into()
+    }
+
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "A color: named (red, blue, cyan, dark_gray, …) or hex (#RRGGBB)",
+            "anyOf": [
+                {
+                    "type": "string",
+                    "enum": [
+                        "black", "red", "green", "yellow", "blue", "magenta", "cyan", "gray",
+                        "dark_gray", "light_red", "light_green", "light_yellow", "light_blue",
+                        "light_magenta", "light_cyan", "white"
+                    ]
+                },
+                {
+                    "type": "string",
+                    "pattern": "^#[0-9a-fA-F]{6}$"
+                }
+            ]
+        })
+    }
 }
 
 /// Sort order variants.
@@ -535,6 +844,8 @@ impl Default for DisplayConfig {
             show_root_entry: false,
             columns: crate::ui::column::default_columns(),
             column_options: crate::ui::column::ColumnOptionsConfig::default(),
+            styles: CategoryStyles::default(),
+            file_styles: Vec::new(),
         }
     }
 }

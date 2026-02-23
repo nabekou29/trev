@@ -239,6 +239,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
+            is_ignored: false,
         }
     }
 
@@ -255,6 +256,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::Loaded(vec![]),
             is_expanded: false,
+            is_ignored: false,
         }
     }
 
@@ -315,6 +317,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::Loaded(inner_children),
             is_expanded: true,
+            is_ignored: false,
         };
 
         apply_sort_recursive(&mut parent, SortOrder::Name, SortDirection::Asc, false);

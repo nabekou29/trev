@@ -1,6 +1,7 @@
 //! UI layout and rendering.
 
 pub mod column;
+pub mod file_style;
 pub mod inline_input;
 pub mod modal;
 pub mod preview_view;

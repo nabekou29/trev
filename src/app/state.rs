@@ -99,6 +99,8 @@ pub struct AppState {
     /// Set to `true` when state changes (key events, async results, status expiry).
     /// The event loop skips `terminal.draw()` when `false`, reducing CPU usage at idle.
     pub dirty: bool,
+    /// Compiled file style matcher for per-file display customization.
+    pub file_style_matcher: crate::ui::file_style::FileStyleMatcher,
 }
 
 impl AppState {

@@ -13,6 +13,7 @@ use serde::{
 
 /// A file or directory node in the tree.
 #[derive(Debug, Clone)]
+#[expect(clippy::struct_excessive_bools, reason = "TreeNode uses bools for independent file flags")]
 pub struct TreeNode {
     /// File name (for display).
     pub name: String,
@@ -37,6 +38,8 @@ pub struct TreeNode {
     pub children: ChildrenState,
     /// Whether this directory is expanded (only meaningful for directories).
     pub is_expanded: bool,
+    /// Whether this file is gitignored (set only when `show_ignored` is true).
+    pub is_ignored: bool,
 }
 
 /// Loading state for a directory's children.
@@ -935,6 +938,7 @@ mod tests {
             symlink_target: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
+            is_ignored: false,
         }
     }
 
@@ -951,6 +955,7 @@ mod tests {
             symlink_target: None,
             children: ChildrenState::Loaded(children),
             is_expanded: false,
+            is_ignored: false,
         }
     }
 
@@ -967,6 +972,7 @@ mod tests {
             symlink_target: None,
             children: ChildrenState::Loaded(children),
             is_expanded: true,
+            is_ignored: false,
         }
     }
 
@@ -1065,6 +1071,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: true, // expanded but NotLoaded
+            is_ignored: false,
         };
         // Even though expanded, no children to show
         let state = state_with_children(vec![not_loaded_dir]);
@@ -1147,6 +1154,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
+            is_ignored: false,
         };
         let mut state = state_with_children(vec![subdir]);
 
@@ -1198,6 +1206,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
+            is_ignored: false,
         };
         state.set_children(&parent_path, vec![new_inner], true);
 
@@ -1261,6 +1270,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::Loading,
             is_expanded: true,
+            is_ignored: false,
         };
         let mut state = state_with_children(vec![subdir]);
 
@@ -1292,6 +1302,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::Loading,
             is_expanded: false, // collapsed (prefetch scenario)
+            is_ignored: false,
         };
         let mut state = state_with_children(vec![subdir]);
 
@@ -1321,6 +1332,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
+            is_ignored: false,
         };
         let subdir_b = TreeNode {
             name: "dir_b".to_string(),
@@ -1333,6 +1345,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
+            is_ignored: false,
         };
         let mut state = state_with_children(vec![subdir_a, subdir_b, file_node("file.txt", root)]);
 
@@ -1364,6 +1377,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::Loading,
             is_expanded: false,
+            is_ignored: false,
         };
         let mut state = state_with_children(vec![loaded_dir, loading_dir]);
 
@@ -1493,6 +1507,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
+            is_ignored: false,
         };
         let mut state = state_with_children(vec![subdir]);
         let result = state.expand_or_open();
@@ -1661,6 +1676,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
+            is_ignored: false,
         };
         let mut state = state_with_children(vec![subdir]);
         assert_that!(state.handle_fs_change(&root.join("subdir")), eq(false));
@@ -1750,6 +1766,7 @@ mod tests {
             symlink_target: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
+            is_ignored: false,
         }
     }
 

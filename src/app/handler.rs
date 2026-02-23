@@ -403,6 +403,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
+            is_ignored: false,
         };
         let root_node = TreeNode {
             name: "root".to_string(),
@@ -415,6 +416,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::Loaded(vec![child]),
             is_expanded: true,
+            is_ignored: false,
         };
         let mut state = TreeState::new(root_node, TreeOptions::default());
         state.move_cursor_to(0);
@@ -434,6 +436,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::NotLoaded,
             is_expanded: false,
+            is_ignored: false,
         };
         let root_node = TreeNode {
             name: "root".to_string(),
@@ -446,6 +449,7 @@ mod tests {
             recursive_max_mtime: None,
             children: ChildrenState::Loaded(vec![child]),
             is_expanded: true,
+            is_ignored: false,
         };
         let mut state = TreeState::new(root_node, TreeOptions::default());
         state.move_cursor_to(0);

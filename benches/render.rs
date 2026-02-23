@@ -42,6 +42,7 @@ fn file_node(name: &str, parent: &Path) -> TreeNode {
         recursive_max_mtime: None,
         children: ChildrenState::NotLoaded,
         is_expanded: false,
+        is_ignored: false,
     }
 }
 
@@ -58,6 +59,7 @@ fn dir_node(name: &str, parent: &Path, children: Vec<TreeNode>) -> TreeNode {
         recursive_max_mtime: None,
         children: ChildrenState::Loaded(children),
         is_expanded: false,
+        is_ignored: false,
     }
 }
 
@@ -94,6 +96,11 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
         pending_keys: trev::app::PendingKeys::new(std::time::Duration::from_millis(500)),
         needs_redraw: false,
         dirty: true,
+        file_style_matcher: trev::ui::file_style::FileStyleMatcher::new(
+            &[],
+            &trev::config::CategoryStyles::default(),
+        )
+        .unwrap(),
     }
 }
 
@@ -110,6 +117,7 @@ fn tree_with_children(children: Vec<TreeNode>) -> TreeState {
         recursive_max_mtime: None,
         children: ChildrenState::Loaded(children),
         is_expanded: true,
+        is_ignored: false,
     };
     TreeState::new(root, TreeOptions::default())
 }

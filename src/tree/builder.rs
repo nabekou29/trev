@@ -63,12 +63,38 @@ impl TreeBuilder {
             recursive_max_mtime,
             children: ChildrenState::Loaded(children),
             is_expanded: true,
+            is_ignored: false,
         })
     }
 
     /// Load immediate children of a directory (depth=1).
+    ///
+    /// When `show_ignored` is true, performs a two-pass walk to detect gitignored entries:
+    /// first with gitignore enabled (to collect visible paths), then without (to build all
+    /// children with `is_ignored` set).
     pub fn load_children(&self, dir_path: &Path) -> Result<Vec<TreeNode>> {
         let _span = tracing::info_span!("load_children", dir_path = %dir_path.display()).entered();
+
+        // When showing ignored files, first collect the non-ignored path set.
+        let non_ignored_paths = if self.show_ignored {
+            let mut set = std::collections::HashSet::new();
+            let strict_walker = ignore::WalkBuilder::new(dir_path)
+                .max_depth(Some(1))
+                .hidden(!self.show_hidden)
+                .git_ignore(true)
+                .git_global(true)
+                .git_exclude(true)
+                .build();
+            for entry in strict_walker.flatten() {
+                if entry.path() != dir_path {
+                    set.insert(entry.into_path());
+                }
+            }
+            Some(set)
+        } else {
+            None
+        };
+
         let mut children = Vec::new();
 
         let walker = ignore::WalkBuilder::new(dir_path)
@@ -114,6 +140,8 @@ impl TreeBuilder {
                 None
             };
 
+            let is_ignored = non_ignored_paths.as_ref().is_some_and(|set| !set.contains(path));
+
             children.push(TreeNode {
                 name,
                 path: path.to_path_buf(),
@@ -125,6 +153,7 @@ impl TreeBuilder {
                 recursive_max_mtime: None,
                 children: ChildrenState::NotLoaded,
                 is_expanded: false,
+                is_ignored,
             });
         }
 

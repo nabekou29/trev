@@ -24,7 +24,6 @@ use crate::state::tree::{
 use crate::ui::column::{
     ColumnKind,
     MtimeMode,
-    ResolvedColumn,
     format_mtime,
     format_size,
     mtime_color,
@@ -119,7 +118,7 @@ fn build_row_spans<'a>(
     push_name_and_columns(
         &mut spans,
         vnode,
-        &state.columns,
+        state,
         git_status,
         area_width,
         left_prefix_width,
@@ -136,7 +135,7 @@ fn push_icon_span(spans: &mut Vec<Span<'_>>, vnode: &VisibleNode<'_>) {
         spans.push(Span::styled(format!("{folder_icon} "), Style::default().fg(Color::Blue)));
     } else {
         let icon = devicons::icon_for_file(&vnode.node.path, &None);
-        let icon_color = parse_hex_color(icon.color);
+        let icon_color = crate::ui::file_style::parse_hex_color(icon.color);
         spans.push(Span::styled(format!("{} ", icon.icon), Style::default().fg(icon_color)));
     }
 }
@@ -145,7 +144,7 @@ fn push_icon_span(spans: &mut Vec<Span<'_>>, vnode: &VisibleNode<'_>) {
 fn push_name_and_columns(
     spans: &mut Vec<Span<'_>>,
     vnode: &VisibleNode<'_>,
-    columns: &[ResolvedColumn],
+    state: &AppState,
     git_status: Option<GitFileStatus>,
     area_width: usize,
     left_prefix_width: usize,
@@ -172,7 +171,13 @@ fn push_name_and_columns(
 
     let name_width = area_width.saturating_sub(left_prefix_width + columns_width);
     let truncated_name = truncate_to_width(&full_name, name_width);
-    let name_style = resolve_name_style(vnode.node.is_dir, git_status);
+    let name_style = state.file_style_matcher.resolve_style(
+        name,
+        vnode.node.is_dir,
+        vnode.node.is_symlink,
+        vnode.node.is_ignored,
+        git_status,
+    );
 
     // Split truncated name into styled segments: filename vs suffix.
     let name_display_len = unicode_width::UnicodeWidthStr::width(name.as_str());
@@ -194,7 +199,7 @@ fn push_name_and_columns(
     }
 
     // Render metadata columns.
-    for col in columns {
+    for col in &state.columns {
         spans.push(Span::raw(" "));
         match col.kind {
             ColumnKind::Size => {
@@ -220,19 +225,6 @@ fn push_name_and_columns(
             }
         }
     }
-}
-
-/// Resolve the display style for a filename.
-///
-/// Priority (highest wins): git status color → default color.
-fn resolve_name_style(is_dir: bool, git_status: Option<GitFileStatus>) -> Style {
-    let base = if is_dir {
-        Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-
-    if is_dir { base } else { git_status.map_or(base, |status| base.fg(status.color())) }
 }
 
 /// Resolve the git status for a node (file or directory).
@@ -291,28 +283,6 @@ fn render_input_overlay(
             crate::ui::inline_input::render_inline_input(frame, input_area, input);
         }
     }
-}
-
-/// Parse a hex color string (e.g., "#D32F2F") into a ratatui `Color`.
-///
-/// Falls back to `Color::White` if the string cannot be parsed.
-fn parse_hex_color(hex: &str) -> Color {
-    let hex = hex.trim_start_matches('#');
-    if hex.len() != 6 {
-        return Color::White;
-    }
-
-    let Ok(r) = u8::from_str_radix(hex.get(..2).unwrap_or("ff"), 16) else {
-        return Color::White;
-    };
-    let Ok(g) = u8::from_str_radix(hex.get(2..4).unwrap_or("ff"), 16) else {
-        return Color::White;
-    };
-    let Ok(b) = u8::from_str_radix(hex.get(4..6).unwrap_or("ff"), 16) else {
-        return Color::White;
-    };
-
-    Color::Rgb(r, g, b)
 }
 
 #[cfg(test)]
