@@ -94,6 +94,11 @@ pub struct AppState {
     pub pending_keys: PendingKeys,
     /// Whether the terminal needs a full redraw (e.g. after shell command execution).
     pub needs_redraw: bool,
+    /// Whether the UI is dirty and needs to be redrawn.
+    ///
+    /// Set to `true` when state changes (key events, async results, status expiry).
+    /// The event loop skips `terminal.draw()` when `false`, reducing CPU usage at idle.
+    pub dirty: bool,
 }
 
 impl AppState {
@@ -103,9 +108,14 @@ impl AppState {
     }
 
     /// Clear the status message if it has expired.
-    pub fn clear_expired_status(&mut self) {
+    ///
+    /// Returns `true` if a message was actually cleared (UI needs redraw).
+    pub fn clear_expired_status(&mut self) -> bool {
         if self.status_message.as_ref().is_some_and(StatusMessage::is_expired) {
             self.status_message = None;
+            true
+        } else {
+            false
         }
     }
 }
@@ -131,6 +141,13 @@ impl StatusMessage {
     /// Whether the message has expired.
     pub fn is_expired(&self) -> bool {
         self.created_at.elapsed() >= Self::DURATION
+    }
+
+    /// Time remaining until the message expires.
+    ///
+    /// Returns `Duration::ZERO` if already expired.
+    pub fn remaining(&self) -> Duration {
+        Self::DURATION.saturating_sub(self.created_at.elapsed())
     }
 }
 

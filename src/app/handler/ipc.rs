@@ -90,6 +90,7 @@ mod tests {
                 std::time::Duration::from_millis(500),
             ),
             needs_redraw: false,
+            dirty: true,
         }
     }
 

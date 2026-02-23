@@ -36,6 +36,8 @@ pub struct ExternalCmdProvider {
     timeout: Duration,
     /// Shared git repository state for `git_status` condition filtering.
     git_state: Arc<RwLock<Option<GitState>>>,
+    /// Whether the command binary exists in PATH (checked once at construction).
+    command_found: bool,
 }
 
 impl ExternalCmdProvider {
@@ -46,7 +48,14 @@ impl ExternalCmdProvider {
         git_state: Arc<RwLock<Option<GitState>>>,
     ) -> Self {
         let name = command.display_name().to_string();
-        Self { name, command, timeout: Duration::from_secs(timeout_secs), git_state }
+        let command_found = Self::command_exists(&command.command);
+        Self {
+            name,
+            command,
+            timeout: Duration::from_secs(timeout_secs),
+            git_state,
+            command_found,
+        }
     }
 
     /// Check if a command exists in PATH.
@@ -70,7 +79,7 @@ impl PreviewProvider for ExternalCmdProvider {
     }
 
     fn can_handle(&self, path: &Path, is_dir: bool) -> bool {
-        if !Self::command_exists(&self.command.command) {
+        if !self.command_found {
             return false;
         }
 

@@ -186,6 +186,7 @@ fn init_app(
             config.keybindings.key_sequence_timeout_ms,
         )),
         needs_redraw: false,
+        dirty: true,
     };
 
     let (ctx, channels) = build_context_and_channels(
@@ -318,17 +319,21 @@ fn trigger_initial_loads(state: &mut AppState, ctx: &AppContext, root_path: &Pat
 
 /// Process all async channel results: children loads, watcher, IPC, git, rebuild, preview.
 ///
-/// Returns the updated `last_cursor` value (may change when preview is triggered).
+/// Returns `(last_cursor, had_events)` — the updated cursor position and whether
+/// any channel produced results (indicating the UI may need a redraw).
 fn process_async_events(
     state: &mut AppState,
     ctx: &AppContext,
     channels: &mut EventReceivers,
     mut last_cursor: usize,
-) -> usize {
+) -> (usize, bool) {
+    let mut had_events = false;
+
     // Receive async children load results.
     {
         let _span = tracing::info_span!("process_children").entered();
         while let Ok(result) = channels.children.try_recv() {
+            had_events = true;
             match result.children {
                 Ok(children) => {
                     let loaded_path = result.path.clone();
@@ -367,16 +372,20 @@ fn process_async_events(
     // Receive watcher events (file system changes in watched directories).
     {
         let _span = tracing::info_span!("process_watcher").entered();
-        process_watcher_events(&mut channels.watcher, state, ctx);
+        if process_watcher_events(&mut channels.watcher, state, ctx) {
+            had_events = true;
+        }
     }
 
     // Receive IPC commands.
     while let Ok(cmd) = channels.ipc.try_recv() {
+        had_events = true;
         handle_ipc_command(cmd, state);
     }
 
     // Receive async git status results.
     while let Ok(result) = channels.git.try_recv() {
+        had_events = true;
         if let Ok(mut guard) = state.git_state.write() {
             *guard = result.state;
         }
@@ -384,12 +393,16 @@ fn process_async_events(
     }
 
     // Receive async tree rebuild results.
-    process_rebuild_results(&mut channels.rebuild, state, ctx);
+    if process_rebuild_results(&mut channels.rebuild, state, ctx) {
+        had_events = true;
+    }
 
     // Receive async preview load results.
     {
         let _span = tracing::info_span!("process_preview").entered();
-        process_preview_results(&mut channels.preview, state);
+        if process_preview_results(&mut channels.preview, state) {
+            had_events = true;
+        }
     }
 
     // Trigger preview when cursor changes.
@@ -401,7 +414,8 @@ fn process_async_events(
         }
     }
 
-    last_cursor
+    tracing::debug!(had_events, "async events processed");
+    (last_cursor, had_events)
 }
 
 /// Run the application.
@@ -415,37 +429,54 @@ pub async fn run(args: &Args) -> Result<()> {
     terminal.draw(|frame| {
         crate::ui::render(frame, &mut state);
     })?;
+    state.dirty = false;
 
     // Main event loop.
     //
-    // Order: poll → drain key events → process async results → preview → scroll → draw.
-    // When keys are pending (multi-key sequence), the poll timeout is shortened
-    // to the remaining sequence timeout so fallback actions fire promptly.
+    // Order: poll → drain key events → process async results → scroll → draw.
+    // The dirty flag tracks whether the UI needs a redraw. When dirty, poll
+    // uses a short timeout (16ms ≈ 60 FPS). When idle, poll uses a longer
+    // timeout (up to 500ms) to reduce CPU usage.
     loop {
-        let _frame_span = tracing::info_span!("frame").entered();
-
         // Clear expired status messages.
-        state.clear_expired_status();
+        if state.clear_expired_status() {
+            state.dirty = true;
+        }
 
         // Check pending key timeout before polling.
         if state.pending_keys.is_pending() && state.pending_keys.is_timed_out() {
             handler::handle_pending_timeout(&mut state, &ctx);
+            state.dirty = true;
         }
 
-        // Poll timeout: shorter when keys are pending so timeout fires quickly.
-        let poll_duration = if state.pending_keys.is_pending() {
-            state.pending_keys.remaining().min(Duration::from_millis(50))
+        // Poll timeout: zero when dirty (redraw immediately after draining events),
+        // short when keys are pending, long when idle.
+        let poll_duration = if state.dirty {
+            Duration::ZERO
+        } else if state.pending_keys.is_pending() {
+            state.pending_keys.remaining().min(Duration::from_millis(16))
+        } else if let Some(remaining) = state.status_message.as_ref().map(StatusMessage::remaining)
+        {
+            remaining.min(Duration::from_millis(500))
         } else {
-            Duration::from_millis(50)
+            Duration::from_millis(500)
         };
+
+        // Wait for terminal events (poll is outside the frame span so idle
+        // wait time doesn't inflate frame duration in traces).
+        let has_terminal_event = crossterm::event::poll(poll_duration)?;
+
+        // Frame span starts after poll — measures only actual processing + draw.
+        let _frame_span = tracing::info_span!("frame", dirty = state.dirty).entered();
 
         // Drain key events. Break early if a key enters pending state
         // (need to render the pending indicator and wait for timeout).
-        if crossterm::event::poll(poll_duration)? {
+        if has_terminal_event {
             let _span = tracing::info_span!("key_event").entered();
             loop {
                 if let Event::Key(key) = crossterm::event::read()? {
                     handle_key_event(key, &mut state, &ctx);
+                    state.dirty = true;
                     if state.pending_keys.is_pending() {
                         break;
                     }
@@ -457,27 +488,41 @@ pub async fn run(args: &Args) -> Result<()> {
         }
 
         // Process all async channel results.
-        last_cursor = process_async_events(&mut state, &ctx, &mut channels, last_cursor);
+        let had_events;
+        (last_cursor, had_events) =
+            process_async_events(&mut state, &ctx, &mut channels, last_cursor);
+        if had_events {
+            state.dirty = true;
+        }
 
-        // Update scroll position.
+        // Update scroll position (only dirty if offset actually changed).
+        let old_offset = state.scroll.offset();
         state.scroll.clamp_to_cursor(state.tree_state.cursor(), state.viewport_height);
+        if state.scroll.offset() != old_offset {
+            state.dirty = true;
+        }
 
         if state.should_quit {
             break;
         }
 
-        // Force full redraw after shell command execution (alternate screen re-enter).
-        if state.needs_redraw {
-            state.needs_redraw = false;
-            terminal.clear()?;
-        }
+        // Draw UI only when dirty or needing a full redraw.
+        if state.dirty || state.needs_redraw {
+            // Force full redraw after shell command execution (alternate screen re-enter).
+            if state.needs_redraw {
+                state.needs_redraw = false;
+                terminal.clear()?;
+            }
 
-        // Draw UI (once per frame, after all events are processed).
-        {
-            let _span = tracing::info_span!("draw").entered();
-            terminal.draw(|frame| {
-                crate::ui::render(frame, &mut state);
-            })?;
+            {
+                let _span = tracing::info_span!("draw").entered();
+                terminal.draw(|frame| {
+                    crate::ui::render(frame, &mut state);
+                })?;
+            }
+            state.dirty = false;
+        } else {
+            tracing::trace!("frame skipped (not dirty)");
         }
     }
 
@@ -716,8 +761,10 @@ fn start_ipc_if_daemon(
 fn process_preview_results(
     preview_rx: &mut tokio::sync::mpsc::Receiver<PreviewLoadResult>,
     state: &mut AppState,
-) {
+) -> bool {
+    let mut had_results = false;
     while let Ok(result) = preview_rx.try_recv() {
+        had_results = true;
         let is_prefetch = result.prefetch;
         // Store in cache (skip non-cloneable Image content).
         if let Some(cloned) = result.content.try_clone() {
@@ -746,6 +793,7 @@ fn process_preview_results(
             state.preview_state.set_content(result.content);
         }
     }
+    had_results
 }
 
 /// Process async tree rebuild results: swap tree and re-trigger prefetch/preview.
@@ -755,7 +803,8 @@ fn process_rebuild_results(
     rebuild_rx: &mut tokio::sync::mpsc::Receiver<TreeRebuildResult>,
     state: &mut AppState,
     ctx: &AppContext,
-) {
+) -> bool {
+    let mut had_results = false;
     while let Ok(result) = rebuild_rx.try_recv() {
         if result.generation != state.rebuild_generation {
             tracing::debug!(
@@ -765,6 +814,7 @@ fn process_rebuild_results(
             );
             continue;
         }
+        had_results = true;
         state.tree_state = result.tree_state;
         // Restore scroll so the cursor stays at the same visual row.
         // Clamp offset so we don't scroll past the end of the tree
@@ -786,6 +836,7 @@ fn process_rebuild_results(
         }
         tracing::info!("tree rebuild applied");
     }
+    had_results
 }
 
 /// Trigger an async git status fetch in the background.
@@ -837,8 +888,10 @@ fn process_watcher_events(
     >,
     state: &mut AppState,
     ctx: &AppContext,
-) {
+) -> bool {
+    let mut had_events = false;
     while let Ok(events) = watcher_rx.try_recv() {
+        had_events = true;
         // Invalidate preview cache for changed files.
         for event in &events {
             tracing::debug!(path = %event.path.display(), "preview cache invalidated (fs change)");
@@ -859,4 +912,5 @@ fn process_watcher_events(
             trigger_git_status(ctx);
         }
     }
+    had_events
 }
