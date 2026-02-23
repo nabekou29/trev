@@ -183,7 +183,7 @@ fn init_app(
     let (ipc_server, ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
 
     // Restore session and clean up expired sessions.
-    let (selection, undo_history, session_restored) = {
+    let (selection, undo_history, restored_scroll_offset) = {
         let _span = tracing::info_span!("session_restore").entered();
         restore_session_if_needed(args, &config, &root_path, builder, &mut tree_state)
     };
@@ -268,7 +268,9 @@ fn init_app(
 
     let terminal = {
         let _span = tracing::info_span!("terminal_setup").entered();
-        setup_terminal(&mut state, session_restored || reveal_succeeded)
+        // Reveal overrides session scroll: always center on the revealed path.
+        let restored_offset = if reveal_succeeded { None } else { restored_scroll_offset };
+        setup_terminal(&mut state, restored_offset)
     };
 
     Ok((state, ctx, channels, terminal))
@@ -327,13 +329,17 @@ fn build_context_and_channels(
 
 /// Initialize terminal and pre-compute viewport dimensions.
 ///
-/// Auto-hides preview on narrow terminals and centers scroll
-/// when restoring a session or revealing a path.
-fn setup_terminal(state: &mut AppState, needs_center: bool) -> ratatui::DefaultTerminal {
+/// Auto-hides preview on narrow terminals and restores scroll position.
+/// `restored_offset` is `Some(offset)` when a session had a saved scroll
+/// position, or `None` to center the cursor (reveal, old session, fresh start).
+fn setup_terminal(
+    state: &mut AppState,
+    restored_offset: Option<usize>,
+) -> ratatui::DefaultTerminal {
     let terminal = crate::terminal::init();
 
     // Pre-compute viewport height and auto-hide preview on narrow terminals
-    // before first draw, so session-restore / reveal can center without a flash.
+    // before first draw, so scroll restore can work without a flash.
     if let Ok((width, height)) = crossterm::terminal::size() {
         if width <= state.layout_narrow_width {
             state.show_preview = false;
@@ -341,9 +347,15 @@ fn setup_terminal(state: &mut AppState, needs_center: bool) -> ratatui::DefaultT
         state.viewport_height = height.saturating_sub(1) as usize;
     }
 
-    // Center scroll before first draw to prevent flash on session restore.
-    if needs_center {
-        state.scroll.center_on_cursor(state.tree_state.cursor(), state.viewport_height);
+    // Restore scroll position before first draw.
+    match restored_offset {
+        Some(offset) => {
+            state.scroll.set_offset(offset);
+            state.scroll.clamp_to_cursor(state.tree_state.cursor(), state.viewport_height);
+        }
+        None => {
+            state.scroll.center_on_cursor(state.tree_state.cursor(), state.viewport_height);
+        }
     }
 
     terminal
@@ -686,15 +698,17 @@ fn build_preview_registry(
 
 /// Restore session state and schedule expired session cleanup.
 ///
-/// Returns `(selection, undo_history, restored)` where `restored` is true
-/// when a session was successfully restored (caller should center scroll).
+/// Returns `(selection, undo_history, restored_scroll_offset)`.
+///
+/// `restored_scroll_offset` is `Some(offset)` when a session with a saved
+/// scroll position was restored, or `None` otherwise.
 fn restore_session_if_needed(
     args: &Args,
     config: &Config,
     root_path: &Path,
     builder: TreeBuilder,
     tree_state: &mut TreeState,
-) -> (SelectionBuffer, UndoHistory, bool) {
+) -> (SelectionBuffer, UndoHistory, Option<usize>) {
     let should_restore = if args.restore {
         true
     } else if args.no_restore {
@@ -705,7 +719,7 @@ fn restore_session_if_needed(
 
     let mut selection = SelectionBuffer::new();
     let mut undo_history = UndoHistory::new(config.file_op.undo_stack_size);
-    let mut restored = false;
+    let mut restored_scroll_offset = None;
 
     if should_restore {
         match session::restore(root_path) {
@@ -737,7 +751,7 @@ fn restore_session_if_needed(
                     config.file_op.undo_stack_size,
                 );
 
-                restored = true;
+                restored_scroll_offset = session_state.scroll_offset;
                 tracing::info!("session restored");
             }
             Ok(None) => {
@@ -759,7 +773,7 @@ fn restore_session_if_needed(
         }
     });
 
-    (selection, undo_history, restored)
+    (selection, undo_history, restored_scroll_offset)
 }
 
 /// Save session, restore terminal, and output emit paths.
@@ -771,6 +785,7 @@ fn shutdown(root_path: &Path, state: &AppState, args: &Args) {
         state.tree_state.cursor_path(),
         &state.selection,
         &state.undo_history,
+        state.scroll.offset(),
     );
     if let Err(e) = session::save(&session_state) {
         tracing::warn!(%e, "failed to save session");

@@ -39,17 +39,26 @@ pub struct SessionState {
     /// Last access timestamp (for expiry cleanup).
     pub last_accessed: SystemTime,
     /// Paths of expanded directories.
+    #[serde(default)]
     pub expanded_paths: Vec<PathBuf>,
     /// Path the cursor was on (more robust than index).
+    #[serde(default)]
     pub cursor_path: Option<PathBuf>,
     /// Selection buffer paths.
+    #[serde(default)]
     pub selection_paths: Vec<PathBuf>,
     /// Selection buffer mode.
+    #[serde(default)]
     pub selection_mode: Option<SelectionMode>,
     /// Undo stack.
+    #[serde(default)]
     pub undo_stack: Vec<OpGroup>,
     /// Redo stack.
+    #[serde(default)]
     pub redo_stack: Vec<OpGroup>,
+    /// Scroll offset (first visible row) for viewport restoration.
+    #[serde(default)]
+    pub scroll_offset: Option<usize>,
 }
 
 /// Get the session storage directory path.
@@ -96,6 +105,7 @@ pub fn build_session_state(
     cursor_path: Option<PathBuf>,
     selection: &SelectionBuffer,
     undo_history: &UndoHistory,
+    scroll_offset: usize,
 ) -> SessionState {
     let (selection_paths, selection_mode) = selection.export();
     let (undo_stack, redo_stack) = undo_history.export_stacks();
@@ -109,6 +119,7 @@ pub fn build_session_state(
         selection_mode: selection_mode.copied(),
         undo_stack,
         redo_stack,
+        scroll_offset: Some(scroll_offset),
     }
 }
 
@@ -231,6 +242,7 @@ mod tests {
             selection_mode: Some(SelectionMode::Copy),
             undo_stack: vec![],
             redo_stack: vec![],
+            scroll_offset: None,
         };
 
         save(&state).unwrap();
@@ -263,6 +275,7 @@ mod tests {
             selection_mode: None,
             undo_stack: vec![],
             redo_stack: vec![],
+            scroll_offset: None,
         };
 
         save(&state).unwrap();
@@ -286,13 +299,15 @@ mod tests {
 
         let undo = UndoHistory::new(10);
 
-        let state = build_session_state(root, expanded.clone(), cursor.clone(), &selection, &undo);
+        let state =
+            build_session_state(root, expanded.clone(), cursor.clone(), &selection, &undo, 42);
 
         assert_eq!(state.root_path, root);
         assert_eq!(state.expanded_paths, expanded);
         assert_eq!(state.cursor_path, cursor);
         assert_eq!(state.selection_mode, Some(SelectionMode::Cut));
         assert_that!(state.selection_paths.len(), eq(1));
+        assert_eq!(state.scroll_offset, Some(42));
     }
 
     /// Write a session file directly into a custom directory for isolated testing.
@@ -326,6 +341,7 @@ mod tests {
             selection_mode: None,
             undo_stack: vec![],
             redo_stack: vec![],
+            scroll_offset: None,
         };
 
         let file_path = save_session_in(&session_dir, &state);
@@ -351,6 +367,7 @@ mod tests {
             selection_mode: None,
             undo_stack: vec![],
             redo_stack: vec![],
+            scroll_offset: None,
         };
 
         let file_path = save_session_in(&session_dir, &state);
@@ -360,5 +377,25 @@ mod tests {
         let deleted = cleanup_expired_in(&session_dir, 90).unwrap();
         assert_that!(deleted, eq(0));
         assert!(file_path.exists());
+    }
+
+    #[rstest]
+    fn restore_deserializes_minimal_session_with_only_required_fields() {
+        // JSON with only the two required fields — all #[serde(default)] fields omitted.
+        let json = r#"{
+            "root_path": "/test/minimal",
+            "last_accessed": { "secs_since_epoch": 1700000000, "nanos_since_epoch": 0 }
+        }"#;
+
+        let state: SessionState = serde_json::from_str(json).unwrap();
+
+        assert_eq!(state.root_path, PathBuf::from("/test/minimal"));
+        assert!(state.expanded_paths.is_empty());
+        assert!(state.cursor_path.is_none());
+        assert!(state.selection_paths.is_empty());
+        assert!(state.selection_mode.is_none());
+        assert!(state.undo_stack.is_empty());
+        assert!(state.redo_stack.is_empty());
+        assert!(state.scroll_offset.is_none());
     }
 }
