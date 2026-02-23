@@ -161,7 +161,7 @@ mod tests {
         dir
     }
 
-    // --- US1 Tests ---
+    // --- TreeBuilder tests ---
 
     #[rstest]
     fn test_build_returns_root_with_children_subdirs_not_loaded() -> Result<()> {

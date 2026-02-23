@@ -262,7 +262,7 @@ mod tests {
         nodes.iter().map(|n| n.name.as_str()).collect()
     }
 
-    // --- US3 Tests ---
+    // --- Sort order tests ---
 
     #[rstest]
     fn test_sort_name_asc_case_insensitive() -> Result<()> {
@@ -339,7 +339,7 @@ mod tests {
     }
 
     // =========================================================================
-    // T004: decompose_name tests
+    // --- decompose_name tests ---
     // =========================================================================
 
     #[rstest]
@@ -367,7 +367,7 @@ mod tests {
     }
 
     // =========================================================================
-    // T005: compare_natural tests
+    // --- compare_natural tests ---
     // =========================================================================
 
     #[rstest]
@@ -420,7 +420,7 @@ mod tests {
     }
 
     // =========================================================================
-    // T006: SortOrder::Smart integration tests
+    // --- SortOrder::Smart integration tests ---
     // =========================================================================
 
     #[rstest]

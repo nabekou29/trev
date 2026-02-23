@@ -670,7 +670,7 @@ mod tests {
 
     use super::*;
 
-    // --- T002: config_dir respects XDG_CONFIG_HOME ---
+    // --- config_dir respects XDG_CONFIG_HOME ---
 
     #[rstest]
     fn config_dir_uses_xdg_config_home() {
@@ -678,7 +678,7 @@ mod tests {
         assert_eq!(dir, PathBuf::from("/tmp/xdg_test/trev"));
     }
 
-    // --- T003: config_dir falls back to ~/.config/trev ---
+    // --- config_dir falls back to ~/.config/trev ---
 
     #[rstest]
     fn config_dir_falls_back_to_home_config() {
@@ -687,7 +687,7 @@ mod tests {
         assert_eq!(dir, home.join(".config/trev"));
     }
 
-    // --- T003b: config_dir falls back to "." when no home dir ---
+    // --- config_dir falls back to "." when no home dir ---
 
     #[rstest]
     fn config_dir_falls_back_to_dot_when_no_home() {
@@ -695,7 +695,7 @@ mod tests {
         assert_eq!(dir, PathBuf::from("./.config/trev"));
     }
 
-    // --- T004: missing config file returns default ---
+    // --- missing config file returns default ---
 
     #[rstest]
     fn load_missing_file_returns_default() {
@@ -708,7 +708,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // --- T005: empty config file applies all defaults ---
+    // --- empty config file applies all defaults ---
 
     #[rstest]
     fn empty_config_applies_defaults() {
@@ -735,7 +735,7 @@ mod tests {
         assert_that!(result.config.sort.order, eq(SortOrder::Smart));
     }
 
-    // --- T006: valid YAML deserializes correctly ---
+    // --- valid YAML deserializes correctly ---
 
     #[rstest]
     fn valid_yaml_deserializes_all_fields() {
@@ -785,7 +785,7 @@ preview:
         assert!(result.warnings.is_empty());
     }
 
-    // --- T007: unknown keys produce warnings ---
+    // --- unknown keys produce warnings ---
 
     #[rstest]
     fn unknown_keys_produce_warnings() {
@@ -817,7 +817,7 @@ display:
         assert!(result.warnings.iter().any(|w| w.contains("typo_key")));
     }
 
-    // --- T008: syntax error includes file path and line info ---
+    // --- syntax error includes file path and line info ---
 
     #[rstest]
     fn syntax_error_includes_file_path() {
@@ -835,7 +835,7 @@ display:
         );
     }
 
-    // --- T009: permission error returns error ---
+    // --- permission error returns error ---
 
     #[rstest]
     #[cfg(unix)]
@@ -858,7 +858,7 @@ display:
         std::fs::set_permissions(&path, perms).unwrap();
     }
 
-    // --- T016: apply_cli_overrides sort order ---
+    // --- apply_cli_overrides sort order ---
 
     #[rstest]
     fn cli_override_sort_order() {
@@ -869,7 +869,7 @@ display:
         assert_that!(config.sort.order, eq(SortOrder::Size));
     }
 
-    // --- T017: apply_cli_overrides no-preview ---
+    // --- apply_cli_overrides no-preview ---
 
     #[rstest]
     fn cli_override_no_preview() {
@@ -882,7 +882,7 @@ display:
         assert_that!(config.display.show_preview, eq(false));
     }
 
-    // --- T018: unset CLI args preserve config values ---
+    // --- unset CLI args preserve config values ---
 
     #[rstest]
     fn unset_cli_args_preserve_config() {
@@ -898,7 +898,7 @@ display:
         assert_that!(config.display.show_preview, eq(false));
     }
 
-    // --- T037: apply_cli_overrides with --no-git ---
+    // --- apply_cli_overrides with --no-git ---
 
     #[rstest]
     fn cli_override_no_git_disables_git() {
@@ -978,7 +978,7 @@ preview:
         assert!(result.warnings.is_empty());
     }
 
-    // --- T019: apply_cli_overrides show-ignored ---
+    // --- apply_cli_overrides show-ignored ---
 
     #[rstest]
     fn cli_override_show_ignored() {
@@ -1180,7 +1180,7 @@ keybindings:
         }
     }
 
-    // --- T011: GitConfig defaults and deserialization ---
+    // --- GitConfig defaults and deserialization ---
 
     #[rstest]
     fn git_config_defaults_to_enabled() {
@@ -1208,7 +1208,7 @@ keybindings:
         assert_that!(result.config.git.enabled, eq(false));
     }
 
-    // --- T030: ExternalCommand deserialization with git_status ---
+    // --- ExternalCommand deserialization with git_status ---
 
     #[rstest]
     fn external_command_git_status_from_yaml() {
@@ -1423,7 +1423,7 @@ preview:
         assert_that!(result.config.preview.cache_size, eq(50));
     }
 
-    // --- T036: MenuDefinition and MenuItemDef deserialization ---
+    // --- MenuDefinition and MenuItemDef deserialization ---
 
     #[rstest]
     fn menu_definition_from_yaml() {
@@ -1508,7 +1508,7 @@ menus:
         assert!(result.config.menus.contains_key("tools"));
     }
 
-    // --- T037: KeyBindingEntry with menu field ---
+    // --- KeyBindingEntry with menu field ---
 
     #[rstest]
     fn keybinding_entry_with_menu_field() {
@@ -1536,7 +1536,7 @@ keybindings:
         assert!(bindings[0].notify.is_none());
     }
 
-    // --- T036/T037: Schema includes menus section ---
+    // --- Schema includes menus section ---
 
     #[rstest]
     fn schema_contains_menus_section() {

@@ -323,7 +323,7 @@ mod tests {
 
     use super::*;
 
-    // --- T012: git_status_indicator ---
+    // --- git_status_indicator ---
 
     #[rstest]
     #[case(GitFileStatus::Modified, 'M', Color::Yellow)]

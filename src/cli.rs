@@ -214,7 +214,7 @@ mod tests {
 
     use super::*;
 
-    // --- T036: --no-git CLI flag parsing ---
+    // --- --no-git CLI flag parsing ---
 
     #[rstest]
     fn no_git_flag_defaults_to_false() {

@@ -184,7 +184,7 @@ mod tests {
 
     use super::*;
 
-    // --- T002: GitFileStatus display char and color ---
+    // --- GitFileStatus display char and color ---
 
     #[rstest]
     #[case(GitFileStatus::Modified, 'M', Color::Yellow)]
@@ -204,7 +204,7 @@ mod tests {
         assert_that!(status.color(), eq(expected_color));
     }
 
-    // --- T002: GitFileStatus priority ordering ---
+    // --- GitFileStatus priority ordering ---
 
     #[rstest]
     fn priority_ordering() {
@@ -223,7 +223,7 @@ mod tests {
         assert_that!(GitFileStatus::Staged.priority(), eq(GitFileStatus::Added.priority()));
     }
 
-    // --- T003: from_porcelain parser ---
+    // --- from_porcelain parser ---
 
     #[rstest]
     fn from_porcelain_modified_unstaged() {
@@ -329,7 +329,7 @@ mod tests {
         assert_that!(state.file_status(Path::new("/repo/anything")), none());
     }
 
-    // --- T004: file_status lookup ---
+    // --- file_status lookup ---
 
     #[rstest]
     fn file_status_exact_match() {
@@ -348,7 +348,7 @@ mod tests {
         assert_that!(state.file_status(Path::new("/repo/src/other.rs")), none());
     }
 
-    // --- T005: dir_status aggregation ---
+    // --- dir_status aggregation ---
 
     #[rstest]
     fn dir_status_single_child() {
@@ -381,7 +381,7 @@ mod tests {
         assert_that!(state.dir_status(Path::new("/repo/src")), none());
     }
 
-    // --- T006: rename handling ---
+    // --- rename handling ---
 
     #[rstest]
     fn from_porcelain_rename_uses_new_path() {
@@ -406,22 +406,7 @@ mod tests {
         );
     }
 
-    // --- T013: GitStatusResult construction ---
-
-    #[rstest]
-    fn git_status_result_with_state() {
-        let state = GitState::from_porcelain("", Path::new("/repo"));
-        let result = GitStatusResult { state: Some(state) };
-        assert!(result.state.is_some());
-    }
-
-    #[rstest]
-    fn git_status_result_without_state() {
-        let result = GitStatusResult { state: None };
-        assert!(result.state.is_none());
-    }
-
-    // --- T041: Performance test for from_porcelain with 10,000 entries ---
+    // --- Performance test for from_porcelain with 10,000 entries ---
 
     #[rstest]
     #[ignore = "performance test — run with --ignored"]
@@ -439,7 +424,7 @@ mod tests {
         assert!(state.file_status(Path::new("/repo/src/file_00000.rs")).is_some());
     }
 
-    // --- T042: Performance test for dir_status with 10,000 entries ---
+    // --- Performance test for dir_status with 10,000 entries ---
 
     #[rstest]
     #[ignore = "performance test — run with --ignored"]

@@ -508,7 +508,7 @@ mod tests {
         assert_that!(result.as_str(), eq("echo hello"));
     }
 
-    // --- T039: resolve_menu_item_action ---
+    // --- resolve_menu_item_action ---
 
     #[rstest]
     fn resolve_menu_item_action_with_action() {
@@ -599,7 +599,7 @@ mod tests {
         assert_that!(result.unwrap().to_string().as_str(), eq("quit"));
     }
 
-    // --- T039: handle_open_menu builds MenuState in config order ---
+    // --- handle_open_menu builds MenuState in config order ---
 
     /// Build a `MenuDefinition` with items in a specific order.
     fn sample_menu_definition() -> crate::config::MenuDefinition {

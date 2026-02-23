@@ -325,7 +325,7 @@ mod tests {
         assert_that!(provider.can_handle(&PathBuf::from("/some/dir"), true), eq(true));
     }
 
-    // --- T031: can_handle with git_status condition ---
+    // --- can_handle with git_status condition ---
 
     #[rstest]
     fn can_handle_git_status_matches() {
