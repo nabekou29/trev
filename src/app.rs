@@ -73,6 +73,11 @@ use crate::ui::column::{
 use crate::watcher::FsWatcher;
 
 /// Async event channel receivers consumed by the main event loop.
+///
+/// Each channel has a corresponding `pre_*` field that holds the single
+/// item consumed by `tokio::select!` when it wakes on that branch.
+/// The `drain_*` methods yield the pre-received item (if any) followed
+/// by all remaining items via `try_recv`.
 struct EventReceivers {
     /// Directory children load results.
     children: tokio::sync::mpsc::Receiver<ChildrenLoadResult>,
@@ -86,27 +91,49 @@ struct EventReceivers {
     watcher: tokio::sync::mpsc::UnboundedReceiver<Vec<notify_debouncer_mini::DebouncedEvent>>,
     /// IPC commands from connected editors.
     ipc: tokio::sync::mpsc::UnboundedReceiver<IpcCommand>,
+
+    // Pre-received items from `tokio::select!` (one per wake).
+    /// Pre-received children load result.
+    pre_children: Option<ChildrenLoadResult>,
+    /// Pre-received preview load result.
+    pre_preview: Option<PreviewLoadResult>,
+    /// Pre-received git status result.
+    pre_git: Option<GitStatusResult>,
+    /// Pre-received tree rebuild result.
+    pre_rebuild: Option<TreeRebuildResult>,
+    /// Pre-received watcher events.
+    pre_watcher: Option<Vec<notify_debouncer_mini::DebouncedEvent>>,
+    /// Pre-received IPC command.
+    pre_ipc: Option<IpcCommand>,
 }
 
-/// Events consumed by `tokio::select!` that must be processed before draining.
-///
-/// When `select!` wakes on a channel branch, it consumes one message.
-/// This struct carries that pre-received message so `process_async_events`
-/// can process it alongside the remaining `try_recv` drain.
-#[derive(Default)]
-struct PreReceivedEvents {
-    /// Pre-received children load result.
-    children: Option<ChildrenLoadResult>,
-    /// Pre-received preview load result.
-    preview: Option<PreviewLoadResult>,
-    /// Pre-received git status result.
-    git: Option<GitStatusResult>,
-    /// Pre-received tree rebuild result.
-    rebuild: Option<TreeRebuildResult>,
-    /// Pre-received watcher events.
-    watcher: Option<Vec<notify_debouncer_mini::DebouncedEvent>>,
-    /// Pre-received IPC command.
-    ipc: Option<IpcCommand>,
+/// Generate a drain method that yields `pre_$field.take()` then `$field.try_recv()` items.
+macro_rules! impl_drain {
+    ($method:ident, $pre:ident, $rx:ident, $T:ty) => {
+        /// Drain this channel: pre-received item (if any) + all pending `try_recv` items.
+        fn $method(&mut self) -> impl Iterator<Item = $T> + use<'_> {
+            self.$pre.take().into_iter().chain(std::iter::from_fn(|| self.$rx.try_recv().ok()))
+        }
+    };
+}
+
+impl EventReceivers {
+    /// Clear all pre-received items, preparing for the next `tokio::select!` cycle.
+    fn clear_pre(&mut self) {
+        self.pre_children = None;
+        self.pre_preview = None;
+        self.pre_git = None;
+        self.pre_rebuild = None;
+        self.pre_watcher = None;
+        self.pre_ipc = None;
+    }
+
+    impl_drain!(drain_children, pre_children, children, ChildrenLoadResult);
+    impl_drain!(drain_preview, pre_preview, preview, PreviewLoadResult);
+    impl_drain!(drain_git, pre_git, git, GitStatusResult);
+    impl_drain!(drain_rebuild, pre_rebuild, rebuild, TreeRebuildResult);
+    impl_drain!(drain_watcher, pre_watcher, watcher, Vec<notify_debouncer_mini::DebouncedEvent>);
+    impl_drain!(drain_ipc, pre_ipc, ipc, IpcCommand);
 }
 
 /// Initialize all application state, context, channels, and terminal.
@@ -287,6 +314,12 @@ fn build_context_and_channels(
         rebuild: rebuild_rx,
         watcher: watcher_rx,
         ipc: ipc_rx,
+        pre_children: None,
+        pre_preview: None,
+        pre_git: None,
+        pre_rebuild: None,
+        pre_watcher: None,
+        pre_ipc: None,
     };
 
     (ctx, channels)
@@ -356,25 +389,20 @@ fn trigger_initial_loads(state: &mut AppState, ctx: &AppContext, root_path: &Pat
 
 /// Process all async channel results: children loads, watcher, IPC, git, rebuild, preview.
 ///
-/// Returns `(last_cursor, had_events)` — the updated cursor position and whether
+/// Returns `(last_cursor, had_events)` -- the updated cursor position and whether
 /// any channel produced results (indicating the UI may need a redraw).
 fn process_async_events(
     state: &mut AppState,
     ctx: &AppContext,
     channels: &mut EventReceivers,
     mut last_cursor: usize,
-    pre: PreReceivedEvents,
 ) -> (usize, bool) {
     let mut had_events = false;
 
-    // Receive async children load results.
+    // Children load results.
     {
         let _span = tracing::info_span!("process_children").entered();
-        for result in pre
-            .children
-            .into_iter()
-            .chain(std::iter::from_fn(|| channels.children.try_recv().ok()))
-        {
+        for result in channels.drain_children() {
             had_events = true;
             match result.children {
                 Ok(children) => {
@@ -411,30 +439,22 @@ fn process_async_events(
         }
     }
 
-    // Receive watcher events (file system changes in watched directories).
+    // Watcher events (file system changes in watched directories).
     {
         let _span = tracing::info_span!("process_watcher").entered();
-        if process_watcher_events(&mut channels.watcher, state, ctx, pre.watcher) {
+        if process_watcher_events(channels.drain_watcher(), state, ctx) {
             had_events = true;
         }
     }
 
-    // Receive IPC commands.
-    for cmd in pre
-        .ipc
-        .into_iter()
-        .chain(std::iter::from_fn(|| channels.ipc.try_recv().ok()))
-    {
+    // IPC commands.
+    for cmd in channels.drain_ipc() {
         had_events = true;
         handle_ipc_command(cmd, state);
     }
 
-    // Receive async git status results.
-    for result in pre
-        .git
-        .into_iter()
-        .chain(std::iter::from_fn(|| channels.git.try_recv().ok()))
-    {
+    // Git status results.
+    for result in channels.drain_git() {
         had_events = true;
         if let Ok(mut guard) = state.git_state.write() {
             *guard = result.state;
@@ -442,15 +462,15 @@ fn process_async_events(
         tracing::debug!("git status updated");
     }
 
-    // Receive async tree rebuild results.
-    if process_rebuild_results(&mut channels.rebuild, state, ctx, pre.rebuild) {
+    // Tree rebuild results.
+    if process_rebuild_results(channels.drain_rebuild(), state, ctx) {
         had_events = true;
     }
 
-    // Receive async preview load results.
+    // Preview load results.
     {
         let _span = tracing::info_span!("process_preview").entered();
-        if process_preview_results(&mut channels.preview, state, pre.preview) {
+        if process_preview_results(channels.drain_preview(), state) {
             had_events = true;
         }
     }
@@ -540,7 +560,7 @@ pub async fn run(args: &Args) -> Result<()> {
         tokio::pin!(timeout);
 
         let mut got_terminal_event = false;
-        let mut pre = PreReceivedEvents::default();
+        channels.clear_pre();
 
         tokio::select! {
             biased;
@@ -560,12 +580,12 @@ pub async fn run(args: &Args) -> Result<()> {
                 }
             }
 
-            Some(v) = channels.children.recv() => { pre.children = Some(v); }
-            Some(v) = channels.preview.recv()  => { pre.preview = Some(v); }
-            Some(v) = channels.git.recv()      => { pre.git = Some(v); }
-            Some(v) = channels.rebuild.recv()  => { pre.rebuild = Some(v); }
-            Some(v) = channels.watcher.recv()  => { pre.watcher = Some(v); }
-            Some(v) = channels.ipc.recv()      => { pre.ipc = Some(v); }
+            Some(v) = channels.children.recv() => { channels.pre_children = Some(v); }
+            Some(v) = channels.preview.recv()  => { channels.pre_preview = Some(v); }
+            Some(v) = channels.git.recv()      => { channels.pre_git = Some(v); }
+            Some(v) = channels.rebuild.recv()  => { channels.pre_rebuild = Some(v); }
+            Some(v) = channels.watcher.recv()  => { channels.pre_watcher = Some(v); }
+            Some(v) = channels.ipc.recv()      => { channels.pre_ipc = Some(v); }
 
             () = &mut timeout => {}
         }
@@ -580,7 +600,7 @@ pub async fn run(args: &Args) -> Result<()> {
         // ── Drain async channels (including pre-received) ──────
         let had_events;
         (last_cursor, had_events) =
-            process_async_events(&mut state, &ctx, &mut channels, last_cursor, pre);
+            process_async_events(&mut state, &ctx, &mut channels, last_cursor);
         if had_events {
             state.dirty = true;
         }
@@ -842,15 +862,11 @@ fn start_ipc_if_daemon(
 
 /// Process async preview load results: cache and display.
 fn process_preview_results(
-    preview_rx: &mut tokio::sync::mpsc::Receiver<PreviewLoadResult>,
+    results: impl Iterator<Item = PreviewLoadResult>,
     state: &mut AppState,
-    pre_received: Option<PreviewLoadResult>,
 ) -> bool {
     let mut had_results = false;
-    for result in pre_received
-        .into_iter()
-        .chain(std::iter::from_fn(|| preview_rx.try_recv().ok()))
-    {
+    for result in results {
         had_results = true;
         let is_prefetch = result.prefetch;
         // Store in cache (skip non-cloneable Image content).
@@ -887,16 +903,12 @@ fn process_preview_results(
 ///
 /// Discards stale results from superseded rebuilds using the generation counter.
 fn process_rebuild_results(
-    rebuild_rx: &mut tokio::sync::mpsc::Receiver<TreeRebuildResult>,
+    results: impl Iterator<Item = TreeRebuildResult>,
     state: &mut AppState,
     ctx: &AppContext,
-    pre_received: Option<TreeRebuildResult>,
 ) -> bool {
     let mut had_results = false;
-    for result in pre_received
-        .into_iter()
-        .chain(std::iter::from_fn(|| rebuild_rx.try_recv().ok()))
-    {
+    for result in results {
         if result.generation != state.rebuild_generation {
             tracing::debug!(
                 expected = state.rebuild_generation,
@@ -974,18 +986,12 @@ fn fetch_git_status(root: &Path) -> GitStatusResult {
 
 /// Process pending file system watcher events and refresh affected directories.
 fn process_watcher_events(
-    watcher_rx: &mut tokio::sync::mpsc::UnboundedReceiver<
-        Vec<notify_debouncer_mini::DebouncedEvent>,
-    >,
+    batches: impl Iterator<Item = Vec<notify_debouncer_mini::DebouncedEvent>>,
     state: &mut AppState,
     ctx: &AppContext,
-    pre_received: Option<Vec<notify_debouncer_mini::DebouncedEvent>>,
 ) -> bool {
     let mut had_events = false;
-    for events in pre_received
-        .into_iter()
-        .chain(std::iter::from_fn(|| watcher_rx.try_recv().ok()))
-    {
+    for events in batches {
         had_events = true;
         // Invalidate preview cache for changed files.
         for event in &events {
