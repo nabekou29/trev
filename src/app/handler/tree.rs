@@ -539,11 +539,12 @@ fn spawn_load_children(
 pub fn refresh_directory(state: &AppState, dir: &Path, ctx: &AppContext) {
     // Spawn reload without invalidating: old children remain visible until
     // set_children() replaces them with the fresh listing.
+    // Use prefetch=true to preserve the current expansion state (don't force re-expand).
     spawn_load_children(
         &ctx.children_tx,
         dir.to_path_buf(),
         state.show_hidden,
         state.show_ignored,
-        false,
+        true,
     );
 }
