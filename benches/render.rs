@@ -102,6 +102,7 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
         )
         .unwrap(),
         preview_debounce: None,
+        layout_areas: trev::app::LayoutAreas::default(),
     }
 }
 

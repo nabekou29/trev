@@ -34,6 +34,8 @@ pub struct Config {
     pub session: SessionConfig,
     /// File system watcher settings.
     pub watcher: WatcherConfig,
+    /// Mouse settings.
+    pub mouse: MouseConfig,
     /// Keybinding customization.
     pub keybindings: KeybindingConfig,
     /// Git integration settings.
@@ -859,6 +861,20 @@ pub struct GitConfig {
 }
 
 impl Default for GitConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Mouse input configuration.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct MouseConfig {
+    /// Whether mouse support (click, scroll wheel) is enabled.
+    pub enabled: bool,
+}
+
+impl Default for MouseConfig {
     fn default() -> Self {
         Self { enabled: true }
     }

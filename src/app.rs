@@ -34,6 +34,7 @@ use futures_util::StreamExt as _;
 use handler::{
     handle_ipc_command,
     handle_key_event,
+    handle_mouse_event,
     refresh_directory,
     trigger_prefetch,
     trigger_preview,
@@ -255,6 +256,7 @@ fn init_app(
         dirty: true,
         file_style_matcher,
         preview_debounce: None,
+        layout_areas: LayoutAreas::default(),
     };
 
     let (ctx, channels) = build_context_and_channels(
@@ -274,7 +276,7 @@ fn init_app(
         let _span = tracing::info_span!("terminal_setup").entered();
         // Reveal overrides session scroll: always center on the revealed path.
         let restored_offset = if reveal_succeeded { None } else { restored_scroll_offset };
-        setup_terminal(&mut state, restored_offset)
+        setup_terminal(&mut state, restored_offset, config.mouse.enabled)
     };
 
     Ok((state, ctx, channels, terminal))
@@ -339,8 +341,9 @@ fn build_context_and_channels(
 fn setup_terminal(
     state: &mut AppState,
     restored_offset: Option<usize>,
+    mouse: bool,
 ) -> ratatui::DefaultTerminal {
-    let terminal = crate::terminal::init();
+    let terminal = crate::terminal::init(mouse);
 
     // Pre-compute viewport height and auto-hide preview on narrow terminals
     // before first draw, so scroll restore can work without a flash.
@@ -539,12 +542,19 @@ fn drain_terminal_events(state: &mut AppState, ctx: &AppContext) -> Result<()> {
         if !crossterm::event::poll(Duration::ZERO)? {
             break;
         }
-        if let Event::Key(key) = crossterm::event::read()? {
-            handle_key_event(key, state, ctx);
-            state.dirty = true;
-            if state.pending_keys.is_pending() {
-                break;
+        match crossterm::event::read()? {
+            Event::Key(key) => {
+                handle_key_event(key, state, ctx);
+                state.dirty = true;
+                if state.pending_keys.is_pending() {
+                    break;
+                }
             }
+            Event::Mouse(mouse) => {
+                handle_mouse_event(mouse, state, ctx);
+                state.dirty = true;
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -596,6 +606,10 @@ pub async fn run(args: &Args) -> Result<()> {
                     Some(Ok(Event::Key(key))) => {
                         got_terminal_event = true;
                         handle_key_event(key, &mut state, &ctx);
+                        state.dirty = true;
+                    }
+                    Some(Ok(Event::Mouse(mouse))) => {
+                        handle_mouse_event(mouse, &mut state, &ctx);
                         state.dirty = true;
                     }
                     Some(Ok(_)) => {}

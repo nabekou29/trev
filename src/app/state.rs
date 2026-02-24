@@ -9,6 +9,8 @@ use std::time::{
     Instant,
 };
 
+use ratatui::layout::Rect;
+
 use super::keymap::KeyMap;
 use super::pending_keys::PendingKeys;
 use crate::config::{
@@ -106,6 +108,20 @@ pub struct AppState {
     /// When set, a preview load is waiting to fire after the cursor settles.
     /// Resets on each cursor change to avoid loading during rapid navigation.
     pub preview_debounce: Option<Instant>,
+    /// Cached layout areas from the last render for mouse hit-testing.
+    pub layout_areas: LayoutAreas,
+}
+
+/// Cached layout areas from the last render, used for mouse hit-testing.
+///
+/// Stores the tree and preview panel rectangles so the mouse event handler
+/// can determine which panel a click or scroll event targets.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LayoutAreas {
+    /// The tree view area.
+    pub tree_area: Rect,
+    /// The preview area (zero-sized when preview is off).
+    pub preview_area: Rect,
 }
 
 impl AppState {

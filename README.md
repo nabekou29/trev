@@ -70,20 +70,20 @@ trev schema               # Print config JSON Schema
 
 ### Navigation
 
-| Key           | Action                            |
-| ------------- | --------------------------------- |
-| `j` / `Down`  | Move down                         |
-| `k` / `Up`    | Move up                           |
-| `l` / `Right` | Expand                            |
-| `h` / `Left`  | Collapse                          |
-| `Enter`       | Change root (on directory)        |
-| `Backspace`   | Go to parent directory            |
-| `g`           | Jump to first                     |
-| `G`           | Jump to last                      |
-| `Ctrl+d`      | Half page down                    |
-| `Ctrl+u`      | Half page up                      |
-| `zz`          | Center cursor in viewport         |
-| `zt`          | Scroll cursor to top of viewport  |
+| Key           | Action                              |
+| ------------- | ----------------------------------- |
+| `j` / `Down`  | Move down                           |
+| `k` / `Up`    | Move up                             |
+| `l` / `Right` | Expand                              |
+| `h` / `Left`  | Collapse                            |
+| `Enter`       | Change root (on directory)          |
+| `Backspace`   | Go to parent directory              |
+| `g`           | Jump to first                       |
+| `G`           | Jump to last                        |
+| `Ctrl+d`      | Half page down                      |
+| `Ctrl+u`      | Half page up                        |
+| `zz`          | Center cursor in viewport           |
+| `zt`          | Scroll cursor to top of viewport    |
 | `zb`          | Scroll cursor to bottom of viewport |
 
 ### Preview
@@ -203,6 +203,9 @@ watcher:
 
 git:
   enabled: true
+
+mouse:
+  enabled: true # Enable mouse support (click, scroll wheel)
 
 keybindings:
   key_sequence_timeout_ms: 500 # Timeout for multi-key sequences (ms)

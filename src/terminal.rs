@@ -3,6 +3,8 @@
 use std::io::stdout;
 
 use crossterm::event::{
+    DisableMouseCapture,
+    EnableMouseCapture,
     KeyboardEnhancementFlags,
     PopKeyboardEnhancementFlags,
     PushKeyboardEnhancementFlags,
@@ -15,8 +17,14 @@ use ratatui::DefaultTerminal;
 /// that restores the terminal before printing the panic message.
 /// Also enables keyboard enhancement (Kitty protocol) if the terminal supports it,
 /// so that modified keys like Shift+Enter can be distinguished.
-pub fn init() -> DefaultTerminal {
+/// When `mouse` is true, enables mouse capture for click and scroll wheel events.
+pub fn init(mouse: bool) -> DefaultTerminal {
     let terminal = ratatui::init();
+
+    if mouse {
+        // Enable mouse capture for click and scroll wheel events.
+        let _ = crossterm::execute!(stdout(), EnableMouseCapture);
+    }
 
     // Enable keyboard enhancement for Shift+Enter etc.
     // Silently ignored if the terminal does not support it.
@@ -30,8 +38,10 @@ pub fn init() -> DefaultTerminal {
 
 /// Restore the terminal to its original state.
 ///
-/// Disables raw mode, leaves the alternate screen, and pops keyboard enhancement.
+/// Disables raw mode, leaves the alternate screen, pops keyboard enhancement,
+/// and disables mouse capture (safe to call even if mouse was never enabled).
 pub fn restore() {
     let _ = crossterm::execute!(stdout(), PopKeyboardEnhancementFlags);
+    let _ = crossterm::execute!(stdout(), DisableMouseCapture);
     ratatui::restore();
 }

@@ -3,6 +3,7 @@
 mod file_op;
 mod input;
 pub mod ipc;
+mod mouse;
 pub(super) mod preview;
 mod tree;
 
@@ -16,6 +17,7 @@ use input::{
     handle_menu_mode_key,
 };
 pub use ipc::handle_ipc_command;
+pub use mouse::handle_mouse_event;
 use preview::handle_preview_action;
 pub use preview::trigger_preview;
 use tree::handle_tree_action;
@@ -253,6 +255,8 @@ fn handle_shell_action(cmd: &str, state: &mut AppState) {
     use std::io::Write;
 
     use crossterm::event::{
+        DisableMouseCapture,
+        EnableMouseCapture,
         KeyboardEnhancementFlags,
         PopKeyboardEnhancementFlags,
         PushKeyboardEnhancementFlags,
@@ -262,6 +266,7 @@ fn handle_shell_action(cmd: &str, state: &mut AppState) {
 
     // Suspend TUI.
     let _ = crossterm::execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
+    let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     let _ = crossterm::terminal::disable_raw_mode();
     let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
 
@@ -286,6 +291,7 @@ fn handle_shell_action(cmd: &str, state: &mut AppState) {
     // Resume TUI.
     let _ = crossterm::terminal::enable_raw_mode();
     let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen);
+    let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     let _ = crossterm::execute!(
         std::io::stdout(),
         PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
