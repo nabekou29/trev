@@ -101,6 +101,7 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
             &trev::config::CategoryStyles::default(),
         )
         .unwrap(),
+        preview_debounce: None,
     }
 }
 

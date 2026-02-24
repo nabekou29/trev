@@ -3,7 +3,7 @@
 mod file_op;
 mod input;
 pub mod ipc;
-mod preview;
+pub(super) mod preview;
 mod tree;
 
 use std::collections::BTreeSet;

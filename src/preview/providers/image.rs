@@ -55,6 +55,10 @@ impl PreviewProvider for ImagePreviewProvider {
         crate::config::Priority::MID.value()
     }
 
+    fn is_cacheable(&self) -> bool {
+        false
+    }
+
     fn can_handle(&self, path: &Path, is_dir: bool) -> bool {
         if is_dir {
             return false;

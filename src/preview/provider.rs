@@ -44,6 +44,14 @@ pub trait PreviewProvider: Send + Sync {
         true
     }
 
+    /// Whether content produced by this provider can be cached.
+    ///
+    /// Providers returning non-cloneable content (e.g., `Image`) should
+    /// return `false` to avoid wasted prefetch work.
+    fn is_cacheable(&self) -> bool {
+        true
+    }
+
     /// Load preview content for the given path.
     ///
     /// This is called from a blocking context (`spawn_blocking`).

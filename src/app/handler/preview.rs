@@ -4,6 +4,10 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use crate::app::state::{
     AppContext,
@@ -59,7 +63,7 @@ pub fn handle_preview_action(
         PreviewAction::TogglePreview => {
             state.show_preview = !state.show_preview;
             if state.show_preview {
-                trigger_preview(state, ctx);
+                trigger_preview_immediate(state, ctx);
             }
         }
         PreviewAction::ToggleWrap => {
@@ -76,10 +80,19 @@ pub fn handle_preview_action(
     }
 }
 
-/// Trigger preview for a new file (cursor change).
+/// Debounce delay before spawning a preview load on cache miss.
+///
+/// During rapid cursor movement, preview loads are deferred until the
+/// cursor settles for this duration. Cache hits bypass the debounce
+/// and display immediately.
+const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(50);
+
+/// Trigger preview for a new file (cursor change, debounced).
 ///
 /// Checks the cache first; on hit, displays immediately without async load.
-/// On miss, spawns an async load task. Also prefetches adjacent nodes.
+/// On miss, defers the load by setting a debounce deadline. The actual load
+/// fires when `fire_pending_preview()` is called from the event loop after
+/// the deadline passes.
 pub fn trigger_preview(state: &mut AppState, ctx: &AppContext) {
     let Some((path, providers)) = resolve_preview_providers(state) else {
         return;
@@ -89,9 +102,58 @@ pub fn trigger_preview(state: &mut AppState, ctx: &AppContext) {
     let cache_hit = try_load_from_cache(state, &path, &providers);
     let _span = tracing::info_span!("trigger_preview", path = %path.display(), cache_hit).entered();
 
+    if cache_hit {
+        state.preview_debounce = None;
+        prefetch_adjacent(state, ctx);
+    } else {
+        // Defer load — reset debounce on every cursor change.
+        state.preview_debounce = Some(Instant::now() + PREVIEW_DEBOUNCE);
+    }
+}
+
+/// Trigger preview immediately without debounce.
+///
+/// Used for explicit user actions (toggle preview, open file) where
+/// the user expects instant feedback.
+pub fn trigger_preview_immediate(state: &mut AppState, ctx: &AppContext) {
+    let Some((path, providers)) = resolve_preview_providers(state) else {
+        return;
+    };
+    state.preview_state.request_preview(path.clone());
+    state.preview_debounce = None;
+
+    let cache_hit = try_load_from_cache(state, &path, &providers);
+    let _span =
+        tracing::info_span!("trigger_preview", path = %path.display(), cache_hit, immediate = true)
+            .entered();
+
     if !cache_hit {
         spawn_preview_for(state, &path, &providers, ctx, false);
     }
+    prefetch_adjacent(state, ctx);
+}
+
+/// Fire a pending debounced preview load.
+///
+/// Called from the event loop when `preview_debounce` deadline has passed.
+/// Re-resolves providers and spawns the actual load task.
+pub fn fire_pending_preview(state: &mut AppState, ctx: &AppContext) {
+    state.preview_debounce = None;
+
+    let Some((path, providers)) = resolve_preview_providers(state) else {
+        return;
+    };
+    // Only spawn if the path still matches the current preview request.
+    let is_current = state.preview_state.current_path.as_deref() == Some(path.as_path());
+    if !is_current {
+        return;
+    }
+    // Re-check cache (might have been populated by another event).
+    if try_load_from_cache(state, &path, &providers) {
+        prefetch_adjacent(state, ctx);
+        return;
+    }
+    spawn_preview_for(state, &path, &providers, ctx, false);
     prefetch_adjacent(state, ctx);
 }
 
@@ -187,6 +249,7 @@ fn spawn_preview_for(
 /// Prefetch preview content for adjacent nodes (cursor ± 1).
 ///
 /// Only prefetches file nodes that are not already cached.
+/// Skips providers that produce non-cacheable content (e.g., images).
 fn prefetch_adjacent(state: &mut AppState, ctx: &AppContext) {
     let cursor = state.tree_state.cursor();
     // Only fetch the 3 nodes around cursor (prev, current, next) instead of all visible nodes.
@@ -199,6 +262,10 @@ fn prefetch_adjacent(state: &mut AppState, ctx: &AppContext) {
         let path = &vn.node.path;
         let providers = state.preview_registry.resolve(path, vn.node.is_dir);
         let Some(provider) = providers.first() else { continue };
+        if !provider.is_cacheable() {
+            tracing::debug!(path = %path.display(), "prefetch skipped (non-cacheable provider)");
+            continue;
+        }
         let key = CacheKey { path: path.clone(), provider_name: provider.name().to_string() };
         if state.preview_cache.get(&key).is_some() {
             tracing::debug!(path = %path.display(), "prefetch skipped (already cached)");

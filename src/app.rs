@@ -17,7 +17,10 @@ use std::sync::{
     Arc,
     RwLock,
 };
-use std::time::Duration;
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use anyhow::{
     Context as _,
@@ -251,6 +254,7 @@ fn init_app(
         needs_redraw: false,
         dirty: true,
         file_style_matcher,
+        preview_debounce: None,
     };
 
     let (ctx, channels) = build_context_and_channels(
@@ -503,17 +507,27 @@ fn process_async_events(
 /// Compute the adaptive poll/sleep duration based on current state.
 ///
 /// Returns `Duration::ZERO` when dirty (immediate redraw), short timeout when
-/// keys are pending, bounded by status message remaining, 500ms when idle.
+/// keys are pending, bounded by status message remaining and preview debounce
+/// deadline, 500ms when idle.
 fn compute_poll_duration(state: &AppState) -> Duration {
     if state.dirty {
-        Duration::ZERO
-    } else if state.pending_keys.is_pending() {
-        state.pending_keys.remaining().min(Duration::from_millis(16))
-    } else if let Some(remaining) = state.status_message.as_ref().map(StatusMessage::remaining) {
-        remaining.min(Duration::from_millis(500))
-    } else {
-        Duration::from_millis(500)
+        return Duration::ZERO;
     }
+
+    let mut duration = Duration::from_millis(500);
+
+    if state.pending_keys.is_pending() {
+        duration = duration.min(state.pending_keys.remaining().min(Duration::from_millis(16)));
+    }
+    if let Some(remaining) = state.status_message.as_ref().map(StatusMessage::remaining) {
+        duration = duration.min(remaining);
+    }
+    if let Some(deadline) = state.preview_debounce {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        duration = duration.min(remaining);
+    }
+
+    duration
 }
 
 /// Drain remaining buffered terminal key events synchronously.
@@ -614,6 +628,12 @@ pub async fn run(args: &Args) -> Result<()> {
         (last_cursor, had_events) =
             process_async_events(&mut state, &ctx, &mut channels, last_cursor);
         if had_events {
+            state.dirty = true;
+        }
+
+        // ── Fire pending debounced preview ─────────────────────
+        if state.preview_debounce.is_some_and(|d| Instant::now() >= d) {
+            handler::preview::fire_pending_preview(&mut state, &ctx);
             state.dirty = true;
         }
 

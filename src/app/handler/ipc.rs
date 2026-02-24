@@ -96,6 +96,7 @@ mod tests {
                 &crate::config::CategoryStyles::default(),
             )
             .unwrap(),
+            preview_debounce: None,
         }
     }
 

@@ -101,6 +101,11 @@ pub struct AppState {
     pub dirty: bool,
     /// Compiled file style matcher for per-file display customization.
     pub file_style_matcher: crate::ui::file_style::FileStyleMatcher,
+    /// Debounce deadline for deferred preview loads (cache-miss only).
+    ///
+    /// When set, a preview load is waiting to fire after the cursor settles.
+    /// Resets on each cursor change to avoid loading during rapid navigation.
+    pub preview_debounce: Option<Instant>,
 }
 
 impl AppState {
