@@ -19,10 +19,115 @@
           "size",
           "modified_at"
         ],
+        "file_styles": [],
         "show_hidden": false,
+        "show_icons": true,
         "show_ignored": false,
         "show_preview": true,
-        "show_root_entry": false
+        "show_root_entry": false,
+        "styles": {
+          "directory": {
+            "bg": null,
+            "bold": true,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "blue",
+            "italic": false,
+            "underlined": false
+          },
+          "git_status": {
+            "added": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "green",
+              "italic": false,
+              "underlined": false
+            },
+            "conflicted": {
+              "bg": null,
+              "bold": true,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "red",
+              "italic": false,
+              "underlined": false
+            },
+            "deleted": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "red",
+              "italic": false,
+              "underlined": false
+            },
+            "modified": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "yellow",
+              "italic": false,
+              "underlined": false
+            },
+            "renamed": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "blue",
+              "italic": false,
+              "underlined": false
+            },
+            "staged": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "green",
+              "italic": false,
+              "underlined": false
+            },
+            "staged_modified": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "yellow",
+              "italic": false,
+              "underlined": false
+            },
+            "untracked": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "magenta",
+              "italic": false,
+              "underlined": false
+            }
+          },
+          "gitignored": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "dark_gray",
+            "italic": false,
+            "underlined": false
+          },
+          "symlink": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "cyan",
+            "italic": false,
+            "underlined": false
+          }
+        }
       }
     },
     "file_op": {
@@ -82,6 +187,13 @@
       },
       "default": {}
     },
+    "mouse": {
+      "description": "Mouse settings.",
+      "$ref": "#/$defs/MouseConfig",
+      "default": {
+        "enabled": true
+      }
+    },
     "preview": {
       "description": "Preview settings.",
       "$ref": "#/$defs/PreviewConfig",
@@ -124,6 +236,159 @@
     }
   },
   "$defs": {
+    "CategoryStyles": {
+      "description": "Category-based default display styles.",
+      "type": "object",
+      "properties": {
+        "directory": {
+          "description": "Style for directory names.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": true,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "blue",
+            "italic": false,
+            "underlined": false
+          }
+        },
+        "git_status": {
+          "description": "Per-status styles for git-tracked files.",
+          "$ref": "#/$defs/GitStatusStyles",
+          "default": {
+            "added": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "green",
+              "italic": false,
+              "underlined": false
+            },
+            "conflicted": {
+              "bg": null,
+              "bold": true,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "red",
+              "italic": false,
+              "underlined": false
+            },
+            "deleted": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "red",
+              "italic": false,
+              "underlined": false
+            },
+            "modified": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "yellow",
+              "italic": false,
+              "underlined": false
+            },
+            "renamed": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "blue",
+              "italic": false,
+              "underlined": false
+            },
+            "staged": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "green",
+              "italic": false,
+              "underlined": false
+            },
+            "staged_modified": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "yellow",
+              "italic": false,
+              "underlined": false
+            },
+            "untracked": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "magenta",
+              "italic": false,
+              "underlined": false
+            }
+          }
+        },
+        "gitignored": {
+          "description": "Style for gitignored file names.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "dark_gray",
+            "italic": false,
+            "underlined": false
+          }
+        },
+        "symlink": {
+          "description": "Style for symbolic link names.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "cyan",
+            "italic": false,
+            "underlined": false
+          }
+        }
+      }
+    },
+    "ColorConfig": {
+      "description": "A color: named (red, blue, cyan, dark_gray, …) or hex (#RRGGBB)",
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "black",
+            "red",
+            "green",
+            "yellow",
+            "blue",
+            "magenta",
+            "cyan",
+            "gray",
+            "dark_gray",
+            "light_red",
+            "light_green",
+            "light_yellow",
+            "light_blue",
+            "light_magenta",
+            "light_cyan",
+            "white"
+          ]
+        },
+        {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        }
+      ]
+    },
     "ColumnKind": {
       "description": "Kind of column that can be displayed in the tree view.",
       "oneOf": [
@@ -248,10 +513,23 @@
             "$ref": "#/$defs/ColumnKind"
           }
         },
+        "file_styles": {
+          "description": "Per-file style rules matched by glob pattern (applied in order; later rules win).",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FileStyleRule"
+          }
+        },
         "show_hidden": {
           "description": "Show hidden files.",
           "type": "boolean",
           "default": false
+        },
+        "show_icons": {
+          "description": "Show file icons (Nerd Fonts).",
+          "type": "boolean",
+          "default": true
         },
         "show_ignored": {
           "description": "Show gitignored files.",
@@ -267,6 +545,113 @@
           "description": "Show root directory as a tree node.",
           "type": "boolean",
           "default": false
+        },
+        "styles": {
+          "description": "Category-based default styles (directory, symlink, gitignored, git status).",
+          "$ref": "#/$defs/CategoryStyles",
+          "default": {
+            "directory": {
+              "bg": null,
+              "bold": true,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "blue",
+              "italic": false,
+              "underlined": false
+            },
+            "git_status": {
+              "added": {
+                "bg": null,
+                "bold": false,
+                "crossed_out": false,
+                "dim": false,
+                "fg": "green",
+                "italic": false,
+                "underlined": false
+              },
+              "conflicted": {
+                "bg": null,
+                "bold": true,
+                "crossed_out": false,
+                "dim": false,
+                "fg": "red",
+                "italic": false,
+                "underlined": false
+              },
+              "deleted": {
+                "bg": null,
+                "bold": false,
+                "crossed_out": false,
+                "dim": false,
+                "fg": "red",
+                "italic": false,
+                "underlined": false
+              },
+              "modified": {
+                "bg": null,
+                "bold": false,
+                "crossed_out": false,
+                "dim": false,
+                "fg": "yellow",
+                "italic": false,
+                "underlined": false
+              },
+              "renamed": {
+                "bg": null,
+                "bold": false,
+                "crossed_out": false,
+                "dim": false,
+                "fg": "blue",
+                "italic": false,
+                "underlined": false
+              },
+              "staged": {
+                "bg": null,
+                "bold": false,
+                "crossed_out": false,
+                "dim": false,
+                "fg": "green",
+                "italic": false,
+                "underlined": false
+              },
+              "staged_modified": {
+                "bg": null,
+                "bold": false,
+                "crossed_out": false,
+                "dim": false,
+                "fg": "yellow",
+                "italic": false,
+                "underlined": false
+              },
+              "untracked": {
+                "bg": null,
+                "bold": false,
+                "crossed_out": false,
+                "dim": false,
+                "fg": "magenta",
+                "italic": false,
+                "underlined": false
+              }
+            },
+            "gitignored": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "dark_gray",
+              "italic": false,
+              "underlined": false
+            },
+            "symlink": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": false,
+              "fg": "cyan",
+              "italic": false,
+              "underlined": false
+            }
+          }
         }
       }
     },
@@ -343,6 +728,32 @@
         }
       }
     },
+    "FileStyleRule": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "description": "A glob pattern or list of glob patterns",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "style": {
+          "$ref": "#/$defs/StyleConfig"
+        }
+      },
+      "required": [
+        "pattern",
+        "style"
+      ]
+    },
     "GitConfig": {
       "description": "Git integration configuration.",
       "type": "object",
@@ -351,6 +762,116 @@
           "description": "Whether Git integration is enabled.",
           "type": "boolean",
           "default": true
+        }
+      }
+    },
+    "GitStatusStyles": {
+      "description": "Per-git-status display styles.",
+      "type": "object",
+      "properties": {
+        "added": {
+          "description": "Style for newly added files.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "green",
+            "italic": false,
+            "underlined": false
+          }
+        },
+        "conflicted": {
+          "description": "Style for conflicted files.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": true,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "red",
+            "italic": false,
+            "underlined": false
+          }
+        },
+        "deleted": {
+          "description": "Style for deleted files.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "red",
+            "italic": false,
+            "underlined": false
+          }
+        },
+        "modified": {
+          "description": "Style for unstaged modifications.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "yellow",
+            "italic": false,
+            "underlined": false
+          }
+        },
+        "renamed": {
+          "description": "Style for renamed files.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "blue",
+            "italic": false,
+            "underlined": false
+          }
+        },
+        "staged": {
+          "description": "Style for staged-only changes.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "green",
+            "italic": false,
+            "underlined": false
+          }
+        },
+        "staged_modified": {
+          "description": "Style for staged changes with working tree modifications.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "yellow",
+            "italic": false,
+            "underlined": false
+          }
+        },
+        "untracked": {
+          "description": "Style for untracked files.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": false,
+            "fg": "magenta",
+            "italic": false,
+            "underlined": false
+          }
         }
       }
     },
@@ -391,6 +912,7 @@
                 "tree.sort.by_type",
                 "tree.sort.by_extension",
                 "tree.sort.by_smart",
+                "tree.sort.toggle_directories_first",
                 "filter.hidden",
                 "filter.ignored",
                 "preview.scroll_down",
@@ -427,6 +949,11 @@
               "type": "null"
             }
           ]
+        },
+        "background": {
+          "description": "Run shell command in background without suspending TUI",
+          "type": "boolean",
+          "default": false
         },
         "key": {
           "description": "Key notation (e.g. \"j\", \"<C-a>\", \"G\", \"<CR>\")",
@@ -564,6 +1091,11 @@
           ],
           "default": null
         },
+        "background": {
+          "description": "Run the shell command in the background without suspending the TUI.",
+          "type": "boolean",
+          "default": false
+        },
         "key": {
           "description": "Shortcut key character.",
           "type": "string"
@@ -607,6 +1139,17 @@
           "description": "How directory mtime is computed.",
           "$ref": "#/$defs/MtimeMode",
           "default": "os_mtime"
+        }
+      }
+    },
+    "MouseConfig": {
+      "description": "Mouse input configuration.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Whether mouse support (click, scroll wheel) is enabled.",
+          "type": "boolean",
+          "default": true
         }
       }
     },
@@ -817,6 +1360,61 @@
           "const": "extension"
         }
       ]
+    },
+    "StyleConfig": {
+      "description": "Display style configuration for file names.\n\nAll fields are optional/defaulted so partial overrides work naturally in YAML.",
+      "type": "object",
+      "properties": {
+        "bg": {
+          "description": "Background color (named color or hex string like `\"#D32F2F\"`).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "bold": {
+          "description": "Bold text modifier.",
+          "type": "boolean",
+          "default": false
+        },
+        "crossed_out": {
+          "description": "Strikethrough text modifier.",
+          "type": "boolean",
+          "default": false
+        },
+        "dim": {
+          "description": "Dim (reduced brightness) text modifier.",
+          "type": "boolean",
+          "default": false
+        },
+        "fg": {
+          "description": "Foreground color (named color or hex string like `\"#D32F2F\"`).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "italic": {
+          "description": "Italic text modifier.",
+          "type": "boolean",
+          "default": false
+        },
+        "underlined": {
+          "description": "Underlined text modifier.",
+          "type": "boolean",
+          "default": false
+        }
+      }
     },
     "WatcherConfig": {
       "description": "File system watcher configuration.",
