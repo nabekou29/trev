@@ -153,7 +153,16 @@ fn init_app(
 
     let (config, root_path) = load_config(args)?;
 
-    let (show_hidden, show_ignored) = (config.display.show_hidden, config.display.show_ignored);
+    // --- Phase 1: early session load to resolve display/sort overrides ---
+    let (session_state, overrides) = {
+        let _span = tracing::info_span!("session_overrides").entered();
+        load_session_overrides(args, &config, &root_path)
+    };
+
+    let show_hidden = overrides.show_hidden;
+    let show_ignored = overrides.show_ignored;
+    let show_preview = overrides.show_preview;
+
     let (builder, root) = {
         let _span = tracing::info_span!("tree_build").entered();
         let builder = TreeBuilder::new(show_hidden, show_ignored);
@@ -161,11 +170,11 @@ fn init_app(
         (builder, root)
     };
 
-    // Create tree state with sort/display options.
+    // Create tree state with sort/display options (using session overrides).
     let tree_options = crate::state::tree::TreeOptions {
-        sort_order: config.sort.order.into(),
-        sort_direction: config.sort.direction.into(),
-        directories_first: config.sort.directories_first,
+        sort_order: overrides.sort_order,
+        sort_direction: overrides.sort_direction,
+        directories_first: overrides.directories_first,
         show_root: config.display.show_root_entry,
     };
     let mut tree_state = TreeState::new(root, tree_options);
@@ -176,7 +185,6 @@ fn init_app(
     );
 
     let (git_state, preview_registry) = detect_terminal_and_build_registry(&config)?;
-    let show_preview = config.display.show_preview;
 
     // Create watcher channel and instance.
     let (watcher_tx, watcher_rx) =
@@ -186,10 +194,10 @@ fn init_app(
     // Start IPC server in daemon mode.
     let (ipc_server, ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
 
-    // Restore session and clean up expired sessions.
+    // --- Phase 2: restore remaining session state (expanded dirs, cursor, etc.) ---
     let (selection, undo_history, restored_scroll_offset) = {
         let _span = tracing::info_span!("session_restore").entered();
-        restore_session_if_needed(args, &config, &root_path, builder, &mut tree_state)
+        restore_session_state(session_state, &config, builder, &mut tree_state)
     };
 
     // Reveal a specific path on startup (--reveal flag).
@@ -234,7 +242,7 @@ fn init_app(
         undo_history,
         watcher: fs_watcher,
         should_quit: false,
-        show_icons: !args.no_icons,
+        show_icons: config.display.show_icons,
         show_preview,
         show_hidden,
         show_ignored,
@@ -242,7 +250,6 @@ fn init_app(
         scroll: ScrollState::new(),
         status_message: None,
         processing: false,
-        emit_paths: if args.emit { Some(Vec::new()) } else { None },
         git_state: Arc::clone(&git_state),
         rebuild_generation: 0,
         columns,
@@ -261,7 +268,6 @@ fn init_app(
 
     let (ctx, channels) = build_context_and_channels(
         &config,
-        args,
         suppressed,
         ipc_server,
         git_enabled,
@@ -286,7 +292,6 @@ fn init_app(
 #[allow(clippy::too_many_arguments)]
 fn build_context_and_channels(
     config: &Config,
-    args: &Args,
     suppressed: Arc<AtomicBool>,
     ipc_server: Option<Arc<crate::ipc::server::IpcServer>>,
     git_enabled: bool,
@@ -307,7 +312,6 @@ fn build_context_and_channels(
         keymap: KeyMap::from_config(&config.keybindings),
         suppressed,
         ipc_server,
-        editor_action: args.action.into(),
         git_tx,
         git_enabled,
         root_path: root_path.to_path_buf(),
@@ -677,7 +681,7 @@ pub async fn run(args: &Args) -> Result<()> {
         }
     }
 
-    shutdown(&root_path, &state, args);
+    shutdown(&root_path, &state);
     Ok(())
 }
 
@@ -730,19 +734,35 @@ fn build_preview_registry(
     PreviewRegistry::new(providers)
 }
 
-/// Restore session state and schedule expired session cleanup.
+/// Resolved display/sort settings after merging config, session, and CLI overrides.
 ///
-/// Returns `(selection, undo_history, restored_scroll_offset)`.
+/// Precedence: CLI flags > session > config defaults.
+#[expect(clippy::struct_excessive_bools, reason = "mirrors AppState display flags")]
+struct SessionOverrides {
+    /// Whether to show hidden (dot) files.
+    show_hidden: bool,
+    /// Whether to show gitignored files.
+    show_ignored: bool,
+    /// Whether the preview panel is visible.
+    show_preview: bool,
+    /// Sort order.
+    sort_order: crate::state::tree::SortOrder,
+    /// Sort direction.
+    sort_direction: crate::state::tree::SortDirection,
+    /// Whether directories are sorted before files.
+    directories_first: bool,
+}
+
+/// Phase 1: load session file early and resolve display/sort overrides.
 ///
-/// `restored_scroll_offset` is `Some(offset)` when a session with a saved
-/// scroll position was restored, or `None` otherwise.
-fn restore_session_if_needed(
+/// Returns the loaded session state (if any) and the resolved overrides.
+/// CLI flags take precedence over session values, which take precedence
+/// over config defaults.
+fn load_session_overrides(
     args: &Args,
     config: &Config,
     root_path: &Path,
-    builder: TreeBuilder,
-    tree_state: &mut TreeState,
-) -> (SelectionBuffer, UndoHistory, Option<usize>) {
+) -> (Option<session::SessionState>, SessionOverrides) {
     let should_restore = if args.restore {
         true
     } else if args.no_restore {
@@ -751,50 +771,128 @@ fn restore_session_if_needed(
         config.session.restore_by_default
     };
 
+    let session_state = if should_restore {
+        match session::restore(root_path) {
+            Ok(Some(state)) => Some(state),
+            Ok(None) => {
+                tracing::debug!("no session to restore");
+                None
+            }
+            Err(e) => {
+                tracing::warn!(%e, "failed to restore session");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Resolve overrides: CLI > session > config.
+    // CLI boolean flags (show_hidden, show_ignored, no_preview, no_directories_first)
+    // are one-directional: when set, they always win. When not set, use session value.
+    let show_hidden = if args.show_hidden {
+        true
+    } else {
+        session_state.as_ref().and_then(|s| s.show_hidden).unwrap_or(config.display.show_hidden)
+    };
+
+    let show_ignored = if args.show_ignored {
+        true
+    } else {
+        session_state.as_ref().and_then(|s| s.show_ignored).unwrap_or(config.display.show_ignored)
+    };
+
+    let show_preview = if args.no_preview {
+        false
+    } else {
+        session_state
+            .as_ref()
+            .and_then(|s| s.show_preview)
+            .unwrap_or(config.display.show_preview)
+    };
+
+    let sort_order = args.sort_order.map_or_else(
+        || {
+            session_state
+                .as_ref()
+                .and_then(|s| s.sort_order)
+                .unwrap_or_else(|| config.sort.order.into())
+        },
+        Into::into,
+    );
+
+    let sort_direction = args.sort_direction.map_or_else(
+        || {
+            session_state
+                .as_ref()
+                .and_then(|s| s.sort_direction)
+                .unwrap_or_else(|| config.sort.direction.into())
+        },
+        Into::into,
+    );
+
+    let directories_first = if args.no_directories_first {
+        false
+    } else {
+        session_state
+            .as_ref()
+            .and_then(|s| s.directories_first)
+            .unwrap_or(config.sort.directories_first)
+    };
+
+    let overrides = SessionOverrides {
+        show_hidden,
+        show_ignored,
+        show_preview,
+        sort_order,
+        sort_direction,
+        directories_first,
+    };
+
+    (session_state, overrides)
+}
+
+/// Phase 2: restore remaining session state (expanded dirs, cursor, selection, undo, scroll).
+///
+/// Returns `(selection, undo_history, restored_scroll_offset)`.
+fn restore_session_state(
+    session_state: Option<session::SessionState>,
+    config: &Config,
+    builder: TreeBuilder,
+    tree_state: &mut TreeState,
+) -> (SelectionBuffer, UndoHistory, Option<usize>) {
     let mut selection = SelectionBuffer::new();
     let mut undo_history = UndoHistory::new(config.file_op.undo_stack_size);
     let mut restored_scroll_offset = None;
 
-    if should_restore {
-        match session::restore(root_path) {
-            Ok(Some(session_state)) => {
-                // Restore expanded directories (sorted so parents load before children).
-                let mut paths = session_state.expanded_paths;
-                paths.sort_by_key(|p| p.as_os_str().len());
-                for path in &paths {
-                    if let Ok(children) = builder.load_children(path) {
-                        tree_state.set_children(path, children, true);
-                    }
-                }
-
-                // Restore cursor position.
-                if let Some(ref cursor_path) = session_state.cursor_path {
-                    tree_state.move_cursor_to_path(cursor_path);
-                }
-
-                // Restore selection buffer.
-                selection = SelectionBuffer::from_parts(
-                    session_state.selection_paths,
-                    session_state.selection_mode,
-                );
-
-                // Restore undo history.
-                undo_history = UndoHistory::from_stacks(
-                    session_state.undo_stack,
-                    session_state.redo_stack,
-                    config.file_op.undo_stack_size,
-                );
-
-                restored_scroll_offset = session_state.scroll_offset;
-                tracing::info!("session restored");
-            }
-            Ok(None) => {
-                tracing::debug!("no session to restore");
-            }
-            Err(e) => {
-                tracing::warn!(%e, "failed to restore session");
+    if let Some(session_state) = session_state {
+        // Restore expanded directories (sorted so parents load before children).
+        let mut paths = session_state.expanded_paths;
+        paths.sort_by_key(|p| p.as_os_str().len());
+        for path in &paths {
+            if let Ok(children) = builder.load_children(path) {
+                tree_state.set_children(path, children, true);
             }
         }
+
+        // Restore cursor position.
+        if let Some(ref cursor_path) = session_state.cursor_path {
+            tree_state.move_cursor_to_path(cursor_path);
+        }
+
+        // Restore selection buffer.
+        selection =
+            SelectionBuffer::from_parts(session_state.selection_paths, session_state.selection_mode);
+
+        // Restore undo history.
+        undo_history = UndoHistory::from_stacks(
+            session_state.undo_stack,
+            session_state.redo_stack,
+            config.file_op.undo_stack_size,
+        );
+
+        restored_scroll_offset = session_state.scroll_offset;
+        tracing::info!("session restored");
     }
 
     // Clean up expired sessions in background.
@@ -810,9 +908,17 @@ fn restore_session_if_needed(
     (selection, undo_history, restored_scroll_offset)
 }
 
-/// Save session, restore terminal, and output emit paths.
-fn shutdown(root_path: &Path, state: &AppState, args: &Args) {
+/// Save session and restore terminal.
+fn shutdown(root_path: &Path, state: &AppState) {
     // Save session state.
+    let display = session::DisplaySettings {
+        show_hidden: state.show_hidden,
+        show_ignored: state.show_ignored,
+        show_preview: state.show_preview,
+        sort_order: state.tree_state.sort_order(),
+        sort_direction: state.tree_state.sort_direction(),
+        directories_first: state.tree_state.directories_first(),
+    };
     let session_state = session::build_session_state(
         root_path,
         state.tree_state.expanded_paths(),
@@ -820,6 +926,7 @@ fn shutdown(root_path: &Path, state: &AppState, args: &Args) {
         &state.selection,
         &state.undo_history,
         state.scroll.offset(),
+        &display,
     );
     if let Err(e) = session::save(&session_state) {
         tracing::warn!(%e, "failed to save session");
@@ -827,47 +934,6 @@ fn shutdown(root_path: &Path, state: &AppState, args: &Args) {
 
     // Restore terminal.
     crate::terminal::restore();
-
-    // Output emit paths after terminal restore (stdout is now safe).
-    if let Some(paths) = &state.emit_paths {
-        emit_paths(paths, args.emit_format);
-    }
-}
-
-/// Output accumulated emit paths to stdout.
-///
-/// Format depends on the `--emit-format` flag:
-/// - `Lines`: one path per line
-/// - `Nul`: null-separated paths
-/// - `Json`: JSON array of strings
-#[expect(clippy::print_stdout, reason = "CLI output to stdout is intentional")]
-fn emit_paths(paths: &[PathBuf], format: crate::cli::EmitFormat) {
-    use crate::cli::EmitFormat;
-
-    if paths.is_empty() {
-        return;
-    }
-    match format {
-        EmitFormat::Lines => {
-            for path in paths {
-                println!("{}", path.display());
-            }
-        }
-        EmitFormat::Nul => {
-            for (i, path) in paths.iter().enumerate() {
-                if i > 0 {
-                    print!("\0");
-                }
-                print!("{}", path.display());
-            }
-        }
-        EmitFormat::Json => {
-            let json: Vec<&str> = paths.iter().filter_map(|p| p.to_str()).collect();
-            if let Ok(output) = serde_json::to_string(&json) {
-                println!("{output}");
-            }
-        }
-    }
 }
 
 /// Start IPC server when running in daemon mode.

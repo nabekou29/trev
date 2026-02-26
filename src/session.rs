@@ -30,6 +30,10 @@ use crate::file_op::undo::{
     OpGroup,
     UndoHistory,
 };
+use crate::state::tree::{
+    SortDirection,
+    SortOrder,
+};
 
 /// Serializable session state for persistence.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +63,24 @@ pub struct SessionState {
     /// Scroll offset (first visible row) for viewport restoration.
     #[serde(default)]
     pub scroll_offset: Option<usize>,
+    /// Whether hidden (dot) files were shown.
+    #[serde(default)]
+    pub show_hidden: Option<bool>,
+    /// Whether gitignored files were shown.
+    #[serde(default)]
+    pub show_ignored: Option<bool>,
+    /// Whether the preview panel was visible.
+    #[serde(default)]
+    pub show_preview: Option<bool>,
+    /// Sort order at the time of save.
+    #[serde(default)]
+    pub sort_order: Option<SortOrder>,
+    /// Sort direction at the time of save.
+    #[serde(default)]
+    pub sort_direction: Option<SortDirection>,
+    /// Whether directories were sorted before files.
+    #[serde(default)]
+    pub directories_first: Option<bool>,
 }
 
 /// Get the session storage directory path.
@@ -98,6 +120,24 @@ pub fn save(state: &SessionState) -> Result<()> {
     Ok(())
 }
 
+/// Display/sort settings to persist in the session.
+#[derive(Debug, Clone, Copy)]
+#[expect(clippy::struct_excessive_bools, reason = "mirrors AppState display flags")]
+pub struct DisplaySettings {
+    /// Whether hidden (dot) files are shown.
+    pub show_hidden: bool,
+    /// Whether gitignored files are shown.
+    pub show_ignored: bool,
+    /// Whether the preview panel is visible.
+    pub show_preview: bool,
+    /// Current sort order.
+    pub sort_order: SortOrder,
+    /// Current sort direction.
+    pub sort_direction: SortDirection,
+    /// Whether directories are sorted before files.
+    pub directories_first: bool,
+}
+
 /// Build a `SessionState` from application state components.
 pub fn build_session_state(
     root_path: &Path,
@@ -106,6 +146,7 @@ pub fn build_session_state(
     selection: &SelectionBuffer,
     undo_history: &UndoHistory,
     scroll_offset: usize,
+    display: &DisplaySettings,
 ) -> SessionState {
     let (selection_paths, selection_mode) = selection.export();
     let (undo_stack, redo_stack) = undo_history.export_stacks();
@@ -120,6 +161,12 @@ pub fn build_session_state(
         undo_stack,
         redo_stack,
         scroll_offset: Some(scroll_offset),
+        show_hidden: Some(display.show_hidden),
+        show_ignored: Some(display.show_ignored),
+        show_preview: Some(display.show_preview),
+        sort_order: Some(display.sort_order),
+        sort_direction: Some(display.sort_direction),
+        directories_first: Some(display.directories_first),
     }
 }
 
@@ -243,6 +290,12 @@ mod tests {
             undo_stack: vec![],
             redo_stack: vec![],
             scroll_offset: None,
+            show_hidden: Some(true),
+            show_ignored: None,
+            show_preview: Some(false),
+            sort_order: Some(SortOrder::Name),
+            sort_direction: Some(SortDirection::Desc),
+            directories_first: Some(false),
         };
 
         save(&state).unwrap();
@@ -252,6 +305,12 @@ mod tests {
         assert_that!(restored.expanded_paths.len(), eq(2));
         assert_eq!(restored.cursor_path, Some(file));
         assert_eq!(restored.selection_mode, Some(SelectionMode::Copy));
+        assert_eq!(restored.show_hidden, Some(true));
+        assert_eq!(restored.show_ignored, None);
+        assert_eq!(restored.show_preview, Some(false));
+        assert_eq!(restored.sort_order, Some(SortOrder::Name));
+        assert_eq!(restored.sort_direction, Some(SortDirection::Desc));
+        assert_eq!(restored.directories_first, Some(false));
     }
 
     #[rstest]
@@ -276,6 +335,12 @@ mod tests {
             undo_stack: vec![],
             redo_stack: vec![],
             scroll_offset: None,
+            show_hidden: None,
+            show_ignored: None,
+            show_preview: None,
+            sort_order: None,
+            sort_direction: None,
+            directories_first: None,
         };
 
         save(&state).unwrap();
@@ -299,8 +364,24 @@ mod tests {
 
         let undo = UndoHistory::new(10);
 
-        let state =
-            build_session_state(root, expanded.clone(), cursor.clone(), &selection, &undo, 42);
+        let display = DisplaySettings {
+            show_hidden: true,
+            show_ignored: false,
+            show_preview: true,
+            sort_order: SortOrder::Size,
+            sort_direction: SortDirection::Desc,
+            directories_first: false,
+        };
+
+        let state = build_session_state(
+            root,
+            expanded.clone(),
+            cursor.clone(),
+            &selection,
+            &undo,
+            42,
+            &display,
+        );
 
         assert_eq!(state.root_path, root);
         assert_eq!(state.expanded_paths, expanded);
@@ -308,6 +389,12 @@ mod tests {
         assert_eq!(state.selection_mode, Some(SelectionMode::Cut));
         assert_that!(state.selection_paths.len(), eq(1));
         assert_eq!(state.scroll_offset, Some(42));
+        assert_eq!(state.show_hidden, Some(true));
+        assert_eq!(state.show_ignored, Some(false));
+        assert_eq!(state.show_preview, Some(true));
+        assert_eq!(state.sort_order, Some(SortOrder::Size));
+        assert_eq!(state.sort_direction, Some(SortDirection::Desc));
+        assert_eq!(state.directories_first, Some(false));
     }
 
     /// Write a session file directly into a custom directory for isolated testing.
@@ -342,6 +429,12 @@ mod tests {
             undo_stack: vec![],
             redo_stack: vec![],
             scroll_offset: None,
+            show_hidden: None,
+            show_ignored: None,
+            show_preview: None,
+            sort_order: None,
+            sort_direction: None,
+            directories_first: None,
         };
 
         let file_path = save_session_in(&session_dir, &state);
@@ -368,6 +461,12 @@ mod tests {
             undo_stack: vec![],
             redo_stack: vec![],
             scroll_offset: None,
+            show_hidden: None,
+            show_ignored: None,
+            show_preview: None,
+            sort_order: None,
+            sort_direction: None,
+            directories_first: None,
         };
 
         let file_path = save_session_in(&session_dir, &state);
@@ -397,5 +496,11 @@ mod tests {
         assert!(state.undo_stack.is_empty());
         assert!(state.redo_stack.is_empty());
         assert!(state.scroll_offset.is_none());
+        assert!(state.show_hidden.is_none());
+        assert!(state.show_ignored.is_none());
+        assert!(state.show_preview.is_none());
+        assert!(state.sort_order.is_none());
+        assert!(state.sort_direction.is_none());
+        assert!(state.directories_first.is_none());
     }
 }
