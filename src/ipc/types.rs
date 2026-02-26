@@ -119,20 +119,6 @@ pub enum IpcCommand {
     },
 }
 
-/// Action for opening files in the editor.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum EditorAction {
-    /// Open in current window.
-    Edit,
-    /// Open in horizontal split.
-    Split,
-    /// Open in vertical split.
-    Vsplit,
-    /// Open in new tab.
-    Tabedit,
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
@@ -176,14 +162,14 @@ mod tests {
 
     #[rstest]
     fn deserialize_notification() {
-        let json_str = r#"{"jsonrpc":"2.0","method":"open_file","params":{"action":"edit","path":"/tmp/foo"}}"#;
+        let json_str = r#"{"jsonrpc":"2.0","method":"open_file","params":{"path":"/tmp/foo"}}"#;
         let msg: JsonRpcMessage = serde_json::from_str(json_str).unwrap();
         assert_eq!(
             msg,
             JsonRpcMessage::Notification {
                 jsonrpc: "2.0".to_owned(),
                 method: "open_file".to_owned(),
-                params: Some(json!({"action": "edit", "path": "/tmp/foo"})),
+                params: Some(json!({"path": "/tmp/foo"})),
             }
         );
     }
@@ -243,24 +229,12 @@ mod tests {
     #[rstest]
     fn serialize_notification() {
         let msg =
-            JsonRpcMessage::notification("open_file", json!({"action": "edit", "path": "/foo"}));
+            JsonRpcMessage::notification("open_file", json!({"path": "/foo"}));
         let serialized = serde_json::to_string(&msg).unwrap();
         let parsed: Value = serde_json::from_str(&serialized).unwrap();
         assert_eq!(parsed["method"], "open_file");
-        assert_eq!(parsed["params"]["action"], "edit");
+        assert_eq!(parsed["params"]["path"], "/foo");
         // Notification must NOT have id
         assert_that!(parsed.get("id"), none());
-    }
-
-    // --- EditorAction serialization ---
-
-    #[rstest]
-    #[case(EditorAction::Edit, "edit")]
-    #[case(EditorAction::Split, "split")]
-    #[case(EditorAction::Vsplit, "vsplit")]
-    #[case(EditorAction::Tabedit, "tabedit")]
-    fn serialize_editor_action(#[case] action: EditorAction, #[case] expected: &str) {
-        let serialized = serde_json::to_string(&action).unwrap();
-        assert_eq!(serialized, format!("\"{expected}\""));
     }
 }

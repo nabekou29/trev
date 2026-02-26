@@ -235,6 +235,8 @@ pub struct DisplayConfig {
     pub show_ignored: bool,
     /// Show preview panel.
     pub show_preview: bool,
+    /// Show file icons (Nerd Fonts).
+    pub show_icons: bool,
     /// Show root directory as a tree node.
     pub show_root_entry: bool,
     /// Columns to display in the tree view (ordered list of column kinds).
@@ -843,6 +845,7 @@ impl Default for DisplayConfig {
             show_hidden: false,
             show_ignored: false,
             show_preview: true,
+            show_icons: true,
             show_root_entry: false,
             columns: crate::ui::column::default_columns(),
             column_options: crate::ui::column::ColumnOptionsConfig::default(),
@@ -950,6 +953,12 @@ impl Config {
         }
         if args.show_root_entry {
             self.display.show_root_entry = true;
+        }
+        if args.icons {
+            self.display.show_icons = true;
+        }
+        if args.no_icons {
+            self.display.show_icons = false;
         }
         if args.no_git {
             self.git.enabled = false;
@@ -1103,6 +1112,7 @@ preview:
         assert_that!(c.display.show_hidden, eq(true));
         assert_that!(c.display.show_ignored, eq(true));
         assert_that!(c.display.show_preview, eq(false));
+        assert_that!(c.display.show_icons, eq(true)); // default when not specified in YAML
         assert_that!(c.preview.max_lines, eq(500));
         assert_that!(c.preview.max_bytes, eq(5_242_880));
         assert_that!(c.preview.cache_size, eq(20));
@@ -1223,6 +1233,7 @@ display:
         // Nothing should change.
         assert_that!(config.sort.order, eq(SortOrder::Mtime));
         assert_that!(config.display.show_preview, eq(false));
+        assert_that!(config.display.show_icons, eq(true));
     }
 
     // --- apply_cli_overrides with --no-git ---
@@ -1303,6 +1314,31 @@ preview:
         assert_that!(commands[0].display_name(), eq("Pretty JSON"));
         assert_that!(commands[1].display_name(), eq("glow"));
         assert!(result.warnings.is_empty());
+    }
+
+    // --- apply_cli_overrides --icons ---
+
+    #[rstest]
+    fn cli_override_icons() {
+        let mut config = Config::default();
+        config.display.show_icons = false;
+        let args = Args { icons: true, ..Args::default() };
+        config.apply_cli_overrides(&args);
+
+        assert_that!(config.display.show_icons, eq(true));
+    }
+
+    // --- apply_cli_overrides --no-icons ---
+
+    #[rstest]
+    fn cli_override_no_icons() {
+        let mut config = Config::default();
+        assert_that!(config.display.show_icons, eq(true));
+
+        let args = Args { no_icons: true, ..Args::default() };
+        config.apply_cli_overrides(&args);
+
+        assert_that!(config.display.show_icons, eq(false));
     }
 
     // --- apply_cli_overrides show-ignored ---

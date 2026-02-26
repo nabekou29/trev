@@ -83,7 +83,6 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
         scroll: ScrollState::new(),
         status_message: None,
         processing: false,
-        emit_paths: None,
         git_state: std::sync::Arc::new(std::sync::RwLock::new(None)),
         rebuild_generation: 0,
         columns: trev::ui::column::resolve_columns(

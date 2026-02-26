@@ -335,7 +335,7 @@ fn handle_shell_background(cmd: &str, state: &mut AppState) {
 
 /// Send an IPC notification to the connected client.
 ///
-/// Includes the cursor file path and editor action in the notification params.
+/// Includes the cursor file path in the notification params.
 /// Silently drops if no IPC server is running (non-daemon mode).
 fn handle_notify_action(method: &str, state: &AppState, ctx: &AppContext) {
     let Some(server) = &ctx.ipc_server else {
@@ -343,7 +343,6 @@ fn handle_notify_action(method: &str, state: &AppState, ctx: &AppContext) {
     };
     let path = state.tree_state.cursor_path().unwrap_or_default();
     let params = serde_json::json!({
-        "action": ctx.editor_action,
         "path": path,
     });
     let server = Arc::clone(server);
