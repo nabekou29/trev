@@ -139,6 +139,8 @@ pub enum SortAction {
     ByExtension,
     /// Sort by smart (natural) order directly.
     BySmart,
+    /// Toggle directories-first sorting.
+    ToggleDirectoriesFirst,
 }
 
 /// Actions for filter operations.
@@ -190,6 +192,7 @@ impl fmt::Display for SortAction {
             Self::ByType => "tree.sort.by_type",
             Self::ByExtension => "tree.sort.by_extension",
             Self::BySmart => "tree.sort.by_smart",
+            Self::ToggleDirectoriesFirst => "tree.sort.toggle_directories_first",
         };
         f.write_str(s)
     }
@@ -315,6 +318,7 @@ impl FromStr for SortAction {
             "tree.sort.by_type" => Ok(Self::ByType),
             "tree.sort.by_extension" => Ok(Self::ByExtension),
             "tree.sort.by_smart" => Ok(Self::BySmart),
+            "tree.sort.toggle_directories_first" => Ok(Self::ToggleDirectoriesFirst),
             _ => Err(format!("unknown sort action: {s}")),
         }
     }
@@ -463,6 +467,7 @@ impl SortAction {
             "tree.sort.by_type",
             "tree.sort.by_extension",
             "tree.sort.by_smart",
+            "tree.sort.toggle_directories_first",
         ]
     }
 }
@@ -613,6 +618,7 @@ mod tests {
             TreeAction::Sort(SortAction::ByType),
             TreeAction::Sort(SortAction::ByExtension),
             TreeAction::Sort(SortAction::BySmart),
+            TreeAction::Sort(SortAction::ToggleDirectoriesFirst),
         ];
         for action in actions {
             let s = action.to_string();

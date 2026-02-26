@@ -65,10 +65,6 @@ pub fn handle_tree_action(
                     show_hidden,
                     show_ignored,
                 );
-                // Emit mode: accumulate file path and quit.
-                if let ExpandResult::OpenFile(ref path) = result {
-                    handle_emit_open(path, state);
-                }
             }
         }
         TreeAction::JumpFirst => {
@@ -209,6 +205,7 @@ fn handle_sort_action(sort_action: crate::action::SortAction, state: &mut AppSta
             apply_sort_order(state, crate::state::tree::SortOrder::Extension);
         }
         SortAction::BySmart => apply_sort_order(state, crate::state::tree::SortOrder::Smart),
+        SortAction::ToggleDirectoriesFirst => toggle_directories_first(state),
     }
 }
 
@@ -280,6 +277,16 @@ fn toggle_sort_direction(state: &mut AppState) {
         SortDirection::Desc => "descending",
     };
     state.set_status(format!("Sort direction: {label}"));
+}
+
+/// Toggle directories-first sorting on or off.
+fn toggle_directories_first(state: &mut AppState) {
+    let new_dirs_first = !state.tree_state.directories_first();
+    let order = state.tree_state.sort_order();
+    let direction = state.tree_state.sort_direction();
+    state.tree_state.apply_sort(order, direction, new_dirs_first);
+    let label = if new_dirs_first { "on" } else { "off" };
+    state.set_status(format!("Directories first: {label}"));
 }
 
 /// Spawn an async tree rebuild with the current display settings.
@@ -456,28 +463,19 @@ fn handle_expand_result(
     }
 }
 
-/// Handle file open in emit mode: accumulate the path and quit.
-fn handle_emit_open(path: &Path, state: &mut AppState) {
-    if let Some(ref mut paths) = state.emit_paths {
-        paths.push(path.to_path_buf());
-        state.should_quit = true;
-    }
-}
-
 /// Send an `open_file` notification to the connected Neovim client.
 ///
 /// Only sends if the IPC server is running (daemon mode). The notification
-/// includes the configured `EditorAction` and the file path.
+/// includes the file path. The editor action is determined by the Neovim plugin.
 fn send_open_file_notification(ctx: &AppContext, path: &Path) {
     if let Some(server) = &ctx.ipc_server {
         let server = server.clone();
-        let action = ctx.editor_action;
         let path = path.to_path_buf();
         tokio::spawn(async move {
             server
                 .send_notification(
                     "open_file",
-                    serde_json::json!({"action": action, "path": path.to_string_lossy()}),
+                    serde_json::json!({"path": path.to_string_lossy()}),
                 )
                 .await;
         });

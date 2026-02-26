@@ -58,11 +58,8 @@ trev schema               # Print config JSON Schema
 | `--sort-order <ORDER>`     | smart, name, size, mtime, type, extension |
 | `--sort-direction <DIR>`   | asc, desc                                 |
 | `--no-directories-first`   | Do not sort directories before files      |
-| `--no-icons`               | Disable file icons                        |
+| `--icons / --no-icons`     | File icons control                        |
 | `--daemon`                 | Run as daemon (IPC server)                |
-| `--emit`                   | Emit selected path(s) to stdout on exit   |
-| `--emit-format <FMT>`      | lines (default), nul, json                |
-| `--action <ACTION>`        | edit, split, vsplit, tabedit              |
 | `--restore / --no-restore` | Session state restore control             |
 | `--reveal <PATH>`          | Reveal a specific path on startup         |
 
@@ -168,6 +165,7 @@ display:
   show_hidden: false
   show_ignored: false
   show_preview: true
+  show_icons: true
   show_root_entry: false
   columns: # Display order of metadata columns
     - git_status
@@ -270,7 +268,7 @@ keybindings:
 
 - **General**: `quit`, `noop`
 - **Tree**: `tree.move_down`, `tree.move_up`, `tree.expand`, `tree.collapse`, `tree.toggle_expand`, `tree.change_root`, `tree.change_root_up`, `tree.jump_first`, `tree.jump_last`, `tree.half_page_down`, `tree.half_page_up`, `tree.center_cursor`, `tree.scroll_cursor_to_top`, `tree.scroll_cursor_to_bottom`, `tree.expand_all`, `tree.collapse_all`, `tree.refresh`
-- **Sort**: `tree.sort.menu`, `tree.sort.toggle_direction`, `tree.sort.by_name`, `tree.sort.by_size`, `tree.sort.by_mtime`, `tree.sort.by_type`, `tree.sort.by_extension`, `tree.sort.by_smart`
+- **Sort**: `tree.sort.menu`, `tree.sort.toggle_direction`, `tree.sort.toggle_directories_first`, `tree.sort.by_name`, `tree.sort.by_size`, `tree.sort.by_mtime`, `tree.sort.by_type`, `tree.sort.by_extension`, `tree.sort.by_smart`
 - **Filter**: `filter.hidden`, `filter.ignored`
 - **Preview**: `preview.scroll_down`, `preview.scroll_up`, `preview.scroll_right`, `preview.scroll_left`, `preview.half_page_down`, `preview.half_page_up`, `preview.cycle_next_provider`, `preview.cycle_prev_provider`, `preview.toggle_preview`, `preview.toggle_wrap`
 - **File operations**: `file_op.yank`, `file_op.cut`, `file_op.paste`, `file_op.create_file`, `file_op.create_directory`, `file_op.rename`, `file_op.delete`, `file_op.system_trash`, `file_op.undo`, `file_op.redo`, `file_op.toggle_mark`, `file_op.clear_selections`
