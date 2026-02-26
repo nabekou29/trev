@@ -52,6 +52,12 @@ run = "cargo llvm-cov --all-features"
 description = "Run tests with coverage and generate HTML report"
 run = "cargo llvm-cov --all-features --html --open"
 
+[tasks.schema]
+description = "Regenerate config JSON Schema"
+run = "cargo run -- schema > config.schema.json"
+sources = ["src/config.rs", "src/ui/column.rs"]
+outputs = ["config.schema.json"]
+
 [tasks.build-install-release]
 description = "Build and install"
 run = "cargo install --path . --force"

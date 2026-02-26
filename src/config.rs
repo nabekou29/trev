@@ -1917,4 +1917,16 @@ keybindings:
         let json_str = entry.to_string();
         assert!(json_str.contains("menu"), "KeyBindingEntry schema missing menu field");
     }
+
+    #[rstest]
+    fn schema_file_is_up_to_date() {
+        let schema = Config::generate_schema();
+        let generated = serde_json::to_string_pretty(&schema).unwrap() + "\n";
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let schema_path = Path::new(manifest_dir).join("config.schema.json");
+        let on_disk = std::fs::read_to_string(&schema_path).unwrap();
+
+        assert_eq!(generated, on_disk, "config.schema.json is out of date. Run `mise run schema` to regenerate.");
+    }
 }
