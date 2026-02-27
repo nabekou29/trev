@@ -465,6 +465,26 @@ impl TreeState {
         false
     }
 
+    /// Transition a directory from `NotLoaded` to `Loading` state.
+    ///
+    /// This is the common primitive for all async directory loads: user-initiated
+    /// expand, prefetch, and deferred session restore.
+    ///
+    /// When `auto_expand` is true, the directory is also marked as expanded.
+    /// Returns the path if the transition was made, `None` if the node is not
+    /// found, not a directory, or not in `NotLoaded` state.
+    pub fn prepare_async_load(&mut self, path: &Path, auto_expand: bool) -> Option<PathBuf> {
+        let node = self.find_node_mut(path)?;
+        if !node.is_dir || !matches!(node.children, ChildrenState::NotLoaded) {
+            return None;
+        }
+        node.children = ChildrenState::Loading;
+        if auto_expand {
+            node.is_expanded = true;
+        }
+        Some(node.path.clone())
+    }
+
     /// Prepare prefetching for child directories at the given path.
     ///
     /// For each child directory with `NotLoaded` children, transitions them
@@ -512,20 +532,21 @@ impl TreeState {
             return None;
         }
 
-        let node = self.find_node_mut(&path)?;
-
         if is_expanded {
+            let node = self.find_node_mut(&path)?;
             node.is_expanded = false;
             None
         } else {
+            // Try the common NotLoaded → Loading transition first.
+            if let Some(p) = self.prepare_async_load(&path, true) {
+                return Some(ExpandResult::NeedsLoad(p));
+            }
+            // Node was already Loading or Loaded.
+            let node = self.find_node_mut(&path)?;
             node.is_expanded = true;
             match &node.children {
-                ChildrenState::NotLoaded => {
-                    node.children = ChildrenState::Loading;
-                    Some(ExpandResult::NeedsLoad(path))
-                }
                 ChildrenState::Loaded(_) => Some(ExpandResult::AlreadyLoaded(path)),
-                ChildrenState::Loading => None,
+                ChildrenState::Loading | ChildrenState::NotLoaded => None,
             }
         }
     }

@@ -80,8 +80,7 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     } else {
         // Full width tree when preview is disabled.
         state.viewport_height = main_area.height as usize;
-        state.layout_areas =
-            LayoutAreas { tree_area: main_area, preview_area: Rect::default() };
+        state.layout_areas = LayoutAreas { tree_area: main_area, preview_area: Rect::default() };
 
         let visible_count = state.tree_state.visible_nodes().len();
         let _span = tracing::info_span!("render_tree", visible_count).entered();

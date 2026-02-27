@@ -13,6 +13,7 @@ use crate::app::state::{
     AppContext,
     AppState,
     ChildrenLoadResult,
+    LoadKind,
     TreeRebuildResult,
 };
 use crate::state::tree::{
@@ -134,11 +135,17 @@ fn handle_expand_all(state: &mut AppState, ctx: &AppContext) {
     let result = state.tree_state.expand_subtree(&dir_path, EXPAND_ALL_LIMIT);
 
     // Spawn loads for directories that need loading.
-    // Use prefetch=true because expand_subtree already set is_expanded=true.
+    // Use Prefetch because expand_subtree already set is_expanded=true.
     // This avoids redundant trigger_prefetch calls in process_children,
     // which would otherwise do an expensive find_node_mut for each result.
     for path in &result.needs_load {
-        spawn_load_children(&ctx.children_tx, path.clone(), show_hidden, show_ignored, true);
+        spawn_load_children(
+            &ctx.children_tx,
+            path.clone(),
+            show_hidden,
+            show_ignored,
+            LoadKind::Prefetch,
+        );
     }
 
     // Status message.
@@ -451,7 +458,13 @@ fn handle_expand_result(
 ) {
     match *result {
         ExpandResult::NeedsLoad(ref path) => {
-            spawn_load_children(&ctx.children_tx, path.clone(), show_hidden, show_ignored, false);
+            spawn_load_children(
+                &ctx.children_tx,
+                path.clone(),
+                show_hidden,
+                show_ignored,
+                LoadKind::UserExpand,
+            );
         }
         ExpandResult::AlreadyLoaded(ref path) => {
             // Directory was prefetched — trigger prefetch for its children.
@@ -473,10 +486,7 @@ fn send_open_file_notification(ctx: &AppContext, path: &Path) {
         let path = path.to_path_buf();
         tokio::spawn(async move {
             server
-                .send_notification(
-                    "open_file",
-                    serde_json::json!({"path": path.to_string_lossy()}),
-                )
+                .send_notification("open_file", serde_json::json!({"path": path.to_string_lossy()}))
                 .await;
         });
     }
@@ -498,17 +508,17 @@ pub fn trigger_prefetch(
 ) {
     let prefetch_paths = tree_state.start_prefetch(parent_path);
     for path in prefetch_paths {
-        spawn_load_children(&ctx.children_tx, path, show_hidden, show_ignored, true);
+        spawn_load_children(&ctx.children_tx, path, show_hidden, show_ignored, LoadKind::Prefetch);
     }
 }
 
 /// Spawn a blocking task to load directory children asynchronously.
-fn spawn_load_children(
+pub fn spawn_load_children(
     tx: &tokio::sync::mpsc::Sender<ChildrenLoadResult>,
     path: PathBuf,
     show_hidden: bool,
     show_ignored: bool,
-    prefetch: bool,
+    kind: LoadKind,
 ) {
     let tx = tx.clone();
     tokio::spawn(async move {
@@ -526,7 +536,7 @@ fn spawn_load_children(
         };
 
         // Ignore send error (receiver dropped = app is shutting down).
-        let _ = tx.send(ChildrenLoadResult { path, children, prefetch }).await;
+        let _ = tx.send(ChildrenLoadResult { path, children, kind }).await;
     });
 }
 
@@ -537,12 +547,12 @@ fn spawn_load_children(
 pub fn refresh_directory(state: &AppState, dir: &Path, ctx: &AppContext) {
     // Spawn reload without invalidating: old children remain visible until
     // set_children() replaces them with the fresh listing.
-    // Use prefetch=true to preserve the current expansion state (don't force re-expand).
+    // Use Prefetch to preserve the current expansion state (don't force re-expand).
     spawn_load_children(
         &ctx.children_tx,
         dir.to_path_buf(),
         state.show_hidden,
         state.show_ignored,
-        true,
+        LoadKind::Prefetch,
     );
 }

@@ -23,6 +23,7 @@ pub use preview::trigger_preview;
 use tree::handle_tree_action;
 pub use tree::{
     refresh_directory,
+    spawn_load_children,
     trigger_prefetch,
 };
 

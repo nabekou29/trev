@@ -419,7 +419,6 @@ fn deserialize_one_or_many<'de, D: serde::Deserializer<'de>>(
     deserializer.deserialize_any(OneOrManyVisitor)
 }
 
-
 /// Display style configuration for file names.
 ///
 /// All fields are optional/defaulted so partial overrides work naturally in YAML.
@@ -1927,6 +1926,9 @@ keybindings:
         let schema_path = Path::new(manifest_dir).join("config.schema.json");
         let on_disk = std::fs::read_to_string(&schema_path).unwrap();
 
-        assert_eq!(generated, on_disk, "config.schema.json is out of date. Run `mise run schema` to regenerate.");
+        assert_eq!(
+            generated, on_disk,
+            "config.schema.json is out of date. Run `mise run schema` to regenerate."
+        );
     }
 }

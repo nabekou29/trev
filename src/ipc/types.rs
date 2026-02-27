@@ -228,8 +228,7 @@ mod tests {
 
     #[rstest]
     fn serialize_notification() {
-        let msg =
-            JsonRpcMessage::notification("open_file", json!({"path": "/foo"}));
+        let msg = JsonRpcMessage::notification("open_file", json!({"path": "/foo"}));
         let serialized = serde_json::to_string(&msg).unwrap();
         let parsed: Value = serde_json::from_str(&serialized).unwrap();
         assert_eq!(parsed["method"], "open_file");

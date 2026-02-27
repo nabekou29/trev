@@ -36,6 +36,7 @@ use handler::{
     handle_key_event,
     handle_mouse_event,
     refresh_directory,
+    spawn_load_children,
     trigger_prefetch,
     trigger_preview,
 };
@@ -68,7 +69,10 @@ use crate::preview::providers::image::ImagePreviewProvider;
 use crate::preview::providers::text::TextPreviewProvider;
 use crate::preview::state::PreviewState;
 use crate::session;
-use crate::state::tree::TreeState;
+use crate::state::tree::{
+    ChildrenState,
+    TreeState,
+};
 use crate::tree::builder::TreeBuilder;
 use crate::ui::column::{
     ColumnKind,
@@ -195,7 +199,7 @@ fn init_app(
     let (ipc_server, ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
 
     // --- Phase 2: restore remaining session state (expanded dirs, cursor, etc.) ---
-    let (selection, undo_history, restored_scroll_offset) = {
+    let (selection, undo_history, restored_scroll_offset, deferred_expansion) = {
         let _span = tracing::info_span!("session_restore").entered();
         restore_session_state(session_state, &config, builder, &mut tree_state)
     };
@@ -264,6 +268,7 @@ fn init_app(
         file_style_matcher,
         preview_debounce: None,
         layout_areas: LayoutAreas::default(),
+        deferred_expansion,
     };
 
     let (ctx, channels) = build_context_and_channels(
@@ -401,13 +406,97 @@ fn detect_terminal_and_build_registry(
     Ok((git_state, preview_registry))
 }
 
-/// Trigger initial async operations: prefetch, git status, preview.
+/// Trigger initial async operations: prefetch, git status, preview, deferred session restore.
 fn trigger_initial_loads(state: &mut AppState, ctx: &AppContext, root_path: &Path) {
     trigger_prefetch(&mut state.tree_state, root_path, ctx, state.show_hidden, state.show_ignored);
+    schedule_deferred_loads(state, ctx);
     if ctx.git_enabled {
         trigger_git_status(ctx);
     }
     trigger_preview(state, ctx);
+}
+
+/// Schedule the next batch of deferred session-restore directory loads.
+///
+/// Tries to start loading remaining expanded directories whose parents are already
+/// loaded, up to the concurrency limit. Cleans up when all loads complete or
+/// no further progress can be made (stuck paths with missing parents).
+fn schedule_deferred_loads(state: &mut AppState, ctx: &AppContext) {
+    let Some(ref mut deferred) = state.deferred_expansion else {
+        return;
+    };
+    let paths = deferred.schedule(&mut state.tree_state);
+    for path in paths {
+        spawn_load_children(
+            &ctx.children_tx,
+            path,
+            state.show_hidden,
+            state.show_ignored,
+            LoadKind::DeferredRestore,
+        );
+    }
+    if state.deferred_expansion.as_ref().is_some_and(|d| d.is_done() || d.is_stuck()) {
+        if state.deferred_expansion.as_ref().is_some_and(DeferredExpansion::is_stuck) {
+            tracing::warn!("deferred expansion stuck — remaining paths have unloaded parents");
+        }
+        tracing::info!("deferred session restore complete");
+        state.deferred_expansion = None;
+    }
+}
+
+/// Apply children load results to the tree, preserving cursor position for deferred restores.
+fn apply_children_load(
+    state: &mut AppState,
+    path: &Path,
+    children: Vec<crate::state::tree::TreeNode>,
+    kind: LoadKind,
+) {
+    let _span =
+        tracing::info_span!("set_children", path = %path.display(), child_count = children.len(), ?kind)
+            .entered();
+
+    if kind == LoadKind::DeferredRestore {
+        // Preserve cursor visual position during deferred restore.
+        let cursor_path = state.tree_state.cursor_path();
+        let visual_row = state.tree_state.cursor().saturating_sub(state.scroll.offset());
+
+        state.tree_state.set_children(path, children, true);
+
+        if let Some(ref cp) = cursor_path {
+            state.tree_state.move_cursor_to_path(cp);
+        }
+        state.scroll.set_offset(state.tree_state.cursor().saturating_sub(visual_row));
+        state.scroll.clamp_to_cursor(state.tree_state.cursor(), state.viewport_height);
+    } else {
+        let auto_expand = kind != LoadKind::Prefetch;
+        state.tree_state.set_children(path, children, auto_expand);
+    }
+}
+
+/// Post-processing after a children load: trigger prefetch or advance deferred loads.
+fn post_children_load(state: &mut AppState, ctx: &AppContext, loaded_path: &Path, kind: LoadKind) {
+    match kind {
+        LoadKind::UserExpand => {
+            let _span = tracing::info_span!("trigger_prefetch_in_process").entered();
+            trigger_prefetch(
+                &mut state.tree_state,
+                loaded_path,
+                ctx,
+                state.show_hidden,
+                state.show_ignored,
+            );
+        }
+        LoadKind::DeferredRestore => advance_deferred(state, ctx),
+        LoadKind::Prefetch => {}
+    }
+}
+
+/// Advance deferred session restore: record completion and schedule next batch.
+fn advance_deferred(state: &mut AppState, ctx: &AppContext) {
+    if let Some(ref mut deferred) = state.deferred_expansion {
+        deferred.on_load_complete();
+    }
+    schedule_deferred_loads(state, ctx);
 }
 
 /// Process all async channel results: children loads, watcher, IPC, git, rebuild, preview.
@@ -430,33 +519,16 @@ fn process_async_events(
             match result.children {
                 Ok(children) => {
                     let loaded_path = result.path.clone();
-                    let is_prefetch = result.prefetch;
-                    {
-                        let _span = tracing::info_span!(
-                            "set_children",
-                            path = %result.path.display(),
-                            child_count = children.len(),
-                            is_prefetch,
-                        )
-                        .entered();
-                        state.tree_state.set_children(&result.path, children, !is_prefetch);
-                    }
-
-                    // Prefetch child directories one level ahead (user-initiated loads only).
-                    if !is_prefetch {
-                        let _span = tracing::info_span!("trigger_prefetch_in_process").entered();
-                        trigger_prefetch(
-                            &mut state.tree_state,
-                            &loaded_path,
-                            ctx,
-                            state.show_hidden,
-                            state.show_ignored,
-                        );
-                    }
+                    let kind = result.kind;
+                    apply_children_load(state, &result.path, children, kind);
+                    post_children_load(state, ctx, &loaded_path, kind);
                 }
                 Err(err) => {
                     tracing::warn!(?result.path, %err, "failed to load children");
                     state.tree_state.set_children_error(&result.path);
+                    if result.kind == LoadKind::DeferredRestore {
+                        advance_deferred(state, ctx);
+                    }
                 }
             }
         }
@@ -805,10 +877,7 @@ fn load_session_overrides(
     let show_preview = if args.no_preview {
         false
     } else {
-        session_state
-            .as_ref()
-            .and_then(|s| s.show_preview)
-            .unwrap_or(config.display.show_preview)
+        session_state.as_ref().and_then(|s| s.show_preview).unwrap_or(config.display.show_preview)
     };
 
     let sort_order = args.sort_order.map_or_else(
@@ -852,37 +921,68 @@ fn load_session_overrides(
     (session_state, overrides)
 }
 
-/// Phase 2: restore remaining session state (expanded dirs, cursor, selection, undo, scroll).
+/// Phase 2: restore session state with deferred tree expansion.
 ///
-/// Returns `(selection, undo_history, restored_scroll_offset)`.
+/// Expanded directories are loaded in three phases:
+/// 1. **Critical** (sync): cursor ancestors — ensures cursor is immediately visible.
+/// 2. **Viewport** (sync): directories visible around cursor — no `[Loading...]` in initial view.
+/// 3. **Deferred** (async, returned): everything else — loaded after first render, cursor-proximate first.
+///
+/// Returns `(selection, undo_history, restored_scroll_offset, deferred_expansion)`.
 fn restore_session_state(
     session_state: Option<session::SessionState>,
     config: &Config,
     builder: TreeBuilder,
     tree_state: &mut TreeState,
-) -> (SelectionBuffer, UndoHistory, Option<usize>) {
+) -> (SelectionBuffer, UndoHistory, Option<usize>, Option<DeferredExpansion>) {
     let mut selection = SelectionBuffer::new();
     let mut undo_history = UndoHistory::new(config.file_op.undo_stack_size);
     let mut restored_scroll_offset = None;
+    let mut deferred = None;
 
     if let Some(session_state) = session_state {
-        // Restore expanded directories (sorted so parents load before children).
+        let cursor_path = session_state.cursor_path.clone();
+
+        // Split expanded paths into critical (cursor ancestors) and the rest.
         let mut paths = session_state.expanded_paths;
         paths.sort_by_key(|p| p.as_os_str().len());
-        for path in &paths {
-            if let Ok(children) = builder.load_children(path) {
-                tree_state.set_children(path, children, true);
+
+        let (critical, mut remaining) = split_critical_paths(&paths, cursor_path.as_deref());
+
+        // Phase 1: load cursor ancestors synchronously.
+        {
+            let _span = tracing::info_span!("phase1_critical", count = critical.len()).entered();
+            for path in &critical {
+                if let Ok(children) = builder.load_children(path) {
+                    tree_state.set_children(path, children, true);
+                }
             }
         }
 
-        // Restore cursor position.
-        if let Some(ref cursor_path) = session_state.cursor_path {
-            tree_state.move_cursor_to_path(cursor_path);
+        // Restore cursor position (needed before viewport calculation).
+        if let Some(ref cp) = cursor_path {
+            tree_state.move_cursor_to_path(cp);
+        }
+
+        // Phase 2: load viewport-visible expanded directories synchronously.
+        {
+            let _span = tracing::info_span!("phase2_viewport").entered();
+            let viewport_height = estimate_viewport_height();
+            load_viewport_paths(tree_state, &mut remaining, builder, viewport_height);
+        }
+
+        // Phase 3: remaining paths become deferred (async after first render).
+        if !remaining.is_empty() {
+            let cp = cursor_path.as_deref().unwrap_or_else(|| Path::new(""));
+            tracing::info!(count = remaining.len(), "deferring session expansion");
+            deferred = Some(DeferredExpansion::new(remaining, cp));
         }
 
         // Restore selection buffer.
-        selection =
-            SelectionBuffer::from_parts(session_state.selection_paths, session_state.selection_mode);
+        selection = SelectionBuffer::from_parts(
+            session_state.selection_paths,
+            session_state.selection_mode,
+        );
 
         // Restore undo history.
         undo_history = UndoHistory::from_stacks(
@@ -892,7 +992,7 @@ fn restore_session_state(
         );
 
         restored_scroll_offset = session_state.scroll_offset;
-        tracing::info!("session restored");
+        tracing::info!("session restored (critical + viewport sync, rest deferred)");
     }
 
     // Clean up expired sessions in background.
@@ -905,7 +1005,89 @@ fn restore_session_state(
         }
     });
 
-    (selection, undo_history, restored_scroll_offset)
+    (selection, undo_history, restored_scroll_offset, deferred)
+}
+
+/// Split expanded paths into cursor ancestors (critical) and the rest.
+fn split_critical_paths(
+    sorted_paths: &[PathBuf],
+    cursor_path: Option<&Path>,
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let Some(cursor) = cursor_path else {
+        // No cursor — nothing is critical, defer everything.
+        return (Vec::new(), sorted_paths.to_vec());
+    };
+
+    // Collect all ancestor directories of the cursor path.
+    let mut ancestors: HashSet<&Path> = HashSet::new();
+    let mut current = cursor.parent();
+    while let Some(dir) = current {
+        ancestors.insert(dir);
+        current = dir.parent();
+    }
+
+    let mut critical = Vec::new();
+    let mut remaining = Vec::new();
+    for path in sorted_paths {
+        if ancestors.contains(path.as_path()) {
+            critical.push(path.clone());
+        } else {
+            remaining.push(path.clone());
+        }
+    }
+    (critical, remaining)
+}
+
+/// Estimate viewport height from terminal size (before raw mode).
+fn estimate_viewport_height() -> usize {
+    crossterm::terminal::size().map_or(40, |(_, h)| h.saturating_sub(1) as usize)
+}
+
+/// Phase 2: synchronously load expanded directories visible within the viewport.
+///
+/// Iterates until no more `NotLoaded` expanded directories appear in the viewport
+/// range around the cursor. Loaded paths are removed from `remaining`.
+fn load_viewport_paths(
+    tree_state: &mut TreeState,
+    remaining: &mut Vec<PathBuf>,
+    builder: TreeBuilder,
+    viewport_height: usize,
+) {
+    if remaining.is_empty() {
+        return;
+    }
+
+    let remaining_set: HashSet<PathBuf> = remaining.iter().cloned().collect();
+
+    loop {
+        let visible = tree_state.visible_nodes();
+        let cursor = tree_state.cursor();
+        let half = viewport_height / 2;
+        let start = cursor.saturating_sub(half);
+        let end = (cursor + half + 1).min(visible.len());
+
+        // Find expanded directories in the viewport that need loading.
+        let mut to_load: Vec<PathBuf> = Vec::new();
+        for vnode in visible.get(start..end).unwrap_or_default() {
+            if vnode.node.is_dir
+                && remaining_set.contains(&vnode.node.path)
+                && matches!(vnode.node.children, ChildrenState::NotLoaded)
+            {
+                to_load.push(vnode.node.path.clone());
+            }
+        }
+
+        if to_load.is_empty() {
+            break;
+        }
+
+        for path in &to_load {
+            if let Ok(children) = builder.load_children(path) {
+                tree_state.set_children(path, children, true);
+            }
+        }
+        remaining.retain(|p| !to_load.contains(p));
+    }
 }
 
 /// Save session and restore terminal.

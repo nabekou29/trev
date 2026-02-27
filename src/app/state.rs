@@ -1,7 +1,10 @@
 //! Application state, context, and result types.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{
@@ -107,6 +110,8 @@ pub struct AppState {
     pub preview_debounce: Option<Instant>,
     /// Cached layout areas from the last render for mouse hit-testing.
     pub layout_areas: LayoutAreas,
+    /// Deferred session restore: expanded directories loaded asynchronously after first render.
+    pub deferred_expansion: Option<DeferredExpansion>,
 }
 
 /// Cached layout areas from the last render, used for mouse hit-testing.
@@ -268,6 +273,17 @@ pub struct AppContext {
     pub menus: HashMap<String, MenuDefinition>,
 }
 
+/// Kind of async directory children load operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadKind {
+    /// User-initiated expand (triggers prefetch after load).
+    UserExpand,
+    /// Background prefetch (one-level-ahead, does not trigger further prefetch).
+    Prefetch,
+    /// Deferred session restore (cursor-prioritized, adjusts scroll to preserve visual row).
+    DeferredRestore,
+}
+
 /// Result of an async directory children load operation.
 ///
 /// Sent through an mpsc channel from the blocking task to the event loop.
@@ -277,8 +293,92 @@ pub struct ChildrenLoadResult {
     pub path: PathBuf,
     /// Loaded children, or an error message.
     pub children: Result<Vec<TreeNode>, String>,
-    /// Whether this was a background prefetch (one-level-ahead load).
-    pub prefetch: bool,
+    /// What kind of load operation produced this result.
+    pub kind: LoadKind,
+}
+
+/// Deferred session restore: expanded directories to load asynchronously after first render.
+///
+/// Paths are sorted by cursor proximity (common prefix length descending, then depth ascending)
+/// so that directories near the cursor are restored first.
+#[derive(Debug)]
+pub struct DeferredExpansion {
+    /// Paths remaining to be loaded, sorted by priority.
+    remaining: Vec<PathBuf>,
+    /// Number of currently in-flight async loads.
+    in_flight: usize,
+    /// Maximum number of concurrent async loads.
+    max_concurrent: usize,
+}
+
+impl DeferredExpansion {
+    /// Maximum concurrent deferred loads.
+    const DEFAULT_MAX_CONCURRENT: usize = 8;
+
+    /// Create a new deferred expansion queue.
+    ///
+    /// Paths are sorted by priority: longest common prefix with `cursor_path` first,
+    /// then shallowest depth first (to resolve parent-child dependencies naturally).
+    pub fn new(mut paths: Vec<PathBuf>, cursor_path: &Path) -> Self {
+        paths.sort_by(|a, b| {
+            let a_common = common_prefix_len(a, cursor_path);
+            let b_common = common_prefix_len(b, cursor_path);
+            // Higher common prefix = higher priority (sort first).
+            b_common.cmp(&a_common).then_with(|| {
+                // Shallower depth = higher priority for same common prefix.
+                a.components().count().cmp(&b.components().count())
+            })
+        });
+        Self { remaining: paths, in_flight: 0, max_concurrent: Self::DEFAULT_MAX_CONCURRENT }
+    }
+
+    /// Try to schedule the next batch of loads.
+    ///
+    /// Returns paths that were transitioned to `Loading` state.
+    /// Only schedules paths whose parent directory is already loaded in the tree.
+    pub fn schedule(&mut self, tree: &mut TreeState) -> Vec<PathBuf> {
+        let mut scheduled = Vec::new();
+        let mut still_remaining = Vec::new();
+
+        for path in self.remaining.drain(..) {
+            if self.in_flight + scheduled.len() >= self.max_concurrent {
+                still_remaining.push(path);
+                continue;
+            }
+            if tree.prepare_async_load(&path, true).is_some() {
+                scheduled.push(path);
+            } else {
+                still_remaining.push(path);
+            }
+        }
+
+        self.in_flight += scheduled.len();
+        self.remaining = still_remaining;
+        scheduled
+    }
+
+    /// Record that one in-flight load has completed.
+    pub const fn on_load_complete(&mut self) {
+        self.in_flight = self.in_flight.saturating_sub(1);
+    }
+
+    /// Whether all deferred loads have completed and no paths remain.
+    pub const fn is_done(&self) -> bool {
+        self.remaining.is_empty() && self.in_flight == 0
+    }
+
+    /// Whether we are stuck: no in-flight loads and remaining paths cannot be scheduled.
+    ///
+    /// This happens when remaining paths have parents that are not loaded (e.g., deleted
+    /// since the session was saved). In this case, give up on the remaining paths.
+    pub const fn is_stuck(&self) -> bool {
+        self.in_flight == 0 && !self.remaining.is_empty()
+    }
+}
+
+/// Count the number of leading path components shared between two paths.
+fn common_prefix_len(a: &Path, b: &Path) -> usize {
+    a.components().zip(b.components()).take_while(|(ca, cb)| ca == cb).count()
 }
 
 /// Result of an async tree rebuild operation.
