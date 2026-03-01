@@ -199,7 +199,7 @@ fn init_app(
     let (ipc_server, ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
 
     // --- Phase 2: restore remaining session state (expanded dirs, cursor, etc.) ---
-    let (selection, undo_history, restored_scroll_offset, deferred_expansion) = {
+    let (selection, undo_history, restored_visual_row, deferred_expansion) = {
         let _span = tracing::info_span!("session_restore").entered();
         restore_session_state(session_state, &config, builder, &mut tree_state)
     };
@@ -286,8 +286,8 @@ fn init_app(
     let terminal = {
         let _span = tracing::info_span!("terminal_setup").entered();
         // Reveal overrides session scroll: always center on the revealed path.
-        let restored_offset = if reveal_succeeded { None } else { restored_scroll_offset };
-        setup_terminal(&mut state, restored_offset, config.mouse.enabled)
+        let visual_row = if reveal_succeeded { None } else { restored_visual_row };
+        setup_terminal(&mut state, visual_row, config.mouse.enabled)
     };
 
     Ok((state, ctx, channels, terminal))
@@ -345,11 +345,11 @@ fn build_context_and_channels(
 /// Initialize terminal and pre-compute viewport dimensions.
 ///
 /// Auto-hides preview on narrow terminals and restores scroll position.
-/// `restored_offset` is `Some(offset)` when a session had a saved scroll
-/// position, or `None` to center the cursor (reveal, old session, fresh start).
+/// `restored_visual_row` is `Some(row)` when a session had a saved cursor
+/// visual row, or `None` to center the cursor (reveal, old session, fresh start).
 fn setup_terminal(
     state: &mut AppState,
-    restored_offset: Option<usize>,
+    restored_visual_row: Option<usize>,
     mouse: bool,
 ) -> ratatui::DefaultTerminal {
     let terminal = crate::terminal::init(mouse);
@@ -364,10 +364,11 @@ fn setup_terminal(
     }
 
     // Restore scroll position before first draw.
-    match restored_offset {
-        Some(offset) => {
-            state.scroll.set_offset(offset);
-            state.scroll.clamp_to_cursor(state.tree_state.cursor(), state.viewport_height);
+    match restored_visual_row {
+        Some(visual_row) => {
+            let cursor = state.tree_state.cursor();
+            state.scroll.set_offset(cursor.saturating_sub(visual_row));
+            state.scroll.clamp_to_cursor(cursor, state.viewport_height);
         }
         None => {
             state.scroll.center_on_cursor(state.tree_state.cursor(), state.viewport_height);
@@ -928,7 +929,7 @@ fn load_session_overrides(
 /// 2. **Viewport** (sync): directories visible around cursor — no `[Loading...]` in initial view.
 /// 3. **Deferred** (async, returned): everything else — loaded after first render, cursor-proximate first.
 ///
-/// Returns `(selection, undo_history, restored_scroll_offset, deferred_expansion)`.
+/// Returns `(selection, undo_history, restored_visual_row, deferred_expansion)`.
 fn restore_session_state(
     session_state: Option<session::SessionState>,
     config: &Config,
@@ -937,7 +938,7 @@ fn restore_session_state(
 ) -> (SelectionBuffer, UndoHistory, Option<usize>, Option<DeferredExpansion>) {
     let mut selection = SelectionBuffer::new();
     let mut undo_history = UndoHistory::new(config.file_op.undo_stack_size);
-    let mut restored_scroll_offset = None;
+    let mut restored_visual_row = None;
     let mut deferred = None;
 
     if let Some(session_state) = session_state {
@@ -971,6 +972,12 @@ fn restore_session_state(
             load_viewport_paths(tree_state, &mut remaining, builder, viewport_height);
         }
 
+        // Re-establish cursor: Phase 2 set_children calls shift visible indices
+        // without updating the cursor field.
+        if let Some(ref cp) = cursor_path {
+            tree_state.move_cursor_to_path(cp);
+        }
+
         // Phase 3: remaining paths become deferred (async after first render).
         if !remaining.is_empty() {
             let cp = cursor_path.as_deref().unwrap_or_else(|| Path::new(""));
@@ -991,8 +998,11 @@ fn restore_session_state(
             config.file_op.undo_stack_size,
         );
 
-        restored_scroll_offset = session_state.scroll_offset;
-        tracing::info!("session restored (critical + viewport sync, rest deferred)");
+        // Prefer scroll_visual_row (new format). Old sessions with only
+        // scroll_offset cannot be translated to the partial tree, so fall
+        // back to None (will center_on_cursor in setup_terminal).
+        restored_visual_row = session_state.scroll_visual_row;
+        tracing::info!(?restored_visual_row, "session restored (critical + viewport sync, rest deferred)");
     }
 
     // Clean up expired sessions in background.
@@ -1005,7 +1015,7 @@ fn restore_session_state(
         }
     });
 
-    (selection, undo_history, restored_scroll_offset, deferred)
+    (selection, undo_history, restored_visual_row, deferred)
 }
 
 /// Split expanded paths into cursor ancestors (critical) and the rest.
@@ -1101,13 +1111,14 @@ fn shutdown(root_path: &Path, state: &AppState) {
         sort_direction: state.tree_state.sort_direction(),
         directories_first: state.tree_state.directories_first(),
     };
+    let visual_row = state.tree_state.cursor().saturating_sub(state.scroll.offset());
     let session_state = session::build_session_state(
         root_path,
         state.tree_state.expanded_paths(),
         state.tree_state.cursor_path(),
         &state.selection,
         &state.undo_history,
-        state.scroll.offset(),
+        visual_row,
         &display,
     );
     if let Err(e) = session::save(&session_state) {
