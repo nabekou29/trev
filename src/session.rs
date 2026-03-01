@@ -60,11 +60,8 @@ pub struct SessionState {
     /// Redo stack.
     #[serde(default)]
     pub redo_stack: Vec<OpGroup>,
-    /// Scroll offset (first visible row) — deprecated, kept for old sessions.
-    #[serde(default)]
-    pub scroll_offset: Option<usize>,
     /// Cursor's visual row (on-screen row) for scroll position restoration.
-    /// Computed as `cursor_index - scroll_offset` at save time.
+    /// Computed as `cursor_index − scroll.offset()` at save time.
     #[serde(default)]
     pub scroll_visual_row: Option<usize>,
     /// Whether hidden (dot) files were shown.
@@ -164,7 +161,6 @@ pub fn build_session_state(
         selection_mode: selection_mode.copied(),
         undo_stack,
         redo_stack,
-        scroll_offset: None,
         scroll_visual_row: Some(scroll_visual_row),
         show_hidden: Some(display.show_hidden),
         show_ignored: Some(display.show_ignored),
@@ -294,7 +290,6 @@ mod tests {
             selection_mode: Some(SelectionMode::Copy),
             undo_stack: vec![],
             redo_stack: vec![],
-            scroll_offset: None,
             scroll_visual_row: None,
             show_hidden: Some(true),
             show_ignored: None,
@@ -340,7 +335,6 @@ mod tests {
             selection_mode: None,
             undo_stack: vec![],
             redo_stack: vec![],
-            scroll_offset: None,
             scroll_visual_row: None,
             show_hidden: None,
             show_ignored: None,
@@ -395,7 +389,6 @@ mod tests {
         assert_eq!(state.cursor_path, cursor);
         assert_eq!(state.selection_mode, Some(SelectionMode::Cut));
         assert_that!(state.selection_paths.len(), eq(1));
-        assert_eq!(state.scroll_offset, None);
         assert_eq!(state.scroll_visual_row, Some(42));
         assert_eq!(state.show_hidden, Some(true));
         assert_eq!(state.show_ignored, Some(false));
@@ -436,7 +429,6 @@ mod tests {
             selection_mode: None,
             undo_stack: vec![],
             redo_stack: vec![],
-            scroll_offset: None,
             scroll_visual_row: None,
             show_hidden: None,
             show_ignored: None,
@@ -469,7 +461,6 @@ mod tests {
             selection_mode: None,
             undo_stack: vec![],
             redo_stack: vec![],
-            scroll_offset: None,
             scroll_visual_row: None,
             show_hidden: None,
             show_ignored: None,
@@ -505,7 +496,6 @@ mod tests {
         assert!(state.selection_mode.is_none());
         assert!(state.undo_stack.is_empty());
         assert!(state.redo_stack.is_empty());
-        assert!(state.scroll_offset.is_none());
         assert!(state.scroll_visual_row.is_none());
         assert!(state.show_hidden.is_none());
         assert!(state.show_ignored.is_none());

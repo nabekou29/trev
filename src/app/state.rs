@@ -132,6 +132,17 @@ impl AppState {
         self.status_message = Some(StatusMessage::new(text));
     }
 
+    /// Expanded directory paths, including not-yet-loaded deferred ones.
+    ///
+    /// Ensures quitting during deferred restore does not lose pending paths.
+    pub fn expanded_paths_including_deferred(&self) -> Vec<PathBuf> {
+        let mut paths = self.tree_state.expanded_paths();
+        if let Some(ref deferred) = self.deferred_expansion {
+            paths.extend_from_slice(deferred.remaining_paths());
+        }
+        paths
+    }
+
     /// Clear the status message if it has expired.
     ///
     /// Returns `true` if a message was actually cleared (UI needs redraw).
@@ -238,6 +249,39 @@ impl ScrollState {
         if cursor >= self.offset + viewport_height {
             self.offset = cursor.saturating_sub(viewport_height - 1);
         }
+    }
+}
+
+/// Snapshot of cursor position and on-screen row before a tree modification.
+///
+/// Captured before operations that change the tree structure (deferred
+/// expansion, rebuild, etc.) and restored afterwards so the cursor stays
+/// at the same visual position on screen.
+#[derive(Debug, Clone)]
+pub struct CursorSnapshot {
+    /// Path the cursor was on (used to relocate after tree changes).
+    pub path: Option<PathBuf>,
+    /// On-screen row (`cursor_index − scroll.offset()`).
+    pub visual_row: usize,
+}
+
+impl CursorSnapshot {
+    /// Capture current cursor position and visual row.
+    pub fn capture(tree: &TreeState, scroll: &ScrollState) -> Self {
+        Self {
+            path: tree.cursor_path(),
+            visual_row: tree.cursor().saturating_sub(scroll.offset()),
+        }
+    }
+
+    /// Restore cursor to the saved path and adjust scroll to preserve visual row.
+    pub fn restore(&self, tree: &mut TreeState, scroll: &mut ScrollState, viewport_height: usize) {
+        if let Some(ref p) = self.path {
+            tree.move_cursor_to_path(p);
+        }
+        let cursor = tree.cursor();
+        scroll.set_offset(cursor.saturating_sub(self.visual_row));
+        scroll.clamp_to_cursor(cursor, viewport_height);
     }
 }
 
@@ -373,6 +417,14 @@ impl DeferredExpansion {
     /// since the session was saved). In this case, give up on the remaining paths.
     pub const fn is_stuck(&self) -> bool {
         self.in_flight == 0 && !self.remaining.is_empty()
+    }
+
+    /// Paths that are still waiting to be loaded.
+    ///
+    /// Used at shutdown to include not-yet-scheduled paths in the session save,
+    /// so they are not lost if the user quits before deferred expansion completes.
+    pub fn remaining_paths(&self) -> &[PathBuf] {
+        &self.remaining
     }
 }
 

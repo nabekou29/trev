@@ -458,16 +458,9 @@ fn apply_children_load(
 
     if kind == LoadKind::DeferredRestore {
         // Preserve cursor visual position during deferred restore.
-        let cursor_path = state.tree_state.cursor_path();
-        let visual_row = state.tree_state.cursor().saturating_sub(state.scroll.offset());
-
+        let snapshot = CursorSnapshot::capture(&state.tree_state, &state.scroll);
         state.tree_state.set_children(path, children, true);
-
-        if let Some(ref cp) = cursor_path {
-            state.tree_state.move_cursor_to_path(cp);
-        }
-        state.scroll.set_offset(state.tree_state.cursor().saturating_sub(visual_row));
-        state.scroll.clamp_to_cursor(state.tree_state.cursor(), state.viewport_height);
+        snapshot.restore(&mut state.tree_state, &mut state.scroll, state.viewport_height);
     } else {
         let auto_expand = kind != LoadKind::Prefetch;
         state.tree_state.set_children(path, children, auto_expand);
@@ -513,25 +506,47 @@ fn process_async_events(
     let mut had_events = false;
 
     // Children load results.
+    //
+    // DeferredRestore results are batched: all set_children calls happen first,
+    // then cursor is resolved once. This avoids O(N×V) per-result cursor walks
+    // when many deferred loads complete in the same frame.
     {
         let _span = tracing::info_span!("process_children").entered();
+
+        let mut deferred_snapshot: Option<CursorSnapshot> = None;
+
         for result in channels.drain_children() {
             had_events = true;
             match result.children {
                 Ok(children) => {
                     let loaded_path = result.path.clone();
                     let kind = result.kind;
-                    apply_children_load(state, &result.path, children, kind);
+
+                    if kind == LoadKind::DeferredRestore {
+                        if deferred_snapshot.is_none() {
+                            deferred_snapshot =
+                                Some(CursorSnapshot::capture(&state.tree_state, &state.scroll));
+                        }
+                        state
+                            .tree_state
+                            .set_children(&result.path, children, true);
+                    } else {
+                        apply_children_load(state, &result.path, children, kind);
+                    }
                     post_children_load(state, ctx, &loaded_path, kind);
                 }
                 Err(err) => {
                     tracing::warn!(?result.path, %err, "failed to load children");
                     state.tree_state.set_children_error(&result.path);
                     if result.kind == LoadKind::DeferredRestore {
-                        advance_deferred(state, ctx);
+                        post_children_load(state, ctx, &result.path, result.kind);
                     }
                 }
             }
+        }
+
+        if let Some(snapshot) = deferred_snapshot {
+            snapshot.restore(&mut state.tree_state, &mut state.scroll, state.viewport_height);
         }
     }
 
@@ -998,9 +1013,8 @@ fn restore_session_state(
             config.file_op.undo_stack_size,
         );
 
-        // Prefer scroll_visual_row (new format). Old sessions with only
-        // scroll_offset cannot be translated to the partial tree, so fall
-        // back to None (will center_on_cursor in setup_terminal).
+        // Old sessions without scroll_visual_row fall back to None
+        // (center_on_cursor in setup_terminal).
         restored_visual_row = session_state.scroll_visual_row;
         tracing::info!(?restored_visual_row, "session restored (critical + viewport sync, rest deferred)");
     }
@@ -1114,7 +1128,7 @@ fn shutdown(root_path: &Path, state: &AppState) {
     let visual_row = state.tree_state.cursor().saturating_sub(state.scroll.offset());
     let session_state = session::build_session_state(
         root_path,
-        state.tree_state.expanded_paths(),
+        state.expanded_paths_including_deferred(),
         state.tree_state.cursor_path(),
         &state.selection,
         &state.undo_history,

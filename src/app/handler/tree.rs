@@ -13,6 +13,7 @@ use crate::app::state::{
     AppContext,
     AppState,
     ChildrenLoadResult,
+    CursorSnapshot,
     LoadKind,
     TreeRebuildResult,
 };
@@ -309,7 +310,7 @@ pub(super) fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
     let expanded = state.tree_state.expanded_paths();
     let cursor_path = state.tree_state.cursor_path();
     let fallback_paths = state.tree_state.paths_above_cursor();
-    let visual_row = state.tree_state.cursor().saturating_sub(state.scroll.offset());
+    let visual_row = CursorSnapshot::capture(&state.tree_state, &state.scroll).visual_row;
     let order = state.tree_state.sort_order();
     let direction = state.tree_state.sort_direction();
     let dirs_first = state.tree_state.directories_first();
