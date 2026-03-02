@@ -275,9 +275,16 @@ impl CursorSnapshot {
     }
 
     /// Restore cursor to the saved path and adjust scroll to preserve visual row.
+    ///
+    /// When the saved path no longer exists (e.g. the file was deleted), the
+    /// cursor is clamped to the current visible range so it stays at the same
+    /// index position — effectively selecting the next item, or the last item
+    /// if the deleted file was at the end.
     pub fn restore(&self, tree: &mut TreeState, scroll: &mut ScrollState, viewport_height: usize) {
-        if let Some(ref p) = self.path {
-            tree.move_cursor_to_path(p);
+        let found = self.path.as_ref().is_some_and(|p| tree.move_cursor_to_path(p));
+        if !found {
+            // Clamp cursor to valid range (same index → next item, or last).
+            tree.move_cursor_to(tree.cursor());
         }
         let cursor = tree.cursor();
         scroll.set_offset(cursor.saturating_sub(self.visual_row));

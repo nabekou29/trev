@@ -445,7 +445,7 @@ fn schedule_deferred_loads(state: &mut AppState, ctx: &AppContext) {
     }
 }
 
-/// Apply children load results to the tree, preserving cursor position for deferred restores.
+/// Apply children load results to the tree, preserving cursor position for non-user loads.
 fn apply_children_load(
     state: &mut AppState,
     path: &Path,
@@ -456,14 +456,19 @@ fn apply_children_load(
         tracing::info_span!("set_children", path = %path.display(), child_count = children.len(), ?kind)
             .entered();
 
-    if kind == LoadKind::DeferredRestore {
-        // Preserve cursor visual position during deferred restore.
-        let snapshot = CursorSnapshot::capture(&state.tree_state, &state.scroll);
-        state.tree_state.set_children(path, children, true);
-        snapshot.restore(&mut state.tree_state, &mut state.scroll, state.viewport_height);
-    } else {
-        let auto_expand = kind != LoadKind::Prefetch;
-        state.tree_state.set_children(path, children, auto_expand);
+    match kind {
+        LoadKind::DeferredRestore | LoadKind::Prefetch => {
+            // Preserve cursor visual position during deferred restore and
+            // background refreshes (e.g. watcher-triggered reloads) so the
+            // selected file does not jump when files are added or removed.
+            let snapshot = CursorSnapshot::capture(&state.tree_state, &state.scroll);
+            let auto_expand = kind != LoadKind::Prefetch;
+            state.tree_state.set_children(path, children, auto_expand);
+            snapshot.restore(&mut state.tree_state, &mut state.scroll, state.viewport_height);
+        }
+        LoadKind::UserExpand => {
+            state.tree_state.set_children(path, children, true);
+        }
     }
 }
 
