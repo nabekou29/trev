@@ -101,7 +101,7 @@ fn build_indicator_spans(state: &AppState) -> Vec<Span<'static>> {
     spans
 }
 
-/// Determine the center text: processing > status message > pending keys > file path.
+/// Determine the center text: processing > status message > pending keys > search filter > file path.
 fn build_center_text(state: &AppState) -> String {
     if state.processing {
         return " Processing...".to_string();
@@ -114,6 +114,13 @@ fn build_center_text(state: &AppState) -> String {
     // Show pending key sequence indicator.
     if state.pending_keys.is_pending() {
         return format!(" {}", state.pending_keys.display_string());
+    }
+
+    // Show active search filter query.
+    if let crate::input::AppMode::Search(ref search) = state.mode
+        && search.phase == crate::input::SearchPhase::Filtered
+    {
+        return format!(" /{}", search.buffer.value);
     }
 
     // Default: file path.

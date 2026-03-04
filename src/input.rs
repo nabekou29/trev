@@ -8,94 +8,28 @@ use crossterm::event::{
     KeyModifiers,
 };
 
-/// Action to perform when inline input is confirmed.
+/// Reusable text buffer with cursor and Emacs-style editing.
+///
+/// Used by [`InputState`] (create/rename) and search input.
 #[derive(Debug, Clone)]
-pub enum InputAction {
-    /// Create a new file or directory at the given parent.
-    Create {
-        /// Parent directory for the new entry.
-        parent_dir: PathBuf,
-    },
-    /// Create a new directory at the given parent.
-    CreateDirectory {
-        /// Parent directory for the new entry.
-        parent_dir: PathBuf,
-    },
-    /// Rename the target file/directory.
-    Rename {
-        /// Path of the file/directory to rename.
-        target: PathBuf,
-    },
-}
-
-/// State for the inline text input field.
-#[derive(Debug, Clone)]
-pub struct InputState {
-    /// Display prompt (e.g. "Create: " or "Rename: ").
-    pub prompt: String,
-    /// Current input text value.
+pub struct TextBuffer {
+    /// Current text value.
     pub value: String,
     /// Cursor position within the value (byte offset).
     pub cursor_pos: usize,
-    /// Action to perform on confirmation.
-    pub on_confirm: InputAction,
 }
 
-impl InputState {
-    /// Create a new input state for file creation.
+impl TextBuffer {
+    /// Create a new, empty text buffer.
     #[must_use]
-    pub fn for_create(parent_dir: PathBuf) -> Self {
-        Self {
-            prompt: "Create: ".to_string(),
-            value: String::new(),
-            cursor_pos: 0,
-            on_confirm: InputAction::Create { parent_dir },
-        }
+    pub const fn new() -> Self {
+        Self { value: String::new(), cursor_pos: 0 }
     }
 
-    /// Create a new input state for directory creation.
+    /// Create a text buffer with initial value and cursor position.
     #[must_use]
-    pub fn for_create_directory(parent_dir: PathBuf) -> Self {
-        Self {
-            prompt: "Create directory: ".to_string(),
-            value: String::new(),
-            cursor_pos: 0,
-            on_confirm: InputAction::CreateDirectory { parent_dir },
-        }
-    }
-
-    /// Create a new input state for renaming.
-    ///
-    /// Pre-fills the value with the existing name and places cursor before the extension.
-    #[must_use]
-    pub fn for_rename(target: PathBuf) -> Self {
-        let name = target.file_name().unwrap_or_default().to_string_lossy().to_string();
-
-        // Place cursor before the extension (e.g. "file|.txt").
-        let cursor_pos = name.rfind('.').filter(|&pos| pos > 0).unwrap_or(name.len());
-
-        Self {
-            prompt: "Rename: ".to_string(),
-            value: name,
-            cursor_pos,
-            on_confirm: InputAction::Rename { target },
-        }
-    }
-
-    /// Get the block title for display in the input box border.
-    ///
-    /// - Create: `"Create"`
-    /// - Rename: `"Rename: original_name.ext"`
-    #[must_use]
-    pub fn title(&self) -> String {
-        match &self.on_confirm {
-            InputAction::Create { .. } => "Create".to_string(),
-            InputAction::CreateDirectory { .. } => "Create directory".to_string(),
-            InputAction::Rename { target } => {
-                let name = target.file_name().unwrap_or_default().to_string_lossy();
-                format!("Rename: {name}")
-            }
-        }
+    pub const fn with_value(value: String, cursor_pos: usize) -> Self {
+        Self { value, cursor_pos }
     }
 
     /// Insert a character at the current cursor position.
@@ -177,67 +111,65 @@ impl InputState {
         self.value.drain(self.cursor_pos..boundary);
     }
 
-    /// Handle a key event, dispatching to the appropriate editing method.
+    /// Handle a key event for text editing only.
     ///
-    /// Returns `Some(true)` on Enter (confirm), `Some(false)` on Esc (cancel),
-    /// `None` for regular editing keys.
-    pub fn handle_key_event(&mut self, key: KeyEvent) -> Option<bool> {
+    /// Returns `true` if the key was consumed as an editing action,
+    /// `false` if it was not handled (caller should process it).
+    pub fn handle_key_event(&mut self, key: KeyEvent) -> bool {
         match (key.code, key.modifiers) {
-            (KeyCode::Enter, _) => Some(true),
-            (KeyCode::Esc, _) => Some(false),
             (KeyCode::Backspace, _) | (KeyCode::Char('h'), KeyModifiers::CONTROL) => {
                 self.delete_char_backward();
-                None
+                true
             }
             (KeyCode::Delete, _) | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
                 self.delete_char_forward();
-                None
+                true
             }
             (KeyCode::Left, _) | (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
                 self.move_cursor_left();
-                None
+                true
             }
             (KeyCode::Right, _) | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
                 self.move_cursor_right();
-                None
+                true
             }
             (KeyCode::Home, _) | (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
                 self.move_cursor_home();
-                None
+                true
             }
             (KeyCode::End, _) | (KeyCode::Char('e'), KeyModifiers::CONTROL) => {
                 self.move_cursor_end();
-                None
+                true
             }
             (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
                 self.clear_to_start();
-                None
+                true
             }
             (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
                 self.clear_to_end();
-                None
+                true
             }
             (KeyCode::Char('w'), KeyModifiers::CONTROL) => {
                 self.delete_word_backward();
-                None
+                true
             }
             (KeyCode::Char('b'), KeyModifiers::ALT) => {
                 self.move_word_backward();
-                None
+                true
             }
             (KeyCode::Char('f'), KeyModifiers::ALT) => {
                 self.move_word_forward();
-                None
+                true
             }
             (KeyCode::Char('d'), KeyModifiers::ALT) => {
                 self.delete_word_forward();
-                None
+                true
             }
             (KeyCode::Char(ch), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
                 self.insert_char(ch);
-                None
+                true
             }
-            _ => None,
+            _ => false,
         }
     }
 
@@ -293,6 +225,113 @@ impl InputState {
         // Return the byte position of the next word start,
         // or end of string if no more words.
         chars.peek().map_or(self.value.len(), |&(i, _)| self.cursor_pos + i)
+    }
+}
+
+impl Default for TextBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Action to perform when inline input is confirmed.
+#[derive(Debug, Clone)]
+pub enum InputAction {
+    /// Create a new file or directory at the given parent.
+    Create {
+        /// Parent directory for the new entry.
+        parent_dir: PathBuf,
+    },
+    /// Create a new directory at the given parent.
+    CreateDirectory {
+        /// Parent directory for the new entry.
+        parent_dir: PathBuf,
+    },
+    /// Rename the target file/directory.
+    Rename {
+        /// Path of the file/directory to rename.
+        target: PathBuf,
+    },
+}
+
+/// State for the inline text input field.
+#[derive(Debug, Clone)]
+pub struct InputState {
+    /// Display prompt (e.g. "Create: " or "Rename: ").
+    pub prompt: String,
+    /// Text buffer with cursor and editing support.
+    pub buffer: TextBuffer,
+    /// Action to perform on confirmation.
+    pub on_confirm: InputAction,
+}
+
+impl InputState {
+    /// Create a new input state for file creation.
+    #[must_use]
+    pub fn for_create(parent_dir: PathBuf) -> Self {
+        Self {
+            prompt: "Create: ".to_string(),
+            buffer: TextBuffer::new(),
+            on_confirm: InputAction::Create { parent_dir },
+        }
+    }
+
+    /// Create a new input state for directory creation.
+    #[must_use]
+    pub fn for_create_directory(parent_dir: PathBuf) -> Self {
+        Self {
+            prompt: "Create directory: ".to_string(),
+            buffer: TextBuffer::new(),
+            on_confirm: InputAction::CreateDirectory { parent_dir },
+        }
+    }
+
+    /// Create a new input state for renaming.
+    ///
+    /// Pre-fills the value with the existing name and places cursor before the extension.
+    #[must_use]
+    pub fn for_rename(target: PathBuf) -> Self {
+        let name = target.file_name().unwrap_or_default().to_string_lossy().to_string();
+
+        // Place cursor before the extension (e.g. "file|.txt").
+        let cursor_pos = name.rfind('.').filter(|&pos| pos > 0).unwrap_or(name.len());
+
+        Self {
+            prompt: "Rename: ".to_string(),
+            buffer: TextBuffer::with_value(name, cursor_pos),
+            on_confirm: InputAction::Rename { target },
+        }
+    }
+
+    /// Get the block title for display in the input box border.
+    ///
+    /// - Create: `"Create"`
+    /// - Rename: `"Rename: original_name.ext"`
+    #[must_use]
+    pub fn title(&self) -> String {
+        match &self.on_confirm {
+            InputAction::Create { .. } => "Create".to_string(),
+            InputAction::CreateDirectory { .. } => "Create directory".to_string(),
+            InputAction::Rename { target } => {
+                let name = target.file_name().unwrap_or_default().to_string_lossy();
+                format!("Rename: {name}")
+            }
+        }
+    }
+
+    /// Handle a key event, dispatching to the appropriate editing method.
+    ///
+    /// Returns `Some(true)` on Enter (confirm), `Some(false)` on Esc (cancel),
+    /// `None` for regular editing keys.
+    pub fn handle_key_event(&mut self, key: KeyEvent) -> Option<bool> {
+        match key.code {
+            KeyCode::Enter => Some(true),
+            KeyCode::Esc => Some(false),
+            _ => {
+                self.buffer.handle_key_event(key);
+                None
+            }
+        }
     }
 }
 
@@ -357,6 +396,41 @@ pub struct MenuState {
     pub item_actions: Vec<crate::action::Action>,
 }
 
+/// Phase of the search interaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchPhase {
+    /// User is actively typing the search query.
+    Typing,
+    /// Search is confirmed and acting as a filter.
+    Filtered,
+}
+
+/// State for the search overlay.
+#[derive(Debug, Clone)]
+pub struct SearchState {
+    /// Text buffer for the search query.
+    pub buffer: TextBuffer,
+    /// Current search phase.
+    pub phase: SearchPhase,
+    /// Index into search history during Up/Down navigation (`None` = new input).
+    pub history_index: Option<usize>,
+    /// Query text saved before entering history navigation.
+    pub original_query: String,
+}
+
+impl SearchState {
+    /// Create a new search state for a fresh search.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            buffer: TextBuffer::new(),
+            phase: SearchPhase::Typing,
+            history_index: None,
+            original_query: String::new(),
+        }
+    }
+}
+
 /// Application mode state machine.
 #[derive(Debug, Clone, Default)]
 pub enum AppMode {
@@ -369,6 +443,8 @@ pub enum AppMode {
     Confirm(ConfirmState),
     /// Selection menu overlay.
     Menu(MenuState),
+    /// Search mode (typing or filtered).
+    Search(SearchState),
 }
 
 #[cfg(test)]
@@ -379,12 +455,16 @@ mod tests {
 
     use super::*;
 
+    /// Create a `TextBuffer` with the given value and cursor position for testing.
+    fn buf(value: &str, cursor_pos: usize) -> TextBuffer {
+        TextBuffer::with_value(value.to_string(), cursor_pos)
+    }
+
     /// Create an `InputState` with the given value and cursor position for testing.
     fn input_with(value: &str, cursor_pos: usize) -> InputState {
         InputState {
             prompt: String::new(),
-            value: value.to_string(),
-            cursor_pos,
+            buffer: buf(value, cursor_pos),
             on_confirm: InputAction::Create { parent_dir: PathBuf::from("/tmp") },
         }
     }
@@ -392,15 +472,15 @@ mod tests {
     #[rstest]
     fn input_state_for_create_has_empty_value() {
         let state = InputState::for_create(PathBuf::from("/tmp"));
-        assert_that!(state.value.as_str(), eq(""));
-        assert_that!(state.cursor_pos, eq(0));
+        assert_that!(state.buffer.value.as_str(), eq(""));
+        assert_that!(state.buffer.cursor_pos, eq(0));
         assert_that!(state.prompt.as_str(), eq("Create: "));
     }
 
     #[rstest]
     fn input_state_for_rename_prefills_name() {
         let state = InputState::for_rename(PathBuf::from("/tmp/hello.txt"));
-        assert_that!(state.value.as_str(), eq("hello.txt"));
+        assert_that!(state.buffer.value.as_str(), eq("hello.txt"));
         assert_that!(state.prompt.as_str(), eq("Rename: "));
     }
 
@@ -408,21 +488,21 @@ mod tests {
     fn input_state_for_rename_cursor_before_extension() {
         let state = InputState::for_rename(PathBuf::from("/tmp/document.pdf"));
         // "document" is 8 chars, cursor should be at position 8 (before ".pdf").
-        assert_that!(state.cursor_pos, eq(8));
+        assert_that!(state.buffer.cursor_pos, eq(8));
     }
 
     #[rstest]
     fn input_state_for_rename_no_extension() {
         let state = InputState::for_rename(PathBuf::from("/tmp/Makefile"));
         // No extension, cursor at end.
-        assert_that!(state.cursor_pos, eq(8)); // "Makefile" length
+        assert_that!(state.buffer.cursor_pos, eq(8)); // "Makefile" length
     }
 
     #[rstest]
     fn input_state_for_rename_dotfile() {
         let state = InputState::for_rename(PathBuf::from("/tmp/.gitignore"));
         // ".gitignore" — stem is ".gitignore", no extension. cursor at end.
-        assert_that!(state.cursor_pos, eq(10)); // ".gitignore" length
+        assert_that!(state.buffer.cursor_pos, eq(10)); // ".gitignore" length
     }
 
     #[rstest]
@@ -431,81 +511,83 @@ mod tests {
         assert!(matches!(mode, AppMode::Normal));
     }
 
+    // --- TextBuffer editing tests ---
+
     #[rstest]
     fn insert_char_at_beginning() {
-        let mut state = input_with("", 0);
-        state.insert_char('h');
-        state.insert_char('i');
-        assert_that!(state.value.as_str(), eq("hi"));
-        assert_that!(state.cursor_pos, eq(2));
+        let mut b = buf("", 0);
+        b.insert_char('h');
+        b.insert_char('i');
+        assert_that!(b.value.as_str(), eq("hi"));
+        assert_that!(b.cursor_pos, eq(2));
     }
 
     #[rstest]
     fn insert_char_in_middle() {
-        let mut state = InputState::for_rename(PathBuf::from("/tmp/ab.txt"));
-        // cursor at 2 (before ".txt"), value is "ab.txt" → "ab|.txt"
-        assert_that!(state.cursor_pos, eq(2));
-        state.insert_char('c');
-        assert_that!(state.value.as_str(), eq("abc.txt"));
-        assert_that!(state.cursor_pos, eq(3));
+        let mut b = buf("ab.txt", 2); // ab|.txt
+        b.insert_char('c');
+        assert_that!(b.value.as_str(), eq("abc.txt"));
+        assert_that!(b.cursor_pos, eq(3));
     }
 
     #[rstest]
     fn delete_char_backward_removes_before_cursor() {
-        let mut state = input_with("hello", 3); // hel|lo
-        state.delete_char_backward();
-        assert_that!(state.value.as_str(), eq("helo"));
-        assert_that!(state.cursor_pos, eq(2));
+        let mut b = buf("hello", 3); // hel|lo
+        b.delete_char_backward();
+        assert_that!(b.value.as_str(), eq("helo"));
+        assert_that!(b.cursor_pos, eq(2));
     }
 
     #[rstest]
     fn delete_char_backward_at_beginning_is_noop() {
-        let mut state = input_with("hello", 0);
-        state.delete_char_backward();
-        assert_that!(state.value.as_str(), eq("hello"));
-        assert_that!(state.cursor_pos, eq(0));
+        let mut b = buf("hello", 0);
+        b.delete_char_backward();
+        assert_that!(b.value.as_str(), eq("hello"));
+        assert_that!(b.cursor_pos, eq(0));
     }
 
     #[rstest]
     fn delete_char_forward_removes_at_cursor() {
-        let mut state = input_with("hello", 2); // he|llo
-        state.delete_char_forward();
-        assert_that!(state.value.as_str(), eq("helo"));
-        assert_that!(state.cursor_pos, eq(2));
+        let mut b = buf("hello", 2); // he|llo
+        b.delete_char_forward();
+        assert_that!(b.value.as_str(), eq("helo"));
+        assert_that!(b.cursor_pos, eq(2));
     }
 
     #[rstest]
     fn delete_char_forward_at_end_is_noop() {
-        let mut state = input_with("hello", 5);
-        state.delete_char_forward();
-        assert_that!(state.value.as_str(), eq("hello"));
+        let mut b = buf("hello", 5);
+        b.delete_char_forward();
+        assert_that!(b.value.as_str(), eq("hello"));
     }
 
     #[rstest]
     fn move_cursor_left_and_right() {
-        let mut state = input_with("abc", 2);
-        state.move_cursor_left();
-        assert_that!(state.cursor_pos, eq(1));
-        state.move_cursor_right();
-        assert_that!(state.cursor_pos, eq(2));
+        let mut b = buf("abc", 2);
+        b.move_cursor_left();
+        assert_that!(b.cursor_pos, eq(1));
+        b.move_cursor_right();
+        assert_that!(b.cursor_pos, eq(2));
     }
 
     #[rstest]
     fn move_cursor_home_and_end() {
-        let mut state = input_with("hello", 3);
-        state.move_cursor_home();
-        assert_that!(state.cursor_pos, eq(0));
-        state.move_cursor_end();
-        assert_that!(state.cursor_pos, eq(5));
+        let mut b = buf("hello", 3);
+        b.move_cursor_home();
+        assert_that!(b.cursor_pos, eq(0));
+        b.move_cursor_end();
+        assert_that!(b.cursor_pos, eq(5));
     }
 
     #[rstest]
     fn clear_to_start_removes_before_cursor() {
-        let mut state = input_with("hello", 3); // hel|lo
-        state.clear_to_start();
-        assert_that!(state.value.as_str(), eq("lo"));
-        assert_that!(state.cursor_pos, eq(0));
+        let mut b = buf("hello", 3); // hel|lo
+        b.clear_to_start();
+        assert_that!(b.value.as_str(), eq("lo"));
+        assert_that!(b.cursor_pos, eq(0));
     }
+
+    // --- InputState handle_key_event tests ---
 
     #[rstest]
     fn handle_key_enter_returns_confirm() {
@@ -526,7 +608,7 @@ mod tests {
         let mut state = input_with("", 0);
         let key = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
         assert_eq!(state.handle_key_event(key), None);
-        assert_that!(state.value.as_str(), eq("x"));
+        assert_that!(state.buffer.value.as_str(), eq("x"));
     }
 
     #[rstest]
@@ -543,160 +625,169 @@ mod tests {
 
     #[rstest]
     fn unicode_multibyte_editing() {
-        let mut state = input_with("", 0);
-        state.insert_char('日');
-        state.insert_char('本');
-        assert_that!(state.value.as_str(), eq("日本"));
-        assert_that!(state.cursor_pos, eq(6)); // 3 bytes per char
-        state.move_cursor_left();
-        assert_that!(state.cursor_pos, eq(3));
-        state.delete_char_backward();
-        assert_that!(state.value.as_str(), eq("本"));
-        assert_that!(state.cursor_pos, eq(0));
+        let mut b = buf("", 0);
+        b.insert_char('日');
+        b.insert_char('本');
+        assert_that!(b.value.as_str(), eq("日本"));
+        assert_that!(b.cursor_pos, eq(6)); // 3 bytes per char
+        b.move_cursor_left();
+        assert_that!(b.cursor_pos, eq(3));
+        b.delete_char_backward();
+        assert_that!(b.value.as_str(), eq("本"));
+        assert_that!(b.cursor_pos, eq(0));
     }
 
     #[rstest]
     fn clear_to_end_removes_after_cursor() {
-        let mut state = input_with("hello world", 5); // hello| world
-        state.clear_to_end();
-        assert_that!(state.value.as_str(), eq("hello"));
-        assert_that!(state.cursor_pos, eq(5));
+        let mut b = buf("hello world", 5); // hello| world
+        b.clear_to_end();
+        assert_that!(b.value.as_str(), eq("hello"));
+        assert_that!(b.cursor_pos, eq(5));
     }
 
     #[rstest]
     fn clear_to_end_at_end_is_noop() {
-        let mut state = input_with("hello", 5);
-        state.clear_to_end();
-        assert_that!(state.value.as_str(), eq("hello"));
+        let mut b = buf("hello", 5);
+        b.clear_to_end();
+        assert_that!(b.value.as_str(), eq("hello"));
     }
 
     #[rstest]
     fn delete_word_backward_removes_word() {
-        let mut state = input_with("hello world", 11); // hello world|
-        state.delete_word_backward();
-        assert_that!(state.value.as_str(), eq("hello "));
-        assert_that!(state.cursor_pos, eq(6));
+        let mut b = buf("hello world", 11); // hello world|
+        b.delete_word_backward();
+        assert_that!(b.value.as_str(), eq("hello "));
+        assert_that!(b.cursor_pos, eq(6));
     }
 
     #[rstest]
     fn delete_word_backward_at_beginning_is_noop() {
-        let mut state = input_with("hello", 0);
-        state.delete_word_backward();
-        assert_that!(state.value.as_str(), eq("hello"));
-        assert_that!(state.cursor_pos, eq(0));
+        let mut b = buf("hello", 0);
+        b.delete_word_backward();
+        assert_that!(b.value.as_str(), eq("hello"));
+        assert_that!(b.cursor_pos, eq(0));
     }
 
     #[rstest]
     fn delete_word_backward_with_spaces() {
-        let mut state = input_with("foo  bar", 8); // foo  bar|
-        state.delete_word_backward();
-        assert_that!(state.value.as_str(), eq("foo  "));
-        assert_that!(state.cursor_pos, eq(5));
+        let mut b = buf("foo  bar", 8); // foo  bar|
+        b.delete_word_backward();
+        assert_that!(b.value.as_str(), eq("foo  "));
+        assert_that!(b.cursor_pos, eq(5));
     }
 
     #[rstest]
     fn delete_word_backward_skips_trailing_spaces() {
-        let mut state = input_with("hello   ", 8); // hello   |
-        state.delete_word_backward();
-        assert_that!(state.value.as_str(), eq(""));
-        assert_that!(state.cursor_pos, eq(0));
+        let mut b = buf("hello   ", 8); // hello   |
+        b.delete_word_backward();
+        assert_that!(b.value.as_str(), eq(""));
+        assert_that!(b.cursor_pos, eq(0));
     }
 
     #[rstest]
     fn delete_word_forward_removes_word() {
-        let mut state = input_with("hello world", 0); // |hello world
-        state.delete_word_forward();
-        assert_that!(state.value.as_str(), eq("world"));
-        assert_that!(state.cursor_pos, eq(0));
+        let mut b = buf("hello world", 0); // |hello world
+        b.delete_word_forward();
+        assert_that!(b.value.as_str(), eq("world"));
+        assert_that!(b.cursor_pos, eq(0));
     }
 
     #[rstest]
     fn delete_word_forward_at_end_is_noop() {
-        let mut state = input_with("hello", 5);
-        state.delete_word_forward();
-        assert_that!(state.value.as_str(), eq("hello"));
+        let mut b = buf("hello", 5);
+        b.delete_word_forward();
+        assert_that!(b.value.as_str(), eq("hello"));
     }
 
     #[rstest]
     fn move_word_backward_moves_to_word_start() {
-        let mut state = input_with("hello world", 11); // hello world|
-        state.move_word_backward();
-        assert_that!(state.cursor_pos, eq(6)); // hello |world
+        let mut b = buf("hello world", 11); // hello world|
+        b.move_word_backward();
+        assert_that!(b.cursor_pos, eq(6)); // hello |world
     }
 
     #[rstest]
     fn move_word_backward_at_beginning_stays() {
-        let mut state = input_with("hello", 0);
-        state.move_word_backward();
-        assert_that!(state.cursor_pos, eq(0));
+        let mut b = buf("hello", 0);
+        b.move_word_backward();
+        assert_that!(b.cursor_pos, eq(0));
     }
 
     #[rstest]
     fn move_word_forward_moves_to_next_word() {
-        let mut state = input_with("hello world", 0); // |hello world
-        state.move_word_forward();
-        assert_that!(state.cursor_pos, eq(6)); // hello |world
+        let mut b = buf("hello world", 0); // |hello world
+        b.move_word_forward();
+        assert_that!(b.cursor_pos, eq(6)); // hello |world
     }
 
     #[rstest]
     fn move_word_forward_at_end_stays() {
-        let mut state = input_with("hello", 5);
-        state.move_word_forward();
-        assert_that!(state.cursor_pos, eq(5));
+        let mut b = buf("hello", 5);
+        b.move_word_forward();
+        assert_that!(b.cursor_pos, eq(5));
     }
+
+    // --- TextBuffer handle_key_event tests ---
 
     #[rstest]
     fn handle_key_ctrl_w_deletes_word_backward() {
-        let mut state = input_with("hello world", 11);
+        let mut b = buf("hello world", 11);
         let key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
-        assert_eq!(state.handle_key_event(key), None);
-        assert_that!(state.value.as_str(), eq("hello "));
+        assert_that!(b.handle_key_event(key), eq(true));
+        assert_that!(b.value.as_str(), eq("hello "));
     }
 
     #[rstest]
     fn handle_key_ctrl_k_clears_to_end() {
-        let mut state = input_with("hello world", 5);
+        let mut b = buf("hello world", 5);
         let key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL);
-        assert_eq!(state.handle_key_event(key), None);
-        assert_that!(state.value.as_str(), eq("hello"));
+        assert_that!(b.handle_key_event(key), eq(true));
+        assert_that!(b.value.as_str(), eq("hello"));
     }
 
     #[rstest]
     fn handle_key_alt_b_moves_word_backward() {
-        let mut state = input_with("hello world", 11);
+        let mut b = buf("hello world", 11);
         let key = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT);
-        assert_eq!(state.handle_key_event(key), None);
-        assert_that!(state.cursor_pos, eq(6));
+        assert_that!(b.handle_key_event(key), eq(true));
+        assert_that!(b.cursor_pos, eq(6));
     }
 
     #[rstest]
     fn handle_key_alt_f_moves_word_forward() {
-        let mut state = input_with("hello world", 0);
+        let mut b = buf("hello world", 0);
         let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT);
-        assert_eq!(state.handle_key_event(key), None);
-        assert_that!(state.cursor_pos, eq(6));
+        assert_that!(b.handle_key_event(key), eq(true));
+        assert_that!(b.cursor_pos, eq(6));
     }
 
     #[rstest]
     fn handle_key_ctrl_b_moves_left() {
-        let mut state = input_with("abc", 2);
+        let mut b = buf("abc", 2);
         let key = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL);
-        assert_eq!(state.handle_key_event(key), None);
-        assert_that!(state.cursor_pos, eq(1));
+        assert_that!(b.handle_key_event(key), eq(true));
+        assert_that!(b.cursor_pos, eq(1));
     }
 
     #[rstest]
     fn handle_key_ctrl_f_moves_right() {
-        let mut state = input_with("abc", 1);
+        let mut b = buf("abc", 1);
         let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL);
-        assert_eq!(state.handle_key_event(key), None);
-        assert_that!(state.cursor_pos, eq(2));
+        assert_that!(b.handle_key_event(key), eq(true));
+        assert_that!(b.cursor_pos, eq(2));
+    }
+
+    #[rstest]
+    fn handle_key_unhandled_returns_false() {
+        let mut b = buf("abc", 0);
+        let key = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+        assert_that!(b.handle_key_event(key), eq(false));
     }
 
     #[rstest]
     fn move_word_with_punctuation() {
-        let mut state = input_with("foo.bar baz", 0);
-        state.move_word_forward();
-        assert_that!(state.cursor_pos, eq(4)); // foo.|bar baz
+        let mut b = buf("foo.bar baz", 0);
+        b.move_word_forward();
+        assert_that!(b.cursor_pos, eq(4)); // foo.|bar baz
     }
 }

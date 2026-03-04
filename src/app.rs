@@ -74,6 +74,11 @@ use crate::state::tree::{
     TreeState,
 };
 use crate::tree::builder::TreeBuilder;
+use crate::tree::search_index::{
+    self,
+    DEFAULT_MAX_ENTRIES,
+    SearchIndex,
+};
 use crate::ui::column::{
     ColumnKind,
     resolve_columns,
@@ -199,6 +204,8 @@ fn init_app(
     let (ipc_server, ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
 
     // --- Phase 2: restore remaining session state (expanded dirs, cursor, etc.) ---
+    let search_history =
+        session_state.as_ref().map_or_else(Vec::new, |s| s.search_history.clone());
     let (selection, undo_history, restored_visual_row, deferred_expansion) = {
         let _span = tracing::info_span!("session_restore").entered();
         restore_session_state(session_state, &config, builder, &mut tree_state)
@@ -269,6 +276,7 @@ fn init_app(
         preview_debounce: None,
         layout_areas: LayoutAreas::default(),
         deferred_expansion,
+        search_history,
     };
 
     let (ctx, channels) = build_context_and_channels(
@@ -322,6 +330,10 @@ fn build_context_and_channels(
         root_path: root_path.to_path_buf(),
         rebuild_tx,
         menus: config.menus.clone(),
+        search_index: Arc::new(RwLock::new(
+            SearchIndex::new(),
+        )),
+        search_max_results: config.search.max_results,
     };
 
     let channels = EventReceivers {
@@ -663,6 +675,9 @@ pub async fn run(args: &Args) -> Result<()> {
     let root_path = ctx.root_path.clone();
     let mut last_cursor = state.tree_state.cursor();
 
+    let search_cancelled =
+        spawn_search_index_build(&ctx.search_index, &root_path, state.show_hidden, state.show_ignored);
+
     // Create the async terminal event stream.
     let mut event_stream = EventStream::new();
 
@@ -774,8 +789,39 @@ pub async fn run(args: &Args) -> Result<()> {
         }
     }
 
+    // Cancel background search index build if still running.
+    search_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+
+
     shutdown(&root_path, &state);
     Ok(())
+}
+
+/// Spawn a background task to build the search index.
+///
+/// Returns a cancellation token that should be set to `true` when the app shuts
+/// down so the background walk stops early.
+fn spawn_search_index_build(
+    index: &Arc<RwLock<SearchIndex>>,
+    root_path: &Path,
+    show_hidden: bool,
+    show_ignored: bool,
+) -> Arc<AtomicBool> {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let idx = Arc::clone(index);
+    let root = root_path.to_path_buf();
+    let cancel = Arc::clone(&cancelled);
+    tokio::task::spawn_blocking(move || {
+        search_index::build_search_index(
+            &idx,
+            &root,
+            show_hidden,
+            show_ignored,
+            &cancel,
+            DEFAULT_MAX_ENTRIES,
+        );
+    });
+    cancelled
 }
 
 /// Create the file system watcher and suppression flag.
@@ -1139,6 +1185,7 @@ fn shutdown(root_path: &Path, state: &AppState) {
         &state.undo_history,
         visual_row,
         &display,
+        state.search_history.clone(),
     );
     if let Err(e) = session::save(&session_state) {
         tracing::warn!(%e, "failed to save session");

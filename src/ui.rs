@@ -5,6 +5,7 @@ pub mod file_style;
 pub mod inline_input;
 pub mod modal;
 pub mod preview_view;
+pub mod search_input;
 pub mod status_bar;
 pub mod tree_view;
 
@@ -97,6 +98,6 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         AppMode::Menu(menu) => {
             modal::render_menu(frame, frame.area(), menu);
         }
-        AppMode::Normal | AppMode::Input(_) => {}
+        AppMode::Normal | AppMode::Input(_) | AppMode::Search(_) => {}
     }
 }

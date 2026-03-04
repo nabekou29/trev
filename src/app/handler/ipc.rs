@@ -98,6 +98,7 @@ mod tests {
             preview_debounce: None,
             layout_areas: crate::app::LayoutAreas::default(),
             deferred_expansion: None,
+            search_history: vec![],
         }
     }
 

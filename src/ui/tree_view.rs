@@ -33,11 +33,29 @@ use crate::ui::column::{
 
 /// Render the tree view into the given area.
 pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+    // When in Search(Typing) mode, reserve the bottom row for the search input bar.
+    let (tree_area, search_bar_area) =
+        if let AppMode::Search(ref search) = state.mode {
+            if search.phase == crate::input::SearchPhase::Typing && area.height > 1 {
+                let tree = Rect { height: area.height - 1, ..area };
+                let bar = Rect {
+                    y: area.y.saturating_add(area.height - 1),
+                    height: 1,
+                    ..area
+                };
+                (tree, Some(bar))
+            } else {
+                (area, None)
+            }
+        } else {
+            (area, None)
+        };
+
     let offset = state.scroll.offset();
-    let height = area.height as usize;
+    let height = tree_area.height as usize;
     let visible = state.tree_state.visible_nodes_in_range(offset, height);
     let cursor = state.tree_state.cursor();
-    let area_width = area.width as usize;
+    let area_width = tree_area.width as usize;
     let columns_width = total_columns_width(&state.columns);
 
     let mut lines: Vec<Line<'_>> = Vec::with_capacity(height);
@@ -60,11 +78,24 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     }
 
     let paragraph = Paragraph::new(lines);
-    frame.render_widget(paragraph, area);
+    frame.render_widget(paragraph, tree_area);
 
     // Render inline input overlay when in Input mode.
     if let AppMode::Input(ref input) = state.mode {
-        render_input_overlay(frame, area, cursor, offset, height, input);
+        render_input_overlay(frame, tree_area, cursor, offset, height, input);
+    }
+
+    // Render search input bar.
+    if let (Some(bar_area), AppMode::Search(search)) = (search_bar_area, &state.mode) {
+        let index_complete = true; // TODO: check ctx.search_index.is_complete()
+        let match_count = Some(state.tree_state.visible_node_count());
+        crate::ui::search_input::render_search_input(
+            frame,
+            bar_area,
+            &search.buffer,
+            match_count,
+            !index_complete,
+        );
     }
 }
 

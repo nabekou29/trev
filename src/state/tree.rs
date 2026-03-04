@@ -1,5 +1,6 @@
 //! Tree state: data structures for file system tree representation and navigation.
 
+use std::collections::HashSet;
 use std::path::{
     Path,
     PathBuf,
@@ -164,6 +165,17 @@ pub struct TreeState {
     cursor: usize,
     /// Display and sort options.
     options: TreeOptions,
+    /// Active search filter: only paths in this set (and their ancestors) are visible.
+    ///
+    /// When `Some`, the tree view shows a filtered subset.
+    /// When `None`, the normal expansion state is used.
+    search_filter: Option<HashSet<PathBuf>>,
+    /// Whether filtered directories should appear expanded regardless of `is_expanded`.
+    ///
+    /// `true` during the Typing phase so incremental search results are immediately
+    /// visible. `false` during the Filtered phase so the user can collapse/expand
+    /// directories freely.
+    search_virtual_expand: bool,
 }
 
 impl TreeNode {
@@ -201,7 +213,7 @@ impl ChildrenState {
 impl TreeState {
     /// Create a new tree state from a root node and options.
     pub const fn new(root: TreeNode, options: TreeOptions) -> Self {
-        Self { root, cursor: 0, options }
+        Self { root, cursor: 0, options, search_filter: None, search_virtual_expand: false }
     }
 
     /// Get the current cursor position.
@@ -332,6 +344,8 @@ impl TreeState {
     ///
     /// Only includes nodes that are in expanded + `Loaded` directories.
     /// When `show_root` is true, the root directory itself appears as the first node.
+    /// When a search filter is active, only nodes in the filter set are included
+    /// and ancestor directories are treated as expanded.
     pub fn visible_nodes(&self) -> Vec<VisibleNode<'_>> {
         let mut result = Vec::new();
         let depth_offset = usize::from(self.options.show_root);
@@ -346,7 +360,11 @@ impl TreeState {
             && let Some(children) = self.root.children.as_loaded()
         {
             for child in children {
-                collect_visible(child, depth_offset, &mut result);
+                if let Some(ref filter) = self.search_filter {
+                    collect_visible_filtered(child, depth_offset, &mut result, filter, self.search_virtual_expand);
+                } else {
+                    collect_visible(child, depth_offset, &mut result);
+                }
             }
         }
         result
@@ -358,7 +376,17 @@ impl TreeState {
     /// collecting at most `take` nodes. Early-terminates once enough nodes
     /// are collected, avoiding a full tree walk when the viewport is near
     /// the top.
+    ///
+    /// When a search filter is active, falls back to full `visible_nodes()`
+    /// and slices the result (the filtered tree is typically small).
     pub fn visible_nodes_in_range(&self, skip: usize, take: usize) -> Vec<VisibleNode<'_>> {
+        // When a search filter is active, fall back to full visible_nodes()
+        // since the filtered tree is small (bounded by max_results).
+        if self.search_filter.is_some() {
+            let all = self.visible_nodes();
+            return all.into_iter().skip(skip).take(take).collect();
+        }
+
         let mut result = Vec::with_capacity(take);
         let mut skipped: usize = 0;
         let depth_offset = usize::from(self.options.show_root);
@@ -388,6 +416,9 @@ impl TreeState {
     }
 
     /// Count of visible nodes (without allocating the full list).
+    ///
+    /// When a search filter is active, falls back to `visible_nodes().len()`
+    /// since the filtered tree is bounded by `max_results`.
     pub fn visible_node_count(&self) -> usize {
         fn count_visible(node: &TreeNode) -> usize {
             1 + node
@@ -395,6 +426,10 @@ impl TreeState {
                 .as_loaded()
                 .filter(|_| node.is_expanded)
                 .map_or(0, |children| children.iter().map(count_visible).sum())
+        }
+
+        if self.search_filter.is_some() {
+            return self.visible_nodes().len();
         }
 
         let children_count = if !self.options.show_root || self.root.is_expanded {
@@ -746,6 +781,61 @@ impl TreeState {
         collapsed
     }
 
+    /// Set the search filter to restrict visible nodes.
+    ///
+    /// Only paths in the set (and their ancestors up to root) will be visible.
+    /// Enables virtual expansion so results are visible during the Typing phase.
+    pub fn set_search_filter(&mut self, filter: HashSet<PathBuf>) {
+        self.search_filter = Some(filter);
+        self.search_virtual_expand = true;
+        // Clamp cursor to new visible range.
+        let count = self.visible_node_count();
+        if count == 0 {
+            self.cursor = 0;
+        } else {
+            self.cursor = self.cursor.min(count - 1);
+        }
+    }
+
+    /// Clear the search filter, restoring normal tree visibility.
+    ///
+    /// Preserves the cursor on the same node by path lookup after clearing.
+    pub fn clear_search_filter(&mut self) {
+        let cursor_path = self.cursor_path();
+        self.search_filter = None;
+        self.search_virtual_expand = false;
+        if let Some(path) = cursor_path {
+            self.move_cursor_to_path(&path);
+        }
+    }
+
+    /// Disable virtual expansion for the search filter.
+    ///
+    /// Called after `expand_paths` has truly expanded filter directories,
+    /// so that user collapse/expand is respected in the Filtered phase.
+    pub const fn pin_search_filter(&mut self) {
+        self.search_virtual_expand = false;
+    }
+
+    /// Whether a search filter is currently active.
+    pub const fn has_search_filter(&self) -> bool {
+        self.search_filter.is_some()
+    }
+
+    /// Get a reference to the active search filter paths.
+    pub const fn search_filter_paths(&self) -> Option<&HashSet<PathBuf>> {
+        self.search_filter.as_ref()
+    }
+
+    /// Expand all directories whose paths are in the given set.
+    ///
+    /// Sets `is_expanded = true` on matching directory nodes so the expansion
+    /// persists after the search filter is cleared. Only recurses into
+    /// children that are already loaded.
+    pub fn expand_paths(&mut self, paths: &HashSet<PathBuf>) {
+        expand_paths_recursive(&mut self.root, paths);
+    }
+
     /// Apply sort settings and re-sort all loaded children.
     pub fn apply_sort(
         &mut self,
@@ -795,6 +885,34 @@ fn collect_visible<'a>(node: &'a TreeNode, depth: usize, result: &mut Vec<Visibl
     {
         for child in children {
             collect_visible(child, depth + 1, result);
+        }
+    }
+}
+
+/// Collect visible nodes filtered by a path set.
+///
+/// A node is included if its path is in `filter`. Ancestor directories are
+/// traversed (and included) if they contain any filtered descendant.
+/// When `force_expand` is true (Typing phase), directories are traversed
+/// regardless of `is_expanded`. When false (Filtered phase), only expanded
+/// directories are traversed.
+fn collect_visible_filtered<'a>(
+    node: &'a TreeNode,
+    depth: usize,
+    result: &mut Vec<VisibleNode<'a>>,
+    filter: &HashSet<PathBuf>,
+    force_expand: bool,
+) {
+    if !filter.contains(&node.path) {
+        return;
+    }
+    result.push(VisibleNode { node, depth });
+
+    if (force_expand || node.is_expanded)
+        && let Some(children) = node.children.as_loaded()
+    {
+        for child in children {
+            collect_visible_filtered(child, depth + 1, result, filter, force_expand);
         }
     }
 }
@@ -893,6 +1011,18 @@ fn collapse_subtree_recursive(node: &mut TreeNode, collapsed: &mut Vec<PathBuf>)
     if let Some(children) = node.children.as_loaded_mut() {
         for child in children.iter_mut() {
             collapse_subtree_recursive(child, collapsed);
+        }
+    }
+}
+
+/// Recursively expand directories whose paths are in the given set.
+fn expand_paths_recursive(node: &mut TreeNode, paths: &HashSet<PathBuf>) {
+    if node.is_dir && paths.contains(&node.path) {
+        node.is_expanded = true;
+    }
+    if let Some(children) = node.children.as_loaded_mut() {
+        for child in children.iter_mut() {
+            expand_paths_recursive(child, paths);
         }
     }
 }
@@ -2043,5 +2173,138 @@ mod tests {
 
         let paths = state.paths_above_cursor();
         assert_eq!(paths, vec![root.join("a.txt")]);
+    }
+
+    // --- Search filter tests ---
+
+    #[rstest]
+    fn search_filter_hides_unmatched_nodes() {
+        let root = Path::new("/test/root");
+        let mut state = state_with_children(vec![
+            file_node("a.txt", root),
+            file_node("b.txt", root),
+            file_node("c.txt", root),
+        ]);
+
+        let mut filter = HashSet::new();
+        filter.insert(root.join("a.txt"));
+        filter.insert(root.join("c.txt"));
+        state.set_search_filter(filter);
+
+        let visible = state.visible_nodes();
+        assert_that!(visible.len(), eq(2));
+        assert_that!(visible[0].node.name.as_str(), eq("a.txt"));
+        assert_that!(visible[1].node.name.as_str(), eq("c.txt"));
+    }
+
+    #[rstest]
+    fn search_filter_includes_ancestors() {
+        let root = Path::new("/test/root");
+        let sub = dir_node(
+            "sub",
+            root,
+            vec![file_node("target.txt", &root.join("sub"))],
+        );
+        let mut state = state_with_children(vec![sub, file_node("other.txt", root)]);
+
+        // Filter includes the file AND its parent directory.
+        let mut filter = HashSet::new();
+        filter.insert(root.join("sub"));
+        filter.insert(root.join("sub").join("target.txt"));
+        // Simulate confirm_search: expand, set filter, then pin.
+        state.expand_paths(&filter);
+        state.set_search_filter(filter);
+        state.pin_search_filter();
+
+        let visible = state.visible_nodes();
+        assert_that!(visible.len(), eq(2));
+        assert_that!(visible[0].node.name.as_str(), eq("sub"));
+        assert_that!(visible[1].node.name.as_str(), eq("target.txt"));
+    }
+
+    #[rstest]
+    fn search_filter_clears_correctly() {
+        let root = Path::new("/test/root");
+        let mut sub = dir_node(
+            "sub",
+            root,
+            vec![file_node("x.txt", &root.join("sub"))],
+        );
+        sub.is_expanded = true;
+        let mut state = state_with_children(vec![sub, file_node("y.txt", root)]);
+
+        // Apply then clear filter.
+        let mut filter = HashSet::new();
+        filter.insert(root.join("y.txt"));
+        state.set_search_filter(filter);
+        assert_that!(state.visible_node_count(), eq(1));
+
+        state.clear_search_filter();
+        // Should return to normal visibility (sub expanded + x.txt + y.txt = 3).
+        assert_that!(state.visible_node_count(), eq(3));
+    }
+
+    #[rstest]
+    fn search_filter_clamps_cursor() {
+        let root = Path::new("/test/root");
+        let mut state = state_with_children(vec![
+            file_node("a.txt", root),
+            file_node("b.txt", root),
+            file_node("c.txt", root),
+        ]);
+        state.move_cursor_to(2); // cursor on c.txt
+
+        // Filter hides c.txt, so cursor should clamp.
+        let mut filter = HashSet::new();
+        filter.insert(root.join("a.txt"));
+        state.set_search_filter(filter);
+
+        assert_that!(state.cursor(), eq(0));
+    }
+
+    #[rstest]
+    fn search_filter_virtual_expand_shows_unexpanded_children() {
+        let root = Path::new("/test/root");
+        let sub = dir_node(
+            "sub",
+            root,
+            vec![file_node("target.txt", &root.join("sub"))],
+        );
+        // sub.is_expanded is false by default.
+        let mut state = state_with_children(vec![sub]);
+
+        let mut filter = HashSet::new();
+        filter.insert(root.join("sub"));
+        filter.insert(root.join("sub").join("target.txt"));
+        // set_search_filter enables virtual expand by default (Typing phase).
+        state.set_search_filter(filter);
+
+        let visible = state.visible_nodes();
+        assert_that!(visible.len(), eq(2));
+        assert_that!(visible[0].node.name.as_str(), eq("sub"));
+        assert_that!(visible[1].node.name.as_str(), eq("target.txt"));
+    }
+
+    #[rstest]
+    fn search_filter_pinned_respects_is_expanded() {
+        let root = Path::new("/test/root");
+        let sub = dir_node(
+            "sub",
+            root,
+            vec![file_node("target.txt", &root.join("sub"))],
+        );
+        // sub.is_expanded is false by default.
+        let mut state = state_with_children(vec![sub]);
+
+        let mut filter = HashSet::new();
+        filter.insert(root.join("sub"));
+        filter.insert(root.join("sub").join("target.txt"));
+        state.set_search_filter(filter);
+        state.pin_search_filter();
+
+        // sub is not expanded, so only sub itself is visible.
+        let visible = state.visible_nodes();
+        assert_that!(visible.len(), eq(1));
+        assert_that!(visible[0].node.name.as_str(), eq("sub"));
     }
 }

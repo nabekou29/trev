@@ -16,6 +16,8 @@ use ratatui::layout::Rect;
 
 use super::keymap::KeyMap;
 use super::pending_keys::PendingKeys;
+use std::sync::RwLock;
+
 use crate::config::{
     FileOpConfig,
     MenuDefinition,
@@ -81,7 +83,7 @@ pub struct AppState {
     ///
     /// Shared via `Arc<RwLock<…>>` so `ExternalCmdProvider` instances can read
     /// the current status in `can_handle()` without borrowing `AppState`.
-    pub git_state: Arc<std::sync::RwLock<Option<GitState>>>,
+    pub git_state: Arc<RwLock<Option<GitState>>>,
     /// Generation counter for tree rebuilds (latest-wins on rapid toggles).
     pub rebuild_generation: u64,
     /// Resolved column definitions for the metadata columns display.
@@ -112,6 +114,8 @@ pub struct AppState {
     pub layout_areas: LayoutAreas,
     /// Deferred session restore: expanded directories loaded asynchronously after first render.
     pub deferred_expansion: Option<DeferredExpansion>,
+    /// Search history (most recent last).
+    pub search_history: Vec<String>,
 }
 
 /// Cached layout areas from the last render, used for mouse hit-testing.
@@ -322,6 +326,10 @@ pub struct AppContext {
     pub rebuild_tx: tokio::sync::mpsc::Sender<TreeRebuildResult>,
     /// User-defined menu definitions (from config).
     pub menus: HashMap<String, MenuDefinition>,
+    /// Shared search index (built in background).
+    pub search_index: Arc<RwLock<crate::tree::search_index::SearchIndex>>,
+    /// Maximum number of search results.
+    pub search_max_results: usize,
 }
 
 /// Kind of async directory children load operation.
@@ -478,12 +486,90 @@ pub struct PreviewLoadResult {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
-mod tests {
+#[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::needless_pub_self)]
+pub(super) mod tests {
     use googletest::prelude::*;
     use rstest::*;
 
     use super::*;
+
+    /// Create a minimal `AppState` for unit testing.
+    ///
+    /// Uses an empty root node with no children. Suitable for testing
+    /// handler logic that doesn't need a real filesystem tree.
+    pub fn minimal_app_state() -> AppState {
+        use crate::config::CategoryStyles;
+        use crate::file_op::selection::SelectionBuffer;
+        use crate::file_op::undo::UndoHistory;
+        use crate::preview::cache::PreviewCache;
+        use crate::preview::provider::PreviewRegistry;
+        use crate::preview::providers::fallback::FallbackProvider;
+        use crate::preview::state::PreviewState;
+        use crate::state::tree::{
+            ChildrenState,
+            TreeNode,
+            TreeOptions,
+            TreeState,
+        };
+        use crate::ui::column::{
+            ColumnOptionsConfig,
+            default_columns,
+            resolve_columns,
+        };
+        use crate::ui::file_style::FileStyleMatcher;
+
+        let root_node = TreeNode {
+            name: "root".to_string(),
+            path: PathBuf::from("/test/root"),
+            is_dir: true,
+            is_symlink: false,
+            symlink_target: None,
+            size: 0,
+            modified: None,
+            recursive_max_mtime: None,
+            children: ChildrenState::Loaded(vec![]),
+            is_expanded: true,
+            is_ignored: false,
+        };
+        let tree_state = TreeState::new(root_node, TreeOptions::default());
+        let registry =
+            PreviewRegistry::new(vec![Arc::new(FallbackProvider::new())]).unwrap();
+
+        AppState {
+            tree_state,
+            preview_state: PreviewState::new(),
+            preview_cache: PreviewCache::new(10),
+            preview_registry: registry,
+            mode: AppMode::default(),
+            selection: SelectionBuffer::new(),
+            undo_history: UndoHistory::new(10),
+            watcher: None,
+            should_quit: false,
+            show_icons: false,
+            show_preview: false,
+            show_hidden: true,
+            show_ignored: true,
+            viewport_height: 20,
+            scroll: ScrollState::new(),
+            status_message: None,
+            processing: false,
+            git_state: Arc::new(RwLock::new(None)),
+            rebuild_generation: 0,
+            columns: resolve_columns(&default_columns(), &ColumnOptionsConfig::default()),
+            layout_split_ratio: 50,
+            layout_narrow_split_ratio: 60,
+            layout_narrow_width: 80,
+            pending_keys: PendingKeys::new(Duration::from_millis(500)),
+            needs_redraw: false,
+            dirty: true,
+            file_style_matcher: FileStyleMatcher::new(&[], &CategoryStyles::default())
+                .unwrap(),
+            preview_debounce: None,
+            layout_areas: LayoutAreas::default(),
+            deferred_expansion: None,
+            search_history: vec![],
+        }
+    }
 
     #[rstest]
     fn scroll_state_clamp_cursor_below_viewport() {

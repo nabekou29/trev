@@ -18,6 +18,7 @@ use crate::action::{
     FileOpAction,
     FilterAction,
     PreviewAction,
+    SearchAction,
     SortAction,
     TreeAction,
 };
@@ -320,6 +321,7 @@ impl KeyMap {
             &[],
             Action::Filter(FilterAction::Ignored),
         );
+        self.bind(KeyCode::Char('/'), KeyModifiers::NONE, &[], Action::Search(SearchAction::Open));
         self.bind(KeyCode::Char('R'), KeyModifiers::SHIFT, &[], Action::Tree(TreeAction::Refresh));
         self.bind(
             KeyCode::Char('S'),

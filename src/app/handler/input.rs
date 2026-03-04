@@ -207,7 +207,7 @@ fn dispatch_custom_action(action: crate::action::Action, state: &mut AppState, c
         Action::Quit => {
             state.should_quit = true;
         }
-        Action::OpenMenu(_) | Action::Noop => {}
+        Action::Search(_) | Action::OpenMenu(_) | Action::Noop => {}
     }
 }
 
@@ -247,14 +247,16 @@ pub(super) fn copy_to_clipboard(state: &mut AppState, label: &str, value: &str) 
 fn status_message_for(input: &crate::input::InputState) -> Option<String> {
     use crate::input::InputAction;
 
-    if input.value.trim().is_empty() {
+    if input.buffer.value.trim().is_empty() {
         return None;
     }
 
     match &input.on_confirm {
-        InputAction::Create { .. } => Some(format!("Created {}", input.value)),
-        InputAction::CreateDirectory { .. } => Some(format!("Created directory {}", input.value)),
-        InputAction::Rename { .. } => Some(format!("Renamed to {}", input.value)),
+        InputAction::Create { .. } => Some(format!("Created {}", input.buffer.value)),
+        InputAction::CreateDirectory { .. } => {
+            Some(format!("Created directory {}", input.buffer.value))
+        }
+        InputAction::Rename { .. } => Some(format!("Renamed to {}", input.buffer.value)),
     }
 }
 
@@ -262,19 +264,19 @@ fn status_message_for(input: &crate::input::InputState) -> Option<String> {
 fn execute_input_confirm(state: &mut AppState, input: crate::input::InputState, ctx: &AppContext) {
     use crate::input::InputAction;
 
-    if input.value.trim().is_empty() {
+    if input.buffer.value.trim().is_empty() {
         return;
     }
 
     match input.on_confirm {
         InputAction::Create { parent_dir } => {
-            execute_create(&parent_dir, &input.value, state, ctx);
+            execute_create(&parent_dir, &input.buffer.value, state, ctx);
         }
         InputAction::CreateDirectory { parent_dir } => {
-            execute_create_directory(&parent_dir, &input.value, state, ctx);
+            execute_create_directory(&parent_dir, &input.buffer.value, state, ctx);
         }
         InputAction::Rename { target } => {
-            execute_rename(&target, &input.value, state, ctx);
+            execute_rename(&target, &input.buffer.value, state, ctx);
         }
     }
 }

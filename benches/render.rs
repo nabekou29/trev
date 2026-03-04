@@ -103,6 +103,7 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
         preview_debounce: None,
         layout_areas: trev::app::LayoutAreas::default(),
         deferred_expansion: None,
+        search_history: vec![],
     }
 }
 

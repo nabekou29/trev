@@ -40,6 +40,8 @@ pub struct Config {
     pub keybindings: KeybindingConfig,
     /// Git integration settings.
     pub git: GitConfig,
+    /// Search settings.
+    pub search: SearchConfig,
     /// User-defined menus.
     #[serde(default)]
     pub menus: HashMap<String, MenuDefinition>,
@@ -879,6 +881,23 @@ pub struct MouseConfig {
 impl Default for MouseConfig {
     fn default() -> Self {
         Self { enabled: true }
+    }
+}
+
+/// Search configuration.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct SearchConfig {
+    /// Maximum number of search results to display.
+    pub max_results: usize,
+}
+
+/// Default maximum search results.
+const DEFAULT_SEARCH_MAX_RESULTS: usize = 1000;
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self { max_results: DEFAULT_SEARCH_MAX_RESULTS }
     }
 }
 

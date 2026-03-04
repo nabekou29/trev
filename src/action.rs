@@ -14,6 +14,8 @@ pub enum Action {
     Preview(PreviewAction),
     /// File operation actions.
     FileOp(FileOpAction),
+    /// Search-related actions.
+    Search(SearchAction),
     /// Quit the application.
     Quit,
     /// Execute a shell command (template string).
@@ -152,6 +154,13 @@ pub enum FilterAction {
     Ignored,
 }
 
+/// Actions for search operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchAction {
+    /// Open the search input.
+    Open,
+}
+
 /// Actions for the preview panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewAction {
@@ -247,6 +256,15 @@ impl fmt::Display for TreeAction {
     }
 }
 
+impl fmt::Display for SearchAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Open => "search.open",
+        };
+        f.write_str(s)
+    }
+}
+
 impl fmt::Display for PreviewAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
@@ -292,6 +310,7 @@ impl fmt::Display for Action {
             Self::Filter(a) => a.fmt(f),
             Self::Preview(a) => a.fmt(f),
             Self::FileOp(a) => a.fmt(f),
+            Self::Search(a) => a.fmt(f),
             Self::Quit => f.write_str("quit"),
             Self::Shell { cmd, .. } => write!(f, "shell:{cmd}"),
             Self::Notify(method) => write!(f, "notify:{method}"),
@@ -382,6 +401,17 @@ impl FromStr for TreeAction {
     }
 }
 
+impl FromStr for SearchAction {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "search.open" => Ok(Self::Open),
+            _ => Err(format!("unknown search action: {s}")),
+        }
+    }
+}
+
 impl FromStr for PreviewAction {
     type Err = String;
 
@@ -438,6 +468,7 @@ impl FromStr for Action {
             _ if s.starts_with("filter.") => s.parse::<FilterAction>().map(Self::Filter),
             _ if s.starts_with("preview.") => s.parse::<PreviewAction>().map(Self::Preview),
             _ if s.starts_with("file_op.") => s.parse::<FileOpAction>().map(Self::FileOp),
+            _ if s.starts_with("search.") => s.parse::<SearchAction>().map(Self::Search),
             _ if s.starts_with("menu:") => {
                 let name = &s["menu:".len()..];
                 if name.is_empty() {
@@ -483,6 +514,13 @@ impl CopyAction {
             "file_op.copy.stem",
             "file_op.copy.parent_dir",
         ]
+    }
+}
+
+impl SearchAction {
+    /// Returns all valid search action name strings.
+    pub(crate) fn action_names() -> Vec<&'static str> {
+        vec!["search.open"]
     }
 }
 
@@ -568,6 +606,7 @@ impl Action {
         names.extend(FilterAction::action_names());
         names.extend(PreviewAction::action_names());
         names.extend(FileOpAction::action_names());
+        names.extend(SearchAction::action_names());
         names
     }
 }

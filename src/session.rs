@@ -82,6 +82,9 @@ pub struct SessionState {
     /// Whether directories were sorted before files.
     #[serde(default)]
     pub directories_first: Option<bool>,
+    /// Search history (most recent last).
+    #[serde(default)]
+    pub search_history: Vec<String>,
 }
 
 /// Get the session storage directory path.
@@ -140,6 +143,7 @@ pub struct DisplaySettings {
 }
 
 /// Build a `SessionState` from application state components.
+#[allow(clippy::too_many_arguments)]
 pub fn build_session_state(
     root_path: &Path,
     expanded_paths: Vec<PathBuf>,
@@ -148,6 +152,7 @@ pub fn build_session_state(
     undo_history: &UndoHistory,
     scroll_visual_row: usize,
     display: &DisplaySettings,
+    search_history: Vec<String>,
 ) -> SessionState {
     let (selection_paths, selection_mode) = selection.export();
     let (undo_stack, redo_stack) = undo_history.export_stacks();
@@ -168,6 +173,7 @@ pub fn build_session_state(
         sort_order: Some(display.sort_order),
         sort_direction: Some(display.sort_direction),
         directories_first: Some(display.directories_first),
+        search_history,
     }
 }
 
@@ -297,6 +303,7 @@ mod tests {
             sort_order: Some(SortOrder::Name),
             sort_direction: Some(SortDirection::Desc),
             directories_first: Some(false),
+            search_history: vec![],
         };
 
         save(&state).unwrap();
@@ -342,6 +349,7 @@ mod tests {
             sort_order: None,
             sort_direction: None,
             directories_first: None,
+            search_history: vec![],
         };
 
         save(&state).unwrap();
@@ -382,6 +390,7 @@ mod tests {
             &undo,
             42,
             &display,
+            vec!["foo".to_string()],
         );
 
         assert_eq!(state.root_path, root);
@@ -436,6 +445,7 @@ mod tests {
             sort_order: None,
             sort_direction: None,
             directories_first: None,
+            search_history: vec![],
         };
 
         let file_path = save_session_in(&session_dir, &state);
@@ -468,6 +478,7 @@ mod tests {
             sort_order: None,
             sort_direction: None,
             directories_first: None,
+            search_history: vec![],
         };
 
         let file_path = save_session_in(&session_dir, &state);

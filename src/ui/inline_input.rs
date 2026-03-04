@@ -50,7 +50,7 @@ pub fn render_inline_input(frame: &mut Frame<'_>, area: Rect, input: &InputState
     let mut spans = Vec::new();
 
     // Split value at cursor position to render cursor indicator.
-    let (before, after) = input.value.split_at(input.cursor_pos);
+    let (before, after) = input.buffer.value.split_at(input.buffer.cursor_pos);
 
     spans.push(Span::raw(before.to_string()));
 

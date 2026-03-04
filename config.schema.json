@@ -209,6 +209,13 @@
         "word_wrap": false
       }
     },
+    "search": {
+      "description": "Search settings.",
+      "$ref": "#/$defs/SearchConfig",
+      "default": {
+        "max_results": 1000
+      }
+    },
     "session": {
       "description": "Session persistence settings.",
       "$ref": "#/$defs/SessionConfig",
@@ -942,7 +949,8 @@
                 "file_op.copy.relative_path",
                 "file_op.copy.file_name",
                 "file_op.copy.stem",
-                "file_op.copy.parent_dir"
+                "file_op.copy.parent_dir",
+                "search.open"
               ]
             },
             {
@@ -1271,6 +1279,19 @@
         }
       ],
       "default": 100
+    },
+    "SearchConfig": {
+      "description": "Search configuration.",
+      "type": "object",
+      "properties": {
+        "max_results": {
+          "description": "Maximum number of search results to display.",
+          "type": "integer",
+          "format": "uint",
+          "default": 1000,
+          "minimum": 0
+        }
+      }
     },
     "SessionConfig": {
       "description": "Session persistence configuration.",
