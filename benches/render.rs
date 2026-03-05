@@ -43,6 +43,7 @@ fn file_node(name: &str, parent: &Path) -> TreeNode {
         children: ChildrenState::NotLoaded,
         is_expanded: false,
         is_ignored: false,
+        is_root: false,
     }
 }
 
@@ -60,6 +61,7 @@ fn dir_node(name: &str, parent: &Path, children: Vec<TreeNode>) -> TreeNode {
         children: ChildrenState::Loaded(children),
         is_expanded: false,
         is_ignored: false,
+        is_root: false,
     }
 }
 
@@ -122,6 +124,7 @@ fn tree_with_children(children: Vec<TreeNode>) -> TreeState {
         children: ChildrenState::Loaded(children),
         is_expanded: true,
         is_ignored: false,
+        is_root: true,
     };
     TreeState::new(root, TreeOptions::default())
 }

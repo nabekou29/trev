@@ -535,6 +535,7 @@ pub(super) mod tests {
             children: ChildrenState::Loaded(vec![]),
             is_expanded: true,
             is_ignored: false,
+            is_root: true,
         };
         let tree_state = TreeState::new(root_node, TreeOptions::default());
         let registry =

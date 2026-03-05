@@ -64,6 +64,7 @@ impl TreeBuilder {
             children: ChildrenState::Loaded(children),
             is_expanded: true,
             is_ignored: false,
+            is_root: true,
         })
     }
 
@@ -154,6 +155,7 @@ impl TreeBuilder {
                 children: ChildrenState::NotLoaded,
                 is_expanded: false,
                 is_ignored,
+                is_root: false,
             });
         }
 

@@ -29,6 +29,7 @@ fn file_node(name: &str, parent: &Path) -> TreeNode {
         children: ChildrenState::NotLoaded,
         is_expanded: false,
         is_ignored: false,
+        is_root: false,
     }
 }
 
@@ -46,6 +47,7 @@ fn dir_node(name: &str, parent: &Path, children: Vec<TreeNode>) -> TreeNode {
         children: ChildrenState::Loaded(children),
         is_expanded: false,
         is_ignored: false,
+        is_root: false,
     }
 }
 
@@ -63,6 +65,7 @@ fn state_with_children(children: Vec<TreeNode>) -> TreeState {
         children: ChildrenState::Loaded(children),
         is_expanded: true,
         is_ignored: false,
+        is_root: true,
     };
     TreeState::new(root, TreeOptions::default())
 }
@@ -201,6 +204,7 @@ fn bench_set_children_100k(c: &mut Criterion) {
                     children: ChildrenState::Loading,
                     is_expanded: true,
                     is_ignored: false,
+                    is_root: false,
                 };
                 let state = state_with_children(vec![target]);
                 // Children to be inserted (unsorted).

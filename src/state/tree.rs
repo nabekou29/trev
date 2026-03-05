@@ -41,6 +41,8 @@ pub struct TreeNode {
     pub is_expanded: bool,
     /// Whether this file is gitignored (set only when `show_ignored` is true).
     pub is_ignored: bool,
+    /// Whether this node is the root of the tree.
+    pub is_root: bool,
 }
 
 /// Loading state for a directory's children.
@@ -389,24 +391,10 @@ impl TreeState {
     /// and ancestor directories are treated as expanded.
     pub fn visible_nodes(&self) -> Vec<VisibleNode<'_>> {
         let mut result = Vec::new();
-        let depth_offset = usize::from(self.options.show_root);
-
-        if self.options.show_root {
-            result.push(VisibleNode { node: &self.root, depth: 0 });
-        }
-
-        // When show_root is enabled, respect root's is_expanded flag.
-        // When show_root is disabled, always show root's children (root is implicit).
-        if (!self.options.show_root || self.root.is_expanded)
-            && let Some(children) = self.root.children.as_loaded()
-        {
-            for child in children {
-                if let Some(ref filter) = self.search_filter {
-                    collect_visible_filtered(child, depth_offset, &mut result, filter, self.search_virtual_expand);
-                } else {
-                    collect_visible(child, depth_offset, &mut result);
-                }
-            }
+        if let Some(ref filter) = self.search_filter {
+            collect_visible_filtered(&self.root, 0, &mut result, filter, self.search_virtual_expand, self.options.show_root);
+        } else {
+            collect_visible(&self.root, 0, &mut result, self.options.show_root);
         }
         result
     }
@@ -430,29 +418,7 @@ impl TreeState {
 
         let mut result = Vec::with_capacity(take);
         let mut skipped: usize = 0;
-        let depth_offset = usize::from(self.options.show_root);
-
-        if self.options.show_root {
-            if skipped >= skip {
-                result.push(VisibleNode { node: &self.root, depth: 0 });
-                if result.len() >= take {
-                    return result;
-                }
-            } else {
-                skipped += 1;
-            }
-        }
-
-        if (!self.options.show_root || self.root.is_expanded)
-            && let Some(children) = self.root.children.as_loaded()
-        {
-            for child in children {
-                collect_visible_range(child, depth_offset, &mut result, &mut skipped, skip, take);
-                if result.len() >= take {
-                    break;
-                }
-            }
-        }
+        collect_visible_range(&self.root, 0, &mut result, &mut skipped, skip, take, self.options.show_root);
         result
     }
 
@@ -461,28 +427,10 @@ impl TreeState {
     /// When a search filter is active, falls back to `visible_nodes().len()`
     /// since the filtered tree is bounded by `max_results`.
     pub fn visible_node_count(&self) -> usize {
-        fn count_visible(node: &TreeNode) -> usize {
-            1 + node
-                .children
-                .as_loaded()
-                .filter(|_| node.is_expanded)
-                .map_or(0, |children| children.iter().map(count_visible).sum())
-        }
-
         if self.search_filter.is_some() {
             return self.visible_nodes().len();
         }
-
-        let children_count = if !self.options.show_root || self.root.is_expanded {
-            self.root
-                .children
-                .as_loaded()
-                .map_or(0, |children| children.iter().map(count_visible).sum())
-        } else {
-            0
-        };
-
-        if self.options.show_root { 1 + children_count } else { children_count }
+        count_visible(&self.root, self.options.show_root)
     }
 
     /// Find the node at the given path in the tree (mutable).
@@ -826,7 +774,10 @@ impl TreeState {
     ///
     /// Only paths in the set (and their ancestors up to root) will be visible.
     /// Enables virtual expansion so results are visible during the Typing phase.
-    pub fn set_search_filter(&mut self, filter: HashSet<PathBuf>) {
+    pub fn set_search_filter(&mut self, mut filter: HashSet<PathBuf>) {
+        if self.options.show_root {
+            filter.insert(self.root.path.clone());
+        }
         self.search_filter = Some(filter);
         self.search_virtual_expand = true;
         // Clamp cursor to new visible range.
@@ -919,13 +870,26 @@ pub enum ExpandResult {
 }
 
 /// Recursively collect visible nodes via DFS.
-fn collect_visible<'a>(node: &'a TreeNode, depth: usize, result: &mut Vec<VisibleNode<'a>>) {
-    result.push(VisibleNode { node, depth });
-    if node.is_expanded
+///
+/// When `node.is_root && !show_root`, the node itself is skipped (not added
+/// to `result`) but its children are always traversed at the same depth.
+fn collect_visible<'a>(
+    node: &'a TreeNode,
+    depth: usize,
+    result: &mut Vec<VisibleNode<'a>>,
+    show_root: bool,
+) {
+    let skip_display = node.is_root && !show_root;
+    if !skip_display {
+        result.push(VisibleNode { node, depth });
+    }
+    let child_depth = if skip_display { depth } else { depth + 1 };
+    let expanded = skip_display || node.is_expanded;
+    if expanded
         && let Some(children) = node.children.as_loaded()
     {
         for child in children {
-            collect_visible(child, depth + 1, result);
+            collect_visible(child, child_depth, result, show_root);
         }
     }
 }
@@ -937,28 +901,39 @@ fn collect_visible<'a>(node: &'a TreeNode, depth: usize, result: &mut Vec<Visibl
 /// When `force_expand` is true (Typing phase), directories are traversed
 /// regardless of `is_expanded`. When false (Filtered phase), only expanded
 /// directories are traversed.
+///
+/// When `node.is_root && !show_root`, the node is always traversed (skipping
+/// both the display and the filter check).
 fn collect_visible_filtered<'a>(
     node: &'a TreeNode,
     depth: usize,
     result: &mut Vec<VisibleNode<'a>>,
     filter: &HashSet<PathBuf>,
     force_expand: bool,
+    show_root: bool,
 ) {
-    if !filter.contains(&node.path) {
-        return;
+    let skip_display = node.is_root && !show_root;
+    if !skip_display {
+        if !filter.contains(&node.path) {
+            return;
+        }
+        result.push(VisibleNode { node, depth });
     }
-    result.push(VisibleNode { node, depth });
-
-    if (force_expand || node.is_expanded)
+    let child_depth = if skip_display { depth } else { depth + 1 };
+    let expanded = skip_display || force_expand || node.is_expanded;
+    if expanded
         && let Some(children) = node.children.as_loaded()
     {
         for child in children {
-            collect_visible_filtered(child, depth + 1, result, filter, force_expand);
+            collect_visible_filtered(child, child_depth, result, filter, force_expand, show_root);
         }
     }
 }
 
 /// Collect visible nodes within a range, with early termination.
+///
+/// When `node.is_root && !show_root`, the node is skipped in the count
+/// but its children are always traversed.
 fn collect_visible_range<'a>(
     node: &'a TreeNode,
     depth: usize,
@@ -966,30 +941,54 @@ fn collect_visible_range<'a>(
     skipped: &mut usize,
     skip: usize,
     take: usize,
+    show_root: bool,
 ) {
     if result.len() >= take {
         return;
     }
 
-    if *skipped >= skip {
-        result.push(VisibleNode { node, depth });
-        if result.len() >= take {
-            return;
+    let skip_display = node.is_root && !show_root;
+    if !skip_display {
+        if *skipped >= skip {
+            result.push(VisibleNode { node, depth });
+            if result.len() >= take {
+                return;
+            }
+        } else {
+            *skipped += 1;
         }
-    } else {
-        *skipped += 1;
     }
 
-    if node.is_expanded
+    let child_depth = if skip_display { depth } else { depth + 1 };
+    let expanded = skip_display || node.is_expanded;
+    if expanded
         && let Some(children) = node.children.as_loaded()
     {
         for child in children {
-            collect_visible_range(child, depth + 1, result, skipped, skip, take);
+            collect_visible_range(child, child_depth, result, skipped, skip, take, show_root);
             if result.len() >= take {
                 return;
             }
         }
     }
+}
+
+/// Count visible nodes without allocating.
+///
+/// When `node.is_root && !show_root`, the node itself is not counted
+/// but its children are always traversed.
+fn count_visible(node: &TreeNode, show_root: bool) -> usize {
+    let skip_display = node.is_root && !show_root;
+    let self_count = usize::from(!skip_display);
+    let expanded = skip_display || node.is_expanded;
+    let children_count = node
+        .children
+        .as_loaded()
+        .filter(|_| expanded)
+        .map_or(0, |children| {
+            children.iter().map(|c| count_visible(c, show_root)).sum()
+        });
+    self_count + children_count
 }
 
 /// Recursively collect paths of all expanded directories via DFS.
@@ -1131,6 +1130,7 @@ mod tests {
             children: ChildrenState::NotLoaded,
             is_expanded: false,
             is_ignored: false,
+            is_root: false,
         }
     }
 
@@ -1148,6 +1148,7 @@ mod tests {
             children: ChildrenState::Loaded(children),
             is_expanded: false,
             is_ignored: false,
+            is_root: false,
         }
     }
 
@@ -1165,6 +1166,7 @@ mod tests {
             children: ChildrenState::Loaded(children),
             is_expanded: true,
             is_ignored: false,
+            is_root: true,
         }
     }
 
@@ -1264,6 +1266,7 @@ mod tests {
             children: ChildrenState::NotLoaded,
             is_expanded: true, // expanded but NotLoaded
             is_ignored: false,
+            is_root: false,
         };
         // Even though expanded, no children to show
         let state = state_with_children(vec![not_loaded_dir]);
@@ -1347,6 +1350,7 @@ mod tests {
             children: ChildrenState::NotLoaded,
             is_expanded: false,
             is_ignored: false,
+            is_root: false,
         };
         let mut state = state_with_children(vec![subdir]);
 
@@ -1399,6 +1403,7 @@ mod tests {
             children: ChildrenState::NotLoaded,
             is_expanded: false,
             is_ignored: false,
+            is_root: false,
         };
         state.set_children(&parent_path, vec![new_inner], true);
 
@@ -1463,6 +1468,7 @@ mod tests {
             children: ChildrenState::Loading,
             is_expanded: true,
             is_ignored: false,
+            is_root: false,
         };
         let mut state = state_with_children(vec![subdir]);
 
@@ -1495,6 +1501,7 @@ mod tests {
             children: ChildrenState::Loading,
             is_expanded: false, // collapsed (prefetch scenario)
             is_ignored: false,
+            is_root: false,
         };
         let mut state = state_with_children(vec![subdir]);
 
@@ -1525,6 +1532,7 @@ mod tests {
             children: ChildrenState::NotLoaded,
             is_expanded: false,
             is_ignored: false,
+            is_root: false,
         };
         let subdir_b = TreeNode {
             name: "dir_b".to_string(),
@@ -1538,6 +1546,7 @@ mod tests {
             children: ChildrenState::NotLoaded,
             is_expanded: false,
             is_ignored: false,
+            is_root: false,
         };
         let mut state = state_with_children(vec![subdir_a, subdir_b, file_node("file.txt", root)]);
 
@@ -1570,6 +1579,7 @@ mod tests {
             children: ChildrenState::Loading,
             is_expanded: false,
             is_ignored: false,
+            is_root: false,
         };
         let mut state = state_with_children(vec![loaded_dir, loading_dir]);
 
@@ -1700,6 +1710,7 @@ mod tests {
             children: ChildrenState::NotLoaded,
             is_expanded: false,
             is_ignored: false,
+            is_root: false,
         };
         let mut state = state_with_children(vec![subdir]);
         let result = state.expand_or_open();
@@ -1869,6 +1880,7 @@ mod tests {
             children: ChildrenState::NotLoaded,
             is_expanded: false,
             is_ignored: false,
+            is_root: false,
         };
         let mut state = state_with_children(vec![subdir]);
         assert_that!(state.handle_fs_change(&root.join("subdir")), eq(false));
@@ -1959,6 +1971,7 @@ mod tests {
             children: ChildrenState::NotLoaded,
             is_expanded: false,
             is_ignored: false,
+            is_root: false,
         }
     }
 

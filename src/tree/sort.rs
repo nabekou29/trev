@@ -240,6 +240,7 @@ mod tests {
             children: ChildrenState::NotLoaded,
             is_expanded: false,
             is_ignored: false,
+            is_root: false,
         }
     }
 
@@ -257,6 +258,7 @@ mod tests {
             children: ChildrenState::Loaded(vec![]),
             is_expanded: false,
             is_ignored: false,
+            is_root: false,
         }
     }
 
@@ -318,6 +320,7 @@ mod tests {
             children: ChildrenState::Loaded(inner_children),
             is_expanded: true,
             is_ignored: false,
+            is_root: false,
         };
 
         apply_sort_recursive(&mut parent, SortOrder::Name, SortDirection::Asc, false);
