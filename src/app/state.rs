@@ -116,6 +116,11 @@ pub struct AppState {
     pub deferred_expansion: Option<DeferredExpansion>,
     /// Search history (most recent last).
     pub search_history: Vec<String>,
+    /// Per-path match highlight indices from the last search.
+    ///
+    /// Maps absolute paths to character indices within the matched string
+    /// (file name or relative path depending on `SearchMode`).
+    pub search_match_indices: HashMap<PathBuf, Vec<u32>>,
 }
 
 /// Cached layout areas from the last render, used for mouse hit-testing.
@@ -568,6 +573,7 @@ pub(super) mod tests {
             layout_areas: LayoutAreas::default(),
             deferred_expansion: None,
             search_history: vec![],
+            search_match_indices: HashMap::new(),
         }
     }
 

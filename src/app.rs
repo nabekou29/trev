@@ -277,6 +277,7 @@ fn init_app(
         layout_areas: LayoutAreas::default(),
         deferred_expansion,
         search_history,
+        search_match_indices: std::collections::HashMap::new(),
     };
 
     let (ctx, channels) = build_context_and_channels(

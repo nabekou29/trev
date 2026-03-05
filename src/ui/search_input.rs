@@ -19,15 +19,22 @@ use ratatui::widgets::{
     Paragraph,
 };
 
-use crate::input::TextBuffer;
+use crate::input::{
+    SearchMode,
+    TextBuffer,
+};
 
 /// Render the search input bar into the given area (1 row high).
 ///
-/// Layout: `/ query█ ········· {count} matches`
+/// Layout: `[mode]/query█ ········· {count} matches`
+///
+/// In `Name` mode (default), the prompt is just `/`.
+/// In `Path` mode, the prompt shows `path/`.
 pub fn render_search_input(
     frame: &mut Frame<'_>,
     area: Rect,
     buffer: &TextBuffer,
+    mode: SearchMode,
     match_count: Option<usize>,
     is_indexing: bool,
 ) {
@@ -36,11 +43,12 @@ pub fn render_search_input(
 
     let mut spans: Vec<Span<'_>> = Vec::new();
 
-    // Prompt.
-    spans.push(Span::styled(
-        "/",
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-    ));
+    // Mode indicator + prompt.
+    let prompt_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    if mode == SearchMode::Path {
+        spans.push(Span::styled("path", Style::default().fg(Color::DarkGray)));
+    }
+    spans.push(Span::styled("/", prompt_style));
 
     // Query text with cursor.
     let (before, after) = buffer.value.split_at(buffer.cursor_pos);
@@ -69,7 +77,8 @@ pub fn render_search_input(
     };
 
     // Calculate how much space to pad.
-    let used_width: usize = 1 + buffer.value.len() + 1; // "/" + query + cursor
+    let prompt_width = if mode == SearchMode::Path { 5 } else { 1 }; // "path/" or "/"
+    let used_width: usize = prompt_width + buffer.value.len() + 1; // prompt + query + cursor
     let status_width = status_text.len();
     let available = area.width as usize;
     let pad = available.saturating_sub(used_width + status_width);

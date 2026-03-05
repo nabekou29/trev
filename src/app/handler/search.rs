@@ -20,6 +20,7 @@ use crate::input::{
     SearchPhase,
     SearchState,
 };
+use crate::tree::builder::TreeBuilder;
 use crate::tree::search_engine;
 
 /// Transition from Normal mode to Search(Typing) mode.
@@ -61,6 +62,7 @@ fn handle_typing_key(
         KeyCode::Esc => {
             // Cancel search, restore normal tree view.
             state.tree_state.clear_search_filter();
+            state.search_match_indices.clear();
             state.mode = AppMode::Normal;
             state.dirty = true;
         }
@@ -69,9 +71,19 @@ fn handle_typing_key(
         }
         KeyCode::Up => {
             navigate_history(state, -1);
+            run_incremental_search(state, ctx);
         }
         KeyCode::Down => {
             navigate_history(state, 1);
+            run_incremental_search(state, ctx);
+        }
+        KeyCode::Tab => {
+            // Toggle search mode (Name ↔ Path) and re-run search.
+            let AppMode::Search(ref mut search) = state.mode else {
+                return;
+            };
+            search.mode = search.mode.toggle();
+            run_incremental_search(state, ctx);
         }
         _ => {
             // Try editing the text buffer.
@@ -100,6 +112,7 @@ fn handle_filtered_key(
         KeyCode::Esc => {
             // Clear filter and return to Normal.
             state.tree_state.clear_search_filter();
+            state.search_match_indices.clear();
             state.mode = AppMode::Normal;
             state.dirty = true;
         }
@@ -128,10 +141,12 @@ fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
         return;
     };
     let query = &search.buffer.value;
+    let mode = search.mode;
 
     if query.is_empty() {
         // Empty query: clear filter.
         state.tree_state.clear_search_filter();
+        state.search_match_indices.clear();
         state.dirty = true;
         return;
     }
@@ -148,13 +163,41 @@ fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
         query,
         &root_path,
         ctx.search_max_results,
+        mode,
     );
 
+    // Store match indices for highlight rendering.
+    state.search_match_indices.clear();
+    for r in &results {
+        state.search_match_indices.insert(r.path.clone(), r.match_indices.clone());
+    }
+
+    let current_path = state.tree_state.cursor_path();
     let visible_paths = search_engine::compute_visible_paths(&results, &root_path);
+
+    // Load NotLoaded directories so collect_visible_filtered can traverse them.
+    let builder = TreeBuilder::new(state.show_hidden, state.show_ignored);
+    state.tree_state.ensure_filter_paths_loaded(&visible_paths, builder);
+
     state.tree_state.set_search_filter(visible_paths);
 
-    // Move cursor to the first result (highest score).
-    if let Some(first) = results.first() {
+    // When filtered results fit in the viewport, reset scroll to top so the
+    // user can see all results at a glance. Search is a "find the target
+    // quickly" operation — if a stale scroll offset hides part of a small
+    // result set, the user has to scroll manually to discover matches that
+    // are already on screen, which defeats the purpose.
+    if state.tree_state.visible_node_count() <= state.viewport_height {
+        state.scroll.set_offset(0);
+    }
+
+    // Keep cursor on the same file if it's still visible in the filtered
+    // results; otherwise fall back to the first (highest score) result.
+    let preserved = current_path
+        .as_ref()
+        .is_some_and(|p| state.tree_state.move_cursor_to_path(p));
+    if !preserved
+        && let Some(first) = results.first()
+    {
         state.tree_state.move_cursor_to_path(&first.path);
     }
 
@@ -281,6 +324,7 @@ mod tests {
         SearchState {
             buffer: TextBuffer::with_value(query.to_string(), query.len()),
             phase: SearchPhase::Typing,
+            mode: crate::input::SearchMode::Name,
             history_index: None,
             original_query: String::new(),
         }

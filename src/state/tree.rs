@@ -321,6 +321,47 @@ impl TreeState {
         self.move_cursor_to_path(&target)
     }
 
+    /// Load children for all `NotLoaded` directories whose paths are in the
+    /// given set.
+    ///
+    /// Processes paths from shallowest to deepest so that parent directories
+    /// are loaded before their children, enabling single-pass traversal.
+    pub fn ensure_filter_paths_loaded(
+        &mut self,
+        paths: &HashSet<PathBuf>,
+        builder: crate::tree::builder::TreeBuilder,
+    ) {
+        let mut dirs: Vec<&PathBuf> = paths.iter().collect();
+        dirs.sort_by_key(|p| p.components().count());
+        for dir in dirs {
+            self.ensure_children_loaded(dir, builder);
+        }
+    }
+
+    /// Load children of a directory without changing its expansion state.
+    ///
+    /// Unlike [`ensure_expanded`], this only transitions `NotLoaded` → `Loaded`
+    /// and preserves the current `is_expanded` flag. Used during the search
+    /// Typing phase where expansion must remain virtual.
+    fn ensure_children_loaded(
+        &mut self,
+        dir: &Path,
+        builder: crate::tree::builder::TreeBuilder,
+    ) -> bool {
+        let Some(node) = self.find_node_mut(dir) else {
+            return false;
+        };
+        if matches!(node.children, ChildrenState::Loaded(_)) {
+            return true;
+        }
+        let was_expanded = node.is_expanded;
+        let Ok(children) = builder.load_children(dir) else {
+            return false;
+        };
+        self.set_children(dir, children, was_expanded);
+        true
+    }
+
     /// Ensure a directory node is loaded and expanded.
     ///
     /// Returns `false` if the node could not be found or children failed to load.

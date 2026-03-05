@@ -15,11 +15,12 @@ use std::path::{
 
 use nucleo::Matcher;
 use nucleo::pattern::{
-    AtomKind,
     CaseMatching,
     Normalization,
     Pattern,
 };
+
+use crate::input::SearchMode;
 
 use super::search_index::SearchEntry;
 
@@ -32,7 +33,10 @@ pub struct SearchResult {
     pub is_dir: bool,
     /// Fuzzy match score (higher is better).
     pub score: u32,
-    /// Byte indices into the file/directory name where characters matched.
+    /// Byte indices into the matched string where characters matched.
+    ///
+    /// The matched string is the file/directory name in `Name` mode,
+    /// or the relative path in `Path` mode.
     pub match_indices: Vec<u32>,
 }
 
@@ -68,28 +72,44 @@ impl Ord for HeapEntry {
 /// Search the given entries for the query using fuzzy matching.
 ///
 /// Returns up to `max_results` results, sorted by score descending.
-/// Matching is performed on the file/directory name (not the full path).
+/// In `Name` mode, matches against the file/directory name.
+/// In `Path` mode, matches against the relative path from `root_path`.
 pub fn search(
     entries: &[SearchEntry],
     query: &str,
     root_path: &Path,
     max_results: usize,
+    mode: SearchMode,
 ) -> Vec<SearchResult> {
-    let _ = root_path; // Reserved for future use (e.g. path-based matching).
     if query.is_empty() || max_results == 0 {
         return Vec::new();
     }
 
     let mut matcher = Matcher::new(nucleo::Config::DEFAULT);
-    let pattern = Pattern::new(query, CaseMatching::Smart, Normalization::Smart, AtomKind::Fuzzy);
+    // Use `parse` instead of `new` to support fzf-style syntax:
+    // 'foo (substring), ^foo (prefix), foo$ (suffix), !foo (negation).
+    let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
 
     // Min-heap (Reverse) to keep top-k highest scores.
     let mut heap: BinaryHeap<Reverse<HeapEntry>> = BinaryHeap::with_capacity(max_results + 1);
     let mut indices_buf = Vec::new();
     let mut utf32_buf = Vec::new();
+    let mut path_buf = String::new();
 
     for (i, entry) in entries.iter().enumerate() {
-        let haystack = nucleo::Utf32Str::new(&entry.name, &mut utf32_buf);
+        let haystack_str = match mode {
+            SearchMode::Name => &entry.name,
+            SearchMode::Path => {
+                path_buf.clear();
+                if let Ok(rel) = entry.path.strip_prefix(root_path) {
+                    path_buf.push_str(&rel.to_string_lossy());
+                } else {
+                    continue;
+                }
+                &path_buf
+            }
+        };
+        let haystack = nucleo::Utf32Str::new(haystack_str, &mut utf32_buf);
 
         indices_buf.clear();
         let score = pattern.indices(haystack, &mut matcher, &mut indices_buf);
@@ -160,7 +180,7 @@ mod tests {
     #[rstest]
     fn search_empty_query_returns_empty() {
         let entries = vec![make_entry("/root/foo.txt", false)];
-        let results = search(&entries, "", Path::new("/root"), 100);
+        let results = search(&entries, "", Path::new("/root"), 100, SearchMode::Name);
         assert_that!(results.len(), eq(0));
     }
 
@@ -171,7 +191,7 @@ mod tests {
             make_entry("/root/bar.txt", false),
             make_entry("/root/foobar.rs", false),
         ];
-        let results = search(&entries, "foo", Path::new("/root"), 100);
+        let results = search(&entries, "foo", Path::new("/root"), 100, SearchMode::Name);
         assert_that!(results.len(), ge(1));
         // "foo.txt" should be a match.
         assert!(results.iter().any(|r| r.path == Path::new("/root/foo.txt")));
@@ -181,7 +201,7 @@ mod tests {
     fn search_respects_max_results() {
         let entries: Vec<SearchEntry> =
             (0..100).map(|i| make_entry(&format!("/root/file{i}.txt"), false)).collect();
-        let results = search(&entries, "file", Path::new("/root"), 5);
+        let results = search(&entries, "file", Path::new("/root"), 5, SearchMode::Name);
         assert_that!(results.len(), eq(5));
     }
 
@@ -192,7 +212,7 @@ mod tests {
             make_entry("/root/abc.txt", false),
             make_entry("/root/sub/abc_file.txt", false),
         ];
-        let results = search(&entries, "abc", Path::new("/root"), 100);
+        let results = search(&entries, "abc", Path::new("/root"), 100, SearchMode::Name);
         // Scores should be in descending order.
         for window in results.windows(2) {
             assert!(window[0].score >= window[1].score);
@@ -200,14 +220,21 @@ mod tests {
     }
 
     #[rstest]
-    fn search_matches_name_only() {
+    fn search_name_mode_does_not_match_path() {
         let entries = vec![make_entry("/root/src/main.rs", false)];
-        // Matches the file name "main.rs", not the full path.
-        let results = search(&entries, "main", Path::new("/root"), 100);
+        // Name mode matches the file name only.
+        let results = search(&entries, "main", Path::new("/root"), 100, SearchMode::Name);
         assert_that!(results.len(), eq(1));
-        // Path-based query should not match.
-        let results = search(&entries, "src/main", Path::new("/root"), 100);
+        // Path-based query should not match in Name mode.
+        let results = search(&entries, "src/main", Path::new("/root"), 100, SearchMode::Name);
         assert_that!(results.len(), eq(0));
+    }
+
+    #[rstest]
+    fn search_path_mode_matches_relative_path() {
+        let entries = vec![make_entry("/root/src/main.rs", false)];
+        let results = search(&entries, "src/main", Path::new("/root"), 100, SearchMode::Path);
+        assert_that!(results.len(), eq(1));
     }
 
     #[rstest]

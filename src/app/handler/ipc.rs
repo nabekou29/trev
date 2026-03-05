@@ -99,6 +99,7 @@ mod tests {
             layout_areas: crate::app::LayoutAreas::default(),
             deferred_expansion: None,
             search_history: vec![],
+            search_match_indices: std::collections::HashMap::new(),
         }
     }
 

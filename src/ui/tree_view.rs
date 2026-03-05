@@ -16,7 +16,10 @@ use ratatui::widgets::Paragraph;
 use crate::app::AppState;
 use crate::file_op::selection::SelectionMode;
 use crate::git::GitFileStatus;
-use crate::input::AppMode;
+use crate::input::{
+    AppMode,
+    SearchMode,
+};
 use crate::state::tree::{
     ChildrenState,
     VisibleNode,
@@ -93,6 +96,7 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             frame,
             bar_area,
             &search.buffer,
+            search.mode,
             match_count,
             !index_complete,
         );
@@ -192,6 +196,13 @@ fn push_name_and_columns(
         match &vnode.node.children {
             ChildrenState::Loading => " [Loading...]",
             ChildrenState::Loaded(children) if children.is_empty() => " (empty)",
+            ChildrenState::Loaded(children)
+                if state.tree_state.search_filter_paths().is_some_and(|filter| {
+                    !children.iter().any(|c| filter.contains(&c.path))
+                }) =>
+            {
+                " (no results)"
+            }
             _ => "",
         }
     } else {
@@ -201,7 +212,6 @@ fn push_name_and_columns(
     let full_name = format!("{name}{}{dir_suffix}", symlink_suffix.as_deref().unwrap_or(""));
 
     let name_width = area_width.saturating_sub(left_prefix_width + columns_width);
-    let truncated_name = truncate_to_width(&full_name, name_width);
     let name_style = state.file_style_matcher.resolve_style(
         name,
         vnode.node.is_dir,
@@ -210,19 +220,10 @@ fn push_name_and_columns(
         git_status,
     );
 
-    // Split truncated name into styled segments: filename vs suffix.
-    let name_display_len = unicode_width::UnicodeWidthStr::width(name.as_str());
-    let truncated_width = unicode_width::UnicodeWidthStr::width(truncated_name.as_str());
-
-    if truncated_width <= name_display_len {
-        spans.push(Span::styled(truncated_name, name_style));
-    } else {
-        spans.push(Span::styled(name.clone(), name_style));
-        let remaining = &truncated_name[name.len()..];
-        if !remaining.is_empty() {
-            spans.push(Span::styled(remaining.to_string(), Style::default().fg(Color::DarkGray)));
-        }
-    }
+    // Render the name with optional search match highlighting.
+    let truncated_width = push_name_with_highlight(
+        spans, name, &full_name, name_width, name_style, vnode, state,
+    );
 
     // Pad name area to its fixed width.
     if truncated_width < name_width {
@@ -230,6 +231,84 @@ fn push_name_and_columns(
     }
 
     // Render metadata columns.
+    push_metadata_columns(spans, vnode, state, git_status);
+}
+
+/// Render the name text with optional search match highlighting.
+///
+/// Returns the display width of the rendered name (used for padding).
+fn push_name_with_highlight(
+    spans: &mut Vec<Span<'_>>,
+    name: &str,
+    full_name: &str,
+    name_width: usize,
+    name_style: Style,
+    vnode: &VisibleNode<'_>,
+    state: &AppState,
+) -> usize {
+    let name_display_len = unicode_width::UnicodeWidthStr::width(name);
+    let full_name_width = unicode_width::UnicodeWidthStr::width(full_name);
+
+    // Check for search match highlight indices.
+    let search_indices = state
+        .search_match_indices
+        .get(&vnode.node.path)
+        .filter(|v| !v.is_empty());
+
+    if let Some(raw_indices) = search_indices {
+        let name_indices = adjust_match_indices_for_name(
+            raw_indices,
+            name,
+            &vnode.node.path,
+            &state.mode,
+            state.tree_state.root_path(),
+        );
+
+        if full_name_width > name_width {
+            push_highlighted_name(spans, name, Some(name_width), &name_indices, name_style);
+        } else {
+            push_highlighted_name(spans, name, None, &name_indices, name_style);
+            if let Some(suffix) = full_name.get(name.len()..)
+                && !suffix.is_empty()
+            {
+                spans.push(Span::styled(
+                    suffix.to_string(),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+        }
+    } else {
+        let truncated_name = truncate_to_width(full_name, name_width);
+        let truncated_width = unicode_width::UnicodeWidthStr::width(truncated_name.as_str());
+
+        if truncated_width <= name_display_len {
+            spans.push(Span::styled(truncated_name, name_style));
+        } else {
+            spans.push(Span::styled(name.to_string(), name_style));
+            if let Some(remaining) = truncated_name.get(name.len()..)
+                && !remaining.is_empty()
+            {
+                spans.push(Span::styled(
+                    remaining.to_string(),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+        }
+
+        return truncated_width;
+    }
+
+    // For highlighted path, compute rendered width.
+    full_name_width.min(name_width)
+}
+
+/// Push metadata column spans (size, mtime, git status).
+fn push_metadata_columns(
+    spans: &mut Vec<Span<'_>>,
+    vnode: &VisibleNode<'_>,
+    state: &AppState,
+    git_status: Option<GitFileStatus>,
+) {
     for col in &state.columns {
         spans.push(Span::raw(" "));
         match col.kind {
@@ -255,6 +334,115 @@ fn push_name_and_columns(
                 }
             }
         }
+    }
+}
+
+/// Adjust search match indices from the matched haystack to the displayed filename.
+///
+/// In `Name` mode, indices already reference the filename and are used as-is.
+/// In `Path` mode, indices reference the relative path; this function remaps
+/// them to character positions within the filename portion.
+fn adjust_match_indices_for_name(
+    indices: &[u32],
+    name: &str,
+    path: &std::path::Path,
+    mode: &AppMode,
+    root_path: &std::path::Path,
+) -> Vec<u32> {
+    let search_mode = match mode {
+        AppMode::Search(s) => s.mode,
+        _ => return indices.to_vec(),
+    };
+
+    match search_mode {
+        SearchMode::Name => indices.to_vec(),
+        SearchMode::Path => {
+            let Ok(rel) = path.strip_prefix(root_path) else {
+                return Vec::new();
+            };
+            let rel_str = rel.to_string_lossy();
+            let rel_char_count = rel_str.chars().count();
+            let name_char_count = name.chars().count();
+            let offset = rel_char_count.saturating_sub(name_char_count);
+
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "char index fits in u32 since name length is bounded"
+            )]
+            indices
+                .iter()
+                .filter_map(|&i| {
+                    (i as usize)
+                        .checked_sub(offset)
+                        .filter(|&adj| adj < name_char_count)
+                        .map(|adj| adj as u32)
+                })
+                .collect()
+        }
+    }
+}
+
+/// Push name spans with character-level match highlighting and optional truncation.
+///
+/// Characters at positions listed in `match_indices` are rendered with an
+/// underline modifier added to `base_style`. When `max_width` is `Some`,
+/// truncates the name and appends "…".
+fn push_highlighted_name(
+    spans: &mut Vec<Span<'_>>,
+    name: &str,
+    max_width: Option<usize>,
+    match_indices: &[u32],
+    base_style: Style,
+) {
+    use std::collections::HashSet;
+    use unicode_width::UnicodeWidthChar;
+
+    let highlight_style = base_style.add_modifier(Modifier::UNDERLINED);
+    let indices_set: HashSet<u32> = match_indices.iter().copied().collect();
+
+    // If truncating, reserve 1 column for "…".
+    let target_width = max_width.map(|w| w.saturating_sub(1));
+    let mut current_width = 0usize;
+    let mut buf = String::new();
+    let mut prev_highlighted: Option<bool> = None;
+    let mut truncated = false;
+
+    for (i, ch) in name.chars().enumerate() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if let Some(tw) = target_width
+            && current_width + ch_width > tw
+        {
+            truncated = true;
+            break;
+        }
+
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "char index in a filename always fits in u32"
+        )]
+        let highlighted = indices_set.contains(&(i as u32));
+        if let Some(prev) = prev_highlighted
+            && highlighted != prev
+            && !buf.is_empty()
+        {
+            let style = if prev { highlight_style } else { base_style };
+            spans.push(Span::styled(std::mem::take(&mut buf), style));
+        }
+        prev_highlighted = Some(highlighted);
+        buf.push(ch);
+        current_width += ch_width;
+    }
+
+    if !buf.is_empty() {
+        let style = match prev_highlighted {
+            Some(true) => highlight_style,
+            _ => base_style,
+        };
+        spans.push(Span::styled(buf, style));
+    }
+
+    if truncated {
+        spans.push(Span::styled("…".to_string(), base_style));
     }
 }
 

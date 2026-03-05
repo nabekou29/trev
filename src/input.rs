@@ -405,6 +405,27 @@ pub enum SearchPhase {
     Filtered,
 }
 
+/// What the fuzzy search matches against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SearchMode {
+    /// Match against file/directory name only.
+    #[default]
+    Name,
+    /// Match against the relative path from the root.
+    Path,
+}
+
+impl SearchMode {
+    /// Toggle between `Name` and `Path`.
+    #[must_use]
+    pub const fn toggle(self) -> Self {
+        match self {
+            Self::Name => Self::Path,
+            Self::Path => Self::Name,
+        }
+    }
+}
+
 /// State for the search overlay.
 #[derive(Debug, Clone)]
 pub struct SearchState {
@@ -412,6 +433,8 @@ pub struct SearchState {
     pub buffer: TextBuffer,
     /// Current search phase.
     pub phase: SearchPhase,
+    /// What to match against (file name or path).
+    pub mode: SearchMode,
     /// Index into search history during Up/Down navigation (`None` = new input).
     pub history_index: Option<usize>,
     /// Query text saved before entering history navigation.
@@ -425,6 +448,7 @@ impl SearchState {
         Self {
             buffer: TextBuffer::new(),
             phase: SearchPhase::Typing,
+            mode: SearchMode::Name,
             history_index: None,
             original_query: String::new(),
         }
