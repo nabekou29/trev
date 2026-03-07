@@ -156,28 +156,42 @@ enum Chunk<'a> {
     Num(&'a str),
 }
 
-/// Split a string into alternating Text/Num chunks for natural sort.
-fn chunks(s: &str) -> Vec<Chunk<'_>> {
-    let mut result = Vec::new();
-    let mut chars = s.char_indices().peekable();
+/// Lazy iterator that yields alternating Text/Num chunks from a string.
+///
+/// Zero-allocation replacement for the previous `chunks()` → `Vec<Chunk>`.
+/// Uses byte-level `is_ascii_digit()` checks; splitting on digit/non-digit
+/// boundaries always produces valid UTF-8 substrings.
+struct ChunkIter<'a> {
+    /// Remaining string to process.
+    remaining: &'a str,
+}
 
-    while let Some(&(start, ch)) = chars.peek() {
-        if ch.is_ascii_digit() {
-            while chars.peek().is_some_and(|&(_, c)| c.is_ascii_digit()) {
-                chars.next();
-            }
-            let end = chars.peek().map_or(s.len(), |&(i, _)| i);
-            result.push(Chunk::Num(&s[start..end]));
-        } else {
-            while chars.peek().is_some_and(|&(_, c)| !c.is_ascii_digit()) {
-                chars.next();
-            }
-            let end = chars.peek().map_or(s.len(), |&(i, _)| i);
-            result.push(Chunk::Text(&s[start..end]));
-        }
+impl<'a> ChunkIter<'a> {
+    /// Create a new chunk iterator over the given string.
+    const fn new(s: &'a str) -> Self {
+        Self { remaining: s }
     }
+}
 
-    result
+impl<'a> Iterator for ChunkIter<'a> {
+    type Item = Chunk<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let bytes = self.remaining.as_bytes();
+        let first = *bytes.first()?;
+        let is_digit = first.is_ascii_digit();
+
+        let end = bytes
+            .iter()
+            .skip(1)
+            .position(|b| b.is_ascii_digit() != is_digit)
+            .map_or(self.remaining.len(), |p| p + 1);
+
+        let (chunk_str, rest) = self.remaining.split_at(end);
+        self.remaining = rest;
+
+        if is_digit { Some(Chunk::Num(chunk_str)) } else { Some(Chunk::Text(chunk_str)) }
+    }
 }
 
 /// Compare two strings using natural sort order.
@@ -185,34 +199,61 @@ fn chunks(s: &str) -> Vec<Chunk<'_>> {
 /// - Numeric chunks compare by value (length then lexicographic).
 /// - Text chunks compare case-insensitively, with case-sensitive tie-break.
 /// - Text vs Num: numbers sort before text.
+/// - Shorter chunk sequence sorts before longer (handled by iterator exhaustion).
 fn compare_natural(a: &str, b: &str) -> std::cmp::Ordering {
-    let a_chunks = chunks(a);
-    let b_chunks = chunks(b);
+    let mut a_iter = ChunkIter::new(a);
+    let mut b_iter = ChunkIter::new(b);
 
-    for (ac, bc) in a_chunks.iter().zip(b_chunks.iter()) {
-        let ord = match (ac, bc) {
-            (Chunk::Num(an), Chunk::Num(bn)) => {
-                // Compare by digit count (shorter = smaller), then lexicographic.
-                let an = an.trim_start_matches('0');
-                let bn = bn.trim_start_matches('0');
-                an.len().cmp(&bn.len()).then_with(|| an.cmp(bn))
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (Some(ac), Some(bc)) => {
+                let ord = match (&ac, &bc) {
+                    (Chunk::Num(an), Chunk::Num(bn)) => {
+                        // Compare by digit count (shorter = smaller), then lexicographic.
+                        let an = an.trim_start_matches('0');
+                        let bn = bn.trim_start_matches('0');
+                        an.len().cmp(&bn.len()).then_with(|| an.cmp(bn))
+                    }
+                    (Chunk::Text(at), Chunk::Text(bt)) => {
+                        compare_text_ci(at, bt).then_with(|| at.cmp(bt))
+                    }
+                    // Numbers sort before text.
+                    (Chunk::Num(_), Chunk::Text(_)) => std::cmp::Ordering::Less,
+                    (Chunk::Text(_), Chunk::Num(_)) => std::cmp::Ordering::Greater,
+                };
+                if ord != std::cmp::Ordering::Equal {
+                    return ord;
+                }
             }
-            (Chunk::Text(at), Chunk::Text(bt)) => {
-                let a_low = at.to_lowercase();
-                let b_low = bt.to_lowercase();
-                a_low.cmp(&b_low).then_with(|| at.cmp(bt))
-            }
-            // Numbers sort before text.
-            (Chunk::Num(_), Chunk::Text(_)) => std::cmp::Ordering::Less,
-            (Chunk::Text(_), Chunk::Num(_)) => std::cmp::Ordering::Greater,
-        };
-        if ord != std::cmp::Ordering::Equal {
-            return ord;
         }
     }
+}
 
-    // Shorter sequence of chunks comes first.
-    a_chunks.len().cmp(&b_chunks.len())
+/// Compare two text slices case-insensitively without allocating.
+///
+/// Iterates character-by-character using `char::to_lowercase`, producing
+/// identical ordering to `str::to_lowercase().cmp()` without the `String`
+/// allocation.
+fn compare_text_ci(a: &str, b: &str) -> std::cmp::Ordering {
+    let mut a_chars = a.chars().flat_map(char::to_lowercase);
+    let mut b_chars = b.chars().flat_map(char::to_lowercase);
+
+    loop {
+        match (a_chars.next(), b_chars.next()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (Some(ac), Some(bc)) => {
+                let ord = ac.cmp(&bc);
+                if ord != std::cmp::Ordering::Equal {
+                    return ord;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
