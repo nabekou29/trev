@@ -277,6 +277,172 @@ fn bench_load_children_100k(c: &mut Criterion) {
     });
 }
 
+fn bench_visible_node_count_1m(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+    let children: Vec<TreeNode> =
+        (0..1_000_000).map(|i| file_node(&format!("file{i:07}.txt"), root_path)).collect();
+    let state = state_with_children(children);
+
+    c.bench_function("visible_node_count_1m", |b| {
+        b.iter(|| state.visible_node_count());
+    });
+}
+
+fn bench_set_children_1m_fresh(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+
+    c.bench_function("set_children_1m_fresh", |b| {
+        b.iter_batched(
+            || {
+                let target = TreeNode {
+                    name: "target".to_string(),
+                    path: root_path.join("target"),
+                    is_dir: true,
+                    is_symlink: false,
+                    symlink_target: None,
+                    size: 0,
+                    modified: None,
+                    recursive_max_mtime: None,
+                    children: ChildrenState::Loading,
+                    is_expanded: true,
+                    is_ignored: false,
+                    is_root: false,
+                };
+                let state = state_with_children(vec![target]);
+                let children: Vec<TreeNode> = (0..1_000_000)
+                    .rev()
+                    .map(|i| file_node(&format!("file{i:07}.txt"), &root_path.join("target")))
+                    .collect();
+                (state, children)
+            },
+            |(mut state, children)| {
+                state.set_children(&root_path.join("target"), children, false);
+            },
+            criterion::BatchSize::LargeInput,
+        );
+    });
+}
+
+fn bench_set_children_1m_refresh(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+    let target_path = root_path.join("target");
+
+    c.bench_function("set_children_1m_refresh", |b| {
+        b.iter_batched(
+            || {
+                // Old children already loaded (simulates watcher reload).
+                let old_children: Vec<TreeNode> = (0..1_000_000)
+                    .map(|i| file_node(&format!("file{i:07}.txt"), &target_path))
+                    .collect();
+                let target = TreeNode {
+                    name: "target".to_string(),
+                    path: target_path.clone(),
+                    is_dir: true,
+                    is_symlink: false,
+                    symlink_target: None,
+                    size: 0,
+                    modified: None,
+                    recursive_max_mtime: None,
+                    children: ChildrenState::Loaded(old_children),
+                    is_expanded: true,
+                    is_ignored: false,
+                    is_root: false,
+                };
+                let state = state_with_children(vec![target]);
+                // New children (same set, slightly different).
+                let new_children: Vec<TreeNode> = (0..1_000_000)
+                    .rev()
+                    .map(|i| file_node(&format!("file{i:07}.txt"), &target_path))
+                    .collect();
+                (state, new_children)
+            },
+            |(mut state, children)| {
+                state.set_children(&target_path, children, false);
+            },
+            criterion::BatchSize::LargeInput,
+        );
+    });
+}
+
+fn bench_set_children_1m_dirs_refresh(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+    let target_path = root_path.join("target");
+
+    c.bench_function("set_children_1m_dirs_refresh", |b| {
+        b.iter_batched(
+            || {
+                // Old: 1M directories (triggers O(N²) transfer_expansion_state).
+                let old_children: Vec<TreeNode> = (0..1_000_000)
+                    .map(|i| dir_node(&format!("dir{i:07}"), &target_path, vec![]))
+                    .collect();
+                let target = TreeNode {
+                    name: "target".to_string(),
+                    path: target_path.clone(),
+                    is_dir: true,
+                    is_symlink: false,
+                    symlink_target: None,
+                    size: 0,
+                    modified: None,
+                    recursive_max_mtime: None,
+                    children: ChildrenState::Loaded(old_children),
+                    is_expanded: true,
+                    is_ignored: false,
+                    is_root: false,
+                };
+                let state = state_with_children(vec![target]);
+                let new_children: Vec<TreeNode> = (0..1_000_000)
+                    .rev()
+                    .map(|i| dir_node(&format!("dir{i:07}"), &target_path, vec![]))
+                    .collect();
+                (state, new_children)
+            },
+            |(mut state, children)| {
+                state.set_children(&target_path, children, false);
+            },
+            criterion::BatchSize::LargeInput,
+        );
+    });
+}
+
+fn bench_sort_1m(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+    let opts = TreeOptions::default();
+
+    c.bench_function("sort_1m", |b| {
+        b.iter_batched(
+            || {
+                (0..1_000_000)
+                    .rev()
+                    .map(|i| file_node(&format!("file{i:07}.txt"), root_path))
+                    .collect::<Vec<TreeNode>>()
+            },
+            |mut children| {
+                trev::tree::sort::sort_children(
+                    &mut children,
+                    opts.sort_order,
+                    opts.sort_direction,
+                    opts.directories_first,
+                );
+            },
+            criterion::BatchSize::LargeInput,
+        );
+    });
+}
+
+fn bench_move_cursor_to_path_1m(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+    let children: Vec<TreeNode> =
+        (0..1_000_000).map(|i| file_node(&format!("file{i:07}.txt"), root_path)).collect();
+    let mut state = state_with_children(children);
+    let target = root_path.join("file0500000.txt");
+
+    c.bench_function("move_cursor_to_path_1m", |b| {
+        b.iter(|| {
+            state.move_cursor_to_path(&target);
+        });
+    });
+}
+
 criterion_group!(
     fast_benches,
     bench_visible_nodes_10k_flat,
@@ -291,6 +457,21 @@ criterion_group!(
 );
 
 criterion_group! {
+    name = large_benches;
+    config = Criterion::default()
+        .sample_size(10)
+        .warm_up_time(std::time::Duration::from_secs(1))
+        .measurement_time(std::time::Duration::from_secs(5));
+    targets =
+        bench_visible_node_count_1m,
+        bench_sort_1m,
+        bench_set_children_1m_fresh,
+        bench_set_children_1m_refresh,
+        bench_set_children_1m_dirs_refresh,
+        bench_move_cursor_to_path_1m
+}
+
+criterion_group! {
     name = io_benches;
     config = Criterion::default()
         .sample_size(10)
@@ -299,4 +480,4 @@ criterion_group! {
     targets = bench_build_100k_files, bench_load_children_100k
 }
 
-criterion_main!(fast_benches, io_benches);
+criterion_main!(fast_benches, large_benches, io_benches);

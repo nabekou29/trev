@@ -1,6 +1,9 @@
 //! Tree state: data structures for file system tree representation and navigation.
 
-use std::collections::HashSet;
+use std::collections::{
+    HashMap,
+    HashSet,
+};
 use std::path::{
     Path,
     PathBuf,
@@ -421,7 +424,9 @@ impl TreeState {
 
         if let Some(node) = self.find_node_mut(path) {
             // Preserve expansion state and loaded children from old nodes.
-            if let Some(old_children) = node.children.as_loaded_mut() {
+            if let ChildrenState::Loaded(old_children) =
+                std::mem::replace(&mut node.children, ChildrenState::NotLoaded)
+            {
                 transfer_expansion_state(old_children, &mut children);
             }
             node.recursive_max_mtime = compute_recursive_max_mtime(&children);
@@ -1120,12 +1125,21 @@ fn expand_paths_recursive(node: &mut TreeNode, paths: &HashSet<PathBuf>) {
 /// For each new directory node that also existed in the old list (matched by path),
 /// copies `is_expanded` and `children` from the old node to preserve the user's
 /// expand/collapse state across directory refreshes (e.g., after file deletion).
-fn transfer_expansion_state(old_children: &mut Vec<TreeNode>, new_children: &mut [TreeNode]) {
+///
+/// Uses a `HashMap` for O(N) total time instead of O(N²) linear search.
+fn transfer_expansion_state(old_children: Vec<TreeNode>, new_children: &mut [TreeNode]) {
+    // Build a lookup map from path → (is_expanded, children) for directories only.
+    // Consumes old_children to move children data without cloning.
+    let mut old_map: HashMap<PathBuf, (bool, ChildrenState)> = old_children
+        .into_iter()
+        .filter(|c| c.is_dir)
+        .map(|c| (c.path, (c.is_expanded, c.children)))
+        .collect();
+
     for new_child in new_children.iter_mut().filter(|c| c.is_dir) {
-        if let Some(old_idx) = old_children.iter().position(|old| old.path == new_child.path) {
-            let old_child = old_children.swap_remove(old_idx);
-            new_child.is_expanded = old_child.is_expanded;
-            new_child.children = old_child.children;
+        if let Some((is_expanded, children)) = old_map.remove(&new_child.path) {
+            new_child.is_expanded = is_expanded;
+            new_child.children = children;
         }
     }
 }
