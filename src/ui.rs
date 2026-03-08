@@ -45,6 +45,10 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         return;
     };
 
+    // Compute visible node count once per frame — avoids redundant full tree walks
+    // in render_tree (search bar) and render_status (position indicator).
+    let visible_count = state.tree_state.visible_node_count();
+
     if state.show_preview {
         let is_narrow = main_area.width <= state.layout_narrow_width;
 
@@ -70,9 +74,8 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         state.layout_areas = LayoutAreas { tree_area, preview_area };
 
         {
-            let visible_count = state.tree_state.visible_node_count();
             let _span = tracing::info_span!("render_tree", visible_count).entered();
-            tree_view::render_tree(frame, tree_area, state);
+            tree_view::render_tree(frame, tree_area, state, visible_count);
         }
         {
             let _span = tracing::info_span!("render_preview").entered();
@@ -83,12 +86,11 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         state.viewport_height = main_area.height as usize;
         state.layout_areas = LayoutAreas { tree_area: main_area, preview_area: Rect::default() };
 
-        let visible_count = state.tree_state.visible_nodes().len();
         let _span = tracing::info_span!("render_tree", visible_count).entered();
-        tree_view::render_tree(frame, main_area, state);
+        tree_view::render_tree(frame, main_area, state, visible_count);
     }
 
-    status_bar::render_status(frame, status_area, state);
+    status_bar::render_status(frame, status_area, state, visible_count);
 
     // Render modal overlays on top of everything.
     match &state.mode {

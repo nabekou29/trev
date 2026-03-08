@@ -403,22 +403,30 @@ impl TreeState {
     ///
     /// Walks the tree in DFS order, skipping the first `skip` nodes and
     /// collecting at most `take` nodes. Early-terminates once enough nodes
-    /// are collected, avoiding a full tree walk when the viewport is near
-    /// the top.
+    /// are collected, avoiding a full tree walk.
     ///
-    /// When a search filter is active, falls back to full `visible_nodes()`
-    /// and slices the result (the filtered tree is typically small).
+    /// Works with both normal and filtered modes, using the appropriate
+    /// early-terminating DFS walk in each case.
     pub fn visible_nodes_in_range(&self, skip: usize, take: usize) -> Vec<VisibleNode<'_>> {
-        // When a search filter is active, fall back to full visible_nodes()
-        // since the filtered tree is small (bounded by max_results).
-        if self.search_filter.is_some() {
-            let all = self.visible_nodes();
-            return all.into_iter().skip(skip).take(take).collect();
-        }
-
         let mut result = Vec::with_capacity(take);
         let mut skipped: usize = 0;
-        collect_visible_range(&self.root, 0, &mut result, &mut skipped, skip, take, self.options.show_root);
+
+        if let Some(ref filter) = self.search_filter {
+            collect_visible_filtered_range(
+                &self.root,
+                0,
+                &mut result,
+                &mut skipped,
+                skip,
+                take,
+                filter,
+                self.search_virtual_expand,
+                self.options.show_root,
+            );
+        } else {
+            collect_visible_range(&self.root, 0, &mut result, &mut skipped, skip, take, self.options.show_root);
+        }
+
         result
     }
 
@@ -923,6 +931,57 @@ fn collect_visible_filtered<'a>(
     {
         for child in children {
             collect_visible_filtered(child, child_depth, result, filter, force_expand, show_root);
+        }
+    }
+}
+
+/// Collect visible nodes filtered by a path set within a range, with early termination.
+///
+/// Combines the filter logic of [`collect_visible_filtered`] with the
+/// skip/take early termination of [`collect_visible_range`].
+#[expect(clippy::too_many_arguments)]
+fn collect_visible_filtered_range<'a>(
+    node: &'a TreeNode,
+    depth: usize,
+    result: &mut Vec<VisibleNode<'a>>,
+    skipped: &mut usize,
+    skip: usize,
+    take: usize,
+    filter: &HashSet<PathBuf>,
+    force_expand: bool,
+    show_root: bool,
+) {
+    if result.len() >= take {
+        return;
+    }
+
+    let skip_display = node.is_root && !show_root;
+    if !skip_display {
+        if !filter.contains(&node.path) {
+            return;
+        }
+        if *skipped >= skip {
+            result.push(VisibleNode { node, depth });
+            if result.len() >= take {
+                return;
+            }
+        } else {
+            *skipped += 1;
+        }
+    }
+
+    let child_depth = if skip_display { depth } else { depth + 1 };
+    let expanded = skip_display || force_expand || node.is_expanded;
+    if expanded
+        && let Some(children) = node.children.as_loaded()
+    {
+        for child in children {
+            collect_visible_filtered_range(
+                child, child_depth, result, skipped, skip, take, filter, force_expand, show_root,
+            );
+            if result.len() >= take {
+                return;
+            }
         }
     }
 }

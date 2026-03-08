@@ -22,16 +22,15 @@ use crate::file_op::selection::SelectionMode;
 /// Render the status bar into the given area.
 ///
 /// Layout: `[indicators] [message or path] ... [position]`
+///
+/// `visible_count` is the pre-computed total visible node count for this frame.
 #[expect(clippy::cast_possible_truncation, reason = "Terminal dimensions fit in u16")]
-pub fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+pub fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState, visible_count: usize) {
     let base_style = Style::default().bg(Color::DarkGray).fg(Color::White);
 
     // --- Build indicator spans (left side) ---
     let indicator_spans = build_indicator_spans(state);
     let indicator_width: u16 = indicator_spans.iter().map(|s| s.width() as u16).sum();
-
-    // --- Build position string (right side) ---
-    let visible_count = state.tree_state.visible_node_count();
     let cursor = state.tree_state.cursor();
     let position = if visible_count > 0 {
         format!(" {}/{} ", cursor + 1, visible_count)

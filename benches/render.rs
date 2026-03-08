@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::expect_used)]
 
+use std::collections::HashSet;
 use std::path::{
     Path,
     PathBuf,
@@ -140,7 +141,8 @@ fn bench_render_tree_100k_flat(c: &mut Criterion) {
         b.iter(|| {
             terminal
                 .draw(|frame| {
-                    trev::ui::tree_view::render_tree(frame, frame.area(), &state);
+                    let visible_count = state.tree_state.visible_node_count();
+                    trev::ui::tree_view::render_tree(frame, frame.area(), &state, visible_count);
                 })
                 .unwrap();
         });
@@ -166,7 +168,8 @@ fn bench_render_tree_100k_nested(c: &mut Criterion) {
         b.iter(|| {
             terminal
                 .draw(|frame| {
-                    trev::ui::tree_view::render_tree(frame, frame.area(), &state);
+                    let visible_count = state.tree_state.visible_node_count();
+                    trev::ui::tree_view::render_tree(frame, frame.area(), &state, visible_count);
                 })
                 .unwrap();
         });
@@ -186,7 +189,8 @@ fn bench_render_tree_100k_scrolled(c: &mut Criterion) {
         b.iter(|| {
             terminal
                 .draw(|frame| {
-                    trev::ui::tree_view::render_tree(frame, frame.area(), &state);
+                    let visible_count = state.tree_state.visible_node_count();
+                    trev::ui::tree_view::render_tree(frame, frame.area(), &state, visible_count);
                 })
                 .unwrap();
         });
@@ -211,11 +215,68 @@ fn bench_full_frame_render_100k(c: &mut Criterion) {
     });
 }
 
+fn bench_render_tree_100k_filtered(c: &mut Criterion) {
+    let root_path = Path::new("/test/root");
+    let children: Vec<TreeNode> =
+        (0..100_000).map(|i| file_node(&format!("file{i:06}.txt"), root_path)).collect();
+    let mut state = app_state_from_tree(tree_with_children(children));
+
+    // Broad filter: ~10k paths.
+    let mut filter: HashSet<PathBuf> = (0..100_000)
+        .step_by(10)
+        .map(|i| root_path.join(format!("file{i:06}.txt")))
+        .collect();
+    filter.insert(root_path.to_path_buf());
+    state.tree_state.set_search_filter(filter);
+
+    let mut terminal = Terminal::new(TestBackend::new(120, 50)).unwrap();
+
+    c.bench_function("render_tree_100k_filtered", |b| {
+        b.iter(|| {
+            terminal
+                .draw(|frame| {
+                    let visible_count = state.tree_state.visible_node_count();
+                    trev::ui::tree_view::render_tree(frame, frame.area(), &state, visible_count);
+                })
+                .unwrap();
+        });
+    });
+}
+
+fn bench_full_frame_render_100k_filtered(c: &mut Criterion) {
+    let root_path = Path::new("/test/root");
+    let children: Vec<TreeNode> =
+        (0..100_000).map(|i| file_node(&format!("file{i:06}.txt"), root_path)).collect();
+    let mut state = app_state_from_tree(tree_with_children(children));
+
+    // Broad filter: ~10k paths.
+    let mut filter: HashSet<PathBuf> = (0..100_000)
+        .step_by(10)
+        .map(|i| root_path.join(format!("file{i:06}.txt")))
+        .collect();
+    filter.insert(root_path.to_path_buf());
+    state.tree_state.set_search_filter(filter);
+
+    let mut terminal = Terminal::new(TestBackend::new(120, 50)).unwrap();
+
+    c.bench_function("full_frame_render_100k_filtered", |b| {
+        b.iter(|| {
+            terminal
+                .draw(|frame| {
+                    trev::ui::render(frame, &mut state);
+                })
+                .unwrap();
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_render_tree_100k_flat,
     bench_render_tree_100k_nested,
     bench_render_tree_100k_scrolled,
     bench_full_frame_render_100k,
+    bench_render_tree_100k_filtered,
+    bench_full_frame_render_100k_filtered,
 );
 criterion_main!(benches);

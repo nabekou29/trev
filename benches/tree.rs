@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::expect_used)]
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use criterion::{
@@ -222,6 +223,46 @@ fn bench_set_children_100k(c: &mut Criterion) {
     });
 }
 
+fn bench_visible_node_count_filtered_1k(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+    let children: Vec<TreeNode> = (0..10_000)
+        .map(|i| file_node(&format!("file{i:05}.txt"), root_path))
+        .collect();
+    let mut state = state_with_children(children);
+
+    // Build filter containing ~1k paths (every 10th file + root ancestors).
+    let mut filter: HashSet<std::path::PathBuf> = (0..10_000)
+        .step_by(10)
+        .map(|i| root_path.join(format!("file{i:05}.txt")))
+        .collect();
+    filter.insert(root_path.to_path_buf());
+    state.set_search_filter(filter);
+
+    c.bench_function("visible_node_count_filtered_1k", |b| {
+        b.iter(|| state.visible_node_count());
+    });
+}
+
+fn bench_visible_nodes_in_range_filtered_10k(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+    let children: Vec<TreeNode> = (0..100_000)
+        .map(|i| file_node(&format!("file{i:06}.txt"), root_path))
+        .collect();
+    let mut state = state_with_children(children);
+
+    // Broad filter: ~10k paths.
+    let mut filter: HashSet<std::path::PathBuf> = (0..100_000)
+        .step_by(10)
+        .map(|i| root_path.join(format!("file{i:06}.txt")))
+        .collect();
+    filter.insert(root_path.to_path_buf());
+    state.set_search_filter(filter);
+
+    c.bench_function("visible_nodes_in_range_filtered_10k", |b| {
+        b.iter(|| state.visible_nodes_in_range(0, 50));
+    });
+}
+
 fn bench_load_children_100k(c: &mut Criterion) {
     let dir = tempfile::TempDir::new().unwrap();
     for i in 0..100_000 {
@@ -242,6 +283,8 @@ criterion_group!(
     bench_visible_nodes_100k_flat,
     bench_visible_nodes_100k_nested,
     bench_visible_node_count_100k,
+    bench_visible_node_count_filtered_1k,
+    bench_visible_nodes_in_range_filtered_10k,
     bench_expand_subtree_1000_dirs,
     bench_toggle_expand_100k,
     bench_set_children_100k,

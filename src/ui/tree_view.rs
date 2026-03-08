@@ -35,7 +35,10 @@ use crate::ui::column::{
 };
 
 /// Render the tree view into the given area.
-pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+///
+/// `visible_count` is the pre-computed total visible node count for this frame,
+/// avoiding redundant full tree walks.
+pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState, visible_count: usize) {
     // When in Search(Typing) mode, reserve the bottom row for the search input bar.
     let (tree_area, search_bar_area) =
         if let AppMode::Search(ref search) = state.mode {
@@ -91,7 +94,7 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     // Render search input bar.
     if let (Some(bar_area), AppMode::Search(search)) = (search_bar_area, &state.mode) {
         let index_complete = true; // TODO: check ctx.search_index.is_complete()
-        let match_count = Some(state.tree_state.visible_node_count());
+        let match_count = Some(visible_count);
         crate::ui::search_input::render_search_input(
             frame,
             bar_area,

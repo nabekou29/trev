@@ -38,6 +38,11 @@ pub enum GitFileStatus {
 pub struct GitState {
     /// File path (absolute) → status mapping.
     statuses: HashMap<PathBuf, GitFileStatus>,
+    /// Pre-computed directory → aggregated status mapping.
+    ///
+    /// Built once during [`from_porcelain`] by propagating each file's status
+    /// to all ancestor directories. Lookups in [`dir_status`] are then O(1).
+    dir_statuses: HashMap<PathBuf, GitFileStatus>,
 }
 
 /// Result of an async git status fetch, sent through a channel.
@@ -104,16 +109,12 @@ impl GitState {
         self.statuses.get(path)
     }
 
-    /// Compute the aggregated status for a directory.
+    /// Look up the pre-computed aggregated status for a directory.
     ///
-    /// Returns the highest-priority status among all descendants whose path
-    /// starts with `dir_path`. Returns `None` when no descendants have status.
+    /// Returns the highest-priority status among all descendants.
+    /// O(1) lookup into the cache built by [`from_porcelain`].
     pub fn dir_status(&self, dir_path: &Path) -> Option<GitFileStatus> {
-        self.statuses
-            .iter()
-            .filter(|(path, _)| path.starts_with(dir_path))
-            .map(|(_, status)| *status)
-            .max_by_key(|s| s.priority())
+        self.dir_statuses.get(dir_path).copied()
     }
 
     /// Parse `git status --porcelain=v1` output into a `GitState`.
@@ -172,7 +173,31 @@ impl GitState {
             statuses.insert(abs_path, status);
         }
 
-        Self { statuses }
+        // Pre-compute directory statuses by propagating each file's status
+        // to all ancestor directories up to (and including) the repo root.
+        let mut dir_statuses: HashMap<PathBuf, GitFileStatus> = HashMap::new();
+        for (path, &status) in &statuses {
+            let mut current = path.parent();
+            while let Some(dir) = current {
+                match dir_statuses.entry(dir.to_path_buf()) {
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(status);
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        if status.priority() > e.get().priority() {
+                            e.insert(status);
+                        }
+                    }
+                }
+                // Stop at repo root to avoid climbing into parent directories.
+                if dir == repo_root {
+                    break;
+                }
+                current = dir.parent();
+            }
+        }
+
+        Self { statuses, dir_statuses }
     }
 }
 
