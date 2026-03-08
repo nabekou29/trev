@@ -11,16 +11,17 @@ use crossterm::event::{
     KeyEvent,
 };
 
+use crate::app::handler::tree::spawn_load_children;
 use crate::app::state::{
     AppContext,
     AppState,
+    LoadKind,
 };
 use crate::input::{
     AppMode,
     SearchPhase,
     SearchState,
 };
-use crate::tree::builder::TreeBuilder;
 use crate::tree::search_engine;
 
 /// Maximum number of search history entries to retain.
@@ -174,11 +175,17 @@ fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
     let current_path = state.tree_state.cursor_path();
     let visible_paths = search_engine::compute_visible_paths(&results, &ctx.root_path);
 
-    // Load NotLoaded directories so collect_visible_filtered can traverse them.
-    let builder = TreeBuilder::new(state.show_hidden, state.show_ignored);
-    state.tree_state.ensure_filter_paths_loaded(&visible_paths, builder);
+    // Register unloaded ancestor directories for progressive async loading.
+    let mut pending: Vec<std::path::PathBuf> = visible_paths.iter().cloned().collect();
+    pending.sort_by_key(|p| p.components().count());
+    state.search_pending_loads = Some(pending);
 
+    // Set filter immediately — already-loaded nodes are shown right away,
+    // and more results appear progressively as async loads complete.
     state.tree_state.set_search_filter(visible_paths);
+
+    // Schedule loads for directories whose parents are already loaded.
+    schedule_search_loads(state, ctx);
 
     // When filtered results fit in the viewport, reset scroll to top so the
     // user can see all results at a glance. Search is a "find the target
@@ -239,6 +246,44 @@ fn confirm_search(state: &mut AppState) {
 
     search.phase = SearchPhase::Filtered;
     state.dirty = true;
+}
+
+/// Schedule async loads for search filter ancestor directories.
+///
+/// Iterates the pending load list (sorted shallowest-first) and spawns
+/// async loads for directories whose parent is already loaded in the tree.
+/// Directories whose parent is not yet loaded are kept in the pending list
+/// and retried when their parent's load completes.
+pub fn schedule_search_loads(state: &mut AppState, ctx: &AppContext) {
+    let Some(ref mut pending) = state.search_pending_loads else {
+        return;
+    };
+
+    let show_hidden = state.show_hidden;
+    let show_ignored = state.show_ignored;
+
+    let mut scheduled = Vec::new();
+    for path in pending.iter() {
+        if let Some(load_path) = state.tree_state.prepare_async_load(path, true) {
+            spawn_load_children(
+                &ctx.children_tx,
+                load_path,
+                show_hidden,
+                show_ignored,
+                LoadKind::SearchFilter,
+            );
+            scheduled.push(path.clone());
+        }
+    }
+
+    let remaining = pending.len() - scheduled.len();
+    if !scheduled.is_empty() {
+        tracing::info!(scheduled = scheduled.len(), remaining, "schedule_search_loads");
+        pending.retain(|p| !scheduled.contains(p));
+    }
+    if pending.is_empty() {
+        state.search_pending_loads = None;
+    }
 }
 
 /// Direction for search history navigation.

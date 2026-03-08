@@ -121,6 +121,11 @@ pub struct AppState {
     /// Maps absolute paths to character indices within the matched string
     /// (file name or relative path depending on `SearchMode`).
     pub search_match_indices: HashMap<PathBuf, Vec<u32>>,
+    /// Pending search filter directory loads (sorted by depth, shallowest first).
+    ///
+    /// Set during incremental search when ancestor directories need async loading.
+    /// Cleared when search exits or all loads complete.
+    pub search_pending_loads: Option<Vec<PathBuf>>,
 }
 
 /// Cached layout areas from the last render, used for mouse hit-testing.
@@ -143,6 +148,7 @@ impl AppState {
     pub fn clear_search(&mut self) {
         self.tree_state.clear_search_filter();
         self.search_match_indices.clear();
+        self.search_pending_loads = None;
     }
 
     /// Set a temporary status message (auto-clears after 3 seconds).
@@ -355,6 +361,8 @@ pub enum LoadKind {
     Prefetch,
     /// Deferred session restore (cursor-prioritized, adjusts scroll to preserve visual row).
     DeferredRestore,
+    /// Search filter load (progressive ancestor loading during search).
+    SearchFilter,
 }
 
 /// Result of an async directory children load operation.
@@ -584,6 +592,7 @@ pub(super) mod tests {
             deferred_expansion: None,
             search_history: vec![],
             search_match_indices: HashMap::new(),
+            search_pending_loads: None,
         }
     }
 

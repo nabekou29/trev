@@ -5,8 +5,8 @@ mod input;
 pub mod ipc;
 mod mouse;
 pub(super) mod preview;
-mod search;
-mod tree;
+pub mod search;
+pub mod tree;
 
 use std::collections::BTreeSet;
 use std::sync::Arc;

@@ -100,6 +100,7 @@ mod tests {
             deferred_expansion: None,
             search_history: vec![],
             search_match_indices: std::collections::HashMap::new(),
+            search_pending_loads: None,
         }
     }
 

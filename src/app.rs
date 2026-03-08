@@ -278,6 +278,7 @@ fn init_app(
         deferred_expansion,
         search_history,
         search_match_indices: std::collections::HashMap::new(),
+        search_pending_loads: None,
     };
 
     let (ctx, channels) = build_context_and_channels(
@@ -470,10 +471,9 @@ fn apply_children_load(
             .entered();
 
     match kind {
-        LoadKind::DeferredRestore | LoadKind::Prefetch => {
-            // Preserve cursor visual position during deferred restore and
-            // background refreshes (e.g. watcher-triggered reloads) so the
-            // selected file does not jump when files are added or removed.
+        LoadKind::DeferredRestore | LoadKind::Prefetch | LoadKind::SearchFilter => {
+            // Preserve cursor visual position during deferred restore, search filter
+            // loading, and background refreshes so the selected file does not jump.
             let snapshot = CursorSnapshot::capture(&state.tree_state, &state.scroll);
             let auto_expand = kind != LoadKind::Prefetch;
             state.tree_state.set_children(path, children, auto_expand);
@@ -499,7 +499,7 @@ fn post_children_load(state: &mut AppState, ctx: &AppContext, loaded_path: &Path
             );
         }
         LoadKind::DeferredRestore => advance_deferred(state, ctx),
-        LoadKind::Prefetch => {}
+        LoadKind::SearchFilter | LoadKind::Prefetch => {}
     }
 }
 
@@ -509,6 +509,81 @@ fn advance_deferred(state: &mut AppState, ctx: &AppContext) {
         deferred.on_load_complete();
     }
     schedule_deferred_loads(state, ctx);
+}
+
+/// Process batched children load results from the async channel.
+///
+/// `DeferredRestore` and `SearchFilter` results are batched: all `set_children`
+/// calls happen first, then cursor is resolved once per kind.  This avoids
+/// O(N×V) per-result cursor walks when many loads complete in the same frame.
+///
+/// Returns `true` if any results were processed.
+fn process_children_results(
+    state: &mut AppState,
+    ctx: &AppContext,
+    channels: &mut EventReceivers,
+) -> bool {
+    let _span = tracing::info_span!("process_children").entered();
+
+    let mut had_events = false;
+    let mut deferred_snapshot: Option<CursorSnapshot> = None;
+    let mut search_snapshot: Option<CursorSnapshot> = None;
+    let mut had_search_filter = false;
+
+    for result in channels.drain_children() {
+        had_events = true;
+        match result.children {
+            Ok(children) => {
+                let loaded_path = result.path.clone();
+                let kind = result.kind;
+
+                if kind == LoadKind::DeferredRestore {
+                    if deferred_snapshot.is_none() {
+                        deferred_snapshot =
+                            Some(CursorSnapshot::capture(&state.tree_state, &state.scroll));
+                    }
+                    state
+                        .tree_state
+                        .set_children(&result.path, children, true);
+                } else if kind == LoadKind::SearchFilter {
+                    had_search_filter = true;
+                    if search_snapshot.is_none() {
+                        search_snapshot =
+                            Some(CursorSnapshot::capture(&state.tree_state, &state.scroll));
+                    }
+                    state
+                        .tree_state
+                        .set_children(&result.path, children, true);
+                } else {
+                    apply_children_load(state, &result.path, children, kind);
+                }
+                // Defer SearchFilter post-processing to after the batch.
+                if kind != LoadKind::SearchFilter {
+                    post_children_load(state, ctx, &loaded_path, kind);
+                }
+            }
+            Err(err) => {
+                tracing::warn!(?result.path, %err, "failed to load children");
+                state.tree_state.set_children_error(&result.path);
+                if result.kind == LoadKind::DeferredRestore {
+                    post_children_load(state, ctx, &result.path, result.kind);
+                }
+            }
+        }
+    }
+
+    if let Some(snapshot) = deferred_snapshot {
+        snapshot.restore(&mut state.tree_state, &mut state.scroll, state.viewport_height);
+    }
+    if let Some(snapshot) = search_snapshot {
+        snapshot.restore(&mut state.tree_state, &mut state.scroll, state.viewport_height);
+    }
+    // Schedule next batch of search loads once, after all results are applied.
+    if had_search_filter {
+        handler::search::schedule_search_loads(state, ctx);
+    }
+
+    had_events
 }
 
 /// Process all async channel results: children loads, watcher, IPC, git, rebuild, preview.
@@ -521,52 +596,7 @@ fn process_async_events(
     channels: &mut EventReceivers,
     mut last_cursor: usize,
 ) -> (usize, bool) {
-    let mut had_events = false;
-
-    // Children load results.
-    //
-    // DeferredRestore results are batched: all set_children calls happen first,
-    // then cursor is resolved once. This avoids O(N×V) per-result cursor walks
-    // when many deferred loads complete in the same frame.
-    {
-        let _span = tracing::info_span!("process_children").entered();
-
-        let mut deferred_snapshot: Option<CursorSnapshot> = None;
-
-        for result in channels.drain_children() {
-            had_events = true;
-            match result.children {
-                Ok(children) => {
-                    let loaded_path = result.path.clone();
-                    let kind = result.kind;
-
-                    if kind == LoadKind::DeferredRestore {
-                        if deferred_snapshot.is_none() {
-                            deferred_snapshot =
-                                Some(CursorSnapshot::capture(&state.tree_state, &state.scroll));
-                        }
-                        state
-                            .tree_state
-                            .set_children(&result.path, children, true);
-                    } else {
-                        apply_children_load(state, &result.path, children, kind);
-                    }
-                    post_children_load(state, ctx, &loaded_path, kind);
-                }
-                Err(err) => {
-                    tracing::warn!(?result.path, %err, "failed to load children");
-                    state.tree_state.set_children_error(&result.path);
-                    if result.kind == LoadKind::DeferredRestore {
-                        post_children_load(state, ctx, &result.path, result.kind);
-                    }
-                }
-            }
-        }
-
-        if let Some(snapshot) = deferred_snapshot {
-            snapshot.restore(&mut state.tree_state, &mut state.scroll, state.viewport_height);
-        }
-    }
+    let mut had_events = process_children_results(state, ctx, channels);
 
     // Watcher events (file system changes in watched directories).
     {
