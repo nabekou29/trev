@@ -121,12 +121,7 @@ pub fn build_search_index(
         .git_global(!show_ignored)
         .git_exclude(!show_ignored)
         .build_parallel()
-        .visit(&mut IndexVisitorBuilder {
-            root: &root_owned,
-            index,
-            cancelled,
-            max_entries,
-        });
+        .visit(&mut IndexVisitorBuilder { root: &root_owned, index, cancelled, max_entries });
 
     // Mark complete and record final count.
     if let Ok(mut guard) = index.write() {
@@ -298,7 +293,14 @@ mod tests {
     fn build_index(root: &Path, show_hidden: bool, show_ignored: bool) -> SearchIndex {
         let index = Arc::new(RwLock::new(SearchIndex::new()));
         let cancelled = Arc::new(AtomicBool::new(false));
-        build_search_index(&index, root, show_hidden, show_ignored, &cancelled, DEFAULT_MAX_ENTRIES);
+        build_search_index(
+            &index,
+            root,
+            show_hidden,
+            show_ignored,
+            &cancelled,
+            DEFAULT_MAX_ENTRIES,
+        );
         Arc::try_unwrap(index).unwrap().into_inner().unwrap()
     }
 

@@ -20,9 +20,8 @@ use nucleo::pattern::{
     Pattern,
 };
 
-use crate::input::SearchMode;
-
 use super::search_index::SearchEntry;
+use crate::input::SearchMode;
 
 /// A single search result with score and match indices.
 #[derive(Debug, Clone)]

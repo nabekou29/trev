@@ -223,10 +223,8 @@ fn bench_render_tree_100k_filtered(c: &mut Criterion) {
     let mut state = app_state_from_tree(tree_with_children(children));
 
     // Broad filter: ~10k paths.
-    let mut filter: HashSet<PathBuf> = (0..100_000)
-        .step_by(10)
-        .map(|i| root_path.join(format!("file{i:06}.txt")))
-        .collect();
+    let mut filter: HashSet<PathBuf> =
+        (0..100_000).step_by(10).map(|i| root_path.join(format!("file{i:06}.txt"))).collect();
     filter.insert(root_path.to_path_buf());
     state.tree_state.set_search_filter(filter);
 
@@ -251,10 +249,8 @@ fn bench_full_frame_render_100k_filtered(c: &mut Criterion) {
     let mut state = app_state_from_tree(tree_with_children(children));
 
     // Broad filter: ~10k paths.
-    let mut filter: HashSet<PathBuf> = (0..100_000)
-        .step_by(10)
-        .map(|i| root_path.join(format!("file{i:06}.txt")))
-        .collect();
+    let mut filter: HashSet<PathBuf> =
+        (0..100_000).step_by(10).map(|i| root_path.join(format!("file{i:06}.txt"))).collect();
     filter.insert(root_path.to_path_buf());
     state.tree_state.set_search_filter(filter);
 

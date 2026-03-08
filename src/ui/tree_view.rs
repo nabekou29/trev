@@ -40,22 +40,17 @@ use crate::ui::column::{
 /// avoiding redundant full tree walks.
 pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState, visible_count: usize) {
     // When in Search(Typing) mode, reserve the bottom row for the search input bar.
-    let (tree_area, search_bar_area) =
-        if let AppMode::Search(ref search) = state.mode {
-            if search.phase == crate::input::SearchPhase::Typing && area.height > 1 {
-                let tree = Rect { height: area.height - 1, ..area };
-                let bar = Rect {
-                    y: area.y.saturating_add(area.height - 1),
-                    height: 1,
-                    ..area
-                };
-                (tree, Some(bar))
-            } else {
-                (area, None)
-            }
+    let (tree_area, search_bar_area) = if let AppMode::Search(ref search) = state.mode {
+        if search.phase == crate::input::SearchPhase::Typing && area.height > 1 {
+            let tree = Rect { height: area.height - 1, ..area };
+            let bar = Rect { y: area.y.saturating_add(area.height - 1), height: 1, ..area };
+            (tree, Some(bar))
         } else {
             (area, None)
-        };
+        }
+    } else {
+        (area, None)
+    };
 
     let offset = state.scroll.offset();
     let height = tree_area.height as usize;
@@ -200,9 +195,10 @@ fn push_name_and_columns(
             ChildrenState::Loading => " [Loading...]",
             ChildrenState::Loaded(children) if children.is_empty() => " (empty)",
             ChildrenState::Loaded(children)
-                if state.tree_state.search_filter_paths().is_some_and(|filter| {
-                    !children.iter().any(|c| filter.contains(&c.path))
-                }) =>
+                if state
+                    .tree_state
+                    .search_filter_paths()
+                    .is_some_and(|filter| !children.iter().any(|c| filter.contains(&c.path))) =>
             {
                 " (no results)"
             }
@@ -224,9 +220,8 @@ fn push_name_and_columns(
     );
 
     // Render the name with optional search match highlighting.
-    let truncated_width = push_name_with_highlight(
-        spans, name, &full_name, name_width, name_style, vnode, state,
-    );
+    let truncated_width =
+        push_name_with_highlight(spans, name, &full_name, name_width, name_style, vnode, state);
 
     // Pad name area to its fixed width.
     if truncated_width < name_width {
@@ -253,10 +248,7 @@ fn push_name_with_highlight(
     let full_name_width = unicode_width::UnicodeWidthStr::width(full_name);
 
     // Check for search match highlight indices.
-    let search_indices = state
-        .search_match_indices
-        .get(&vnode.node.path)
-        .filter(|v| !v.is_empty());
+    let search_indices = state.search_match_indices.get(&vnode.node.path).filter(|v| !v.is_empty());
 
     if let Some(raw_indices) = search_indices {
         let name_indices = adjust_match_indices_for_name(
@@ -274,10 +266,7 @@ fn push_name_with_highlight(
             if let Some(suffix) = full_name.get(name.len()..)
                 && !suffix.is_empty()
             {
-                spans.push(Span::styled(
-                    suffix.to_string(),
-                    Style::default().fg(Color::DarkGray),
-                ));
+                spans.push(Span::styled(suffix.to_string(), Style::default().fg(Color::DarkGray)));
             }
         }
     } else {

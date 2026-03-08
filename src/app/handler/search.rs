@@ -36,11 +36,7 @@ pub fn open_search(state: &mut AppState) {
 /// Handle key events in Search mode.
 ///
 /// Dispatches based on the current search phase (Typing or Filtered).
-pub fn handle_search_mode_key(
-    key: KeyEvent,
-    state: &mut AppState,
-    ctx: &AppContext,
-) {
+pub fn handle_search_mode_key(key: KeyEvent, state: &mut AppState, ctx: &AppContext) {
     let AppMode::Search(ref search) = state.mode else {
         return;
     };
@@ -57,11 +53,7 @@ pub fn handle_search_mode_key(
 /// - Enter: confirm search and transition to Filtered phase.
 /// - Esc: cancel search and return to Normal mode.
 /// - Up/Down: navigate search history.
-fn handle_typing_key(
-    key: KeyEvent,
-    state: &mut AppState,
-    ctx: &AppContext,
-) {
+fn handle_typing_key(key: KeyEvent, state: &mut AppState, ctx: &AppContext) {
     match key.code {
         KeyCode::Esc => {
             // Cancel search, restore normal tree view.
@@ -106,11 +98,7 @@ fn handle_typing_key(
 /// Normal tree navigation keys are passed through to the tree handler.
 /// Esc clears the filter and returns to Normal mode.
 /// `/` opens a new search from the filtered state.
-fn handle_filtered_key(
-    key: KeyEvent,
-    state: &mut AppState,
-    ctx: &AppContext,
-) {
+fn handle_filtered_key(key: KeyEvent, state: &mut AppState, ctx: &AppContext) {
     match key.code {
         KeyCode::Esc => {
             // Clear filter and return to Normal.
@@ -158,13 +146,8 @@ fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
         return;
     };
 
-    let results = search_engine::search(
-        index.entries(),
-        query,
-        &ctx.root_path,
-        ctx.search_max_results,
-        mode,
-    );
+    let results =
+        search_engine::search(index.entries(), query, &ctx.root_path, ctx.search_max_results, mode);
 
     // Store match indices for highlight rendering.
     state.search_match_indices.clear();
@@ -198,12 +181,8 @@ fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
 
     // Keep cursor on the same file if it's still visible in the filtered
     // results; otherwise fall back to the first (highest score) result.
-    let preserved = current_path
-        .as_ref()
-        .is_some_and(|p| state.tree_state.move_cursor_to_path(p));
-    if !preserved
-        && let Some(first) = results.first()
-    {
+    let preserved = current_path.as_ref().is_some_and(|p| state.tree_state.move_cursor_to_path(p));
+    if !preserved && let Some(first) = results.first() {
         state.tree_state.move_cursor_to_path(&first.path);
     }
 
