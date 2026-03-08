@@ -1177,7 +1177,7 @@ fn shutdown(root_path: &Path, state: &AppState) {
         sort_direction: state.tree_state.sort_direction(),
         directories_first: state.tree_state.directories_first(),
     };
-    let visual_row = state.tree_state.cursor().saturating_sub(state.scroll.offset());
+    let visual_row = CursorSnapshot::capture(&state.tree_state, &state.scroll).visual_row;
     let session_state = session::build_session_state(
         root_path,
         state.expanded_paths_including_deferred(),

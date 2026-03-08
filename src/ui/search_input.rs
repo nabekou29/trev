@@ -51,21 +51,7 @@ pub fn render_search_input(
     spans.push(Span::styled("/", prompt_style));
 
     // Query text with cursor.
-    let (before, after) = buffer.value.split_at(buffer.cursor_pos);
-    spans.push(Span::raw(before.to_string()));
-
-    // Cursor: inverted character (or space if at end).
-    let cursor_style = Style::default().bg(Color::White).fg(Color::Black);
-    let mut after_chars = after.chars();
-    if let Some(cursor_char) = after_chars.next() {
-        spans.push(Span::styled(cursor_char.to_string(), cursor_style));
-        let rest: String = after_chars.collect();
-        if !rest.is_empty() {
-            spans.push(Span::raw(rest));
-        }
-    } else {
-        spans.push(Span::styled(" ", cursor_style));
-    }
+    buffer.push_cursor_spans(&mut spans);
 
     // Right-aligned status indicator.
     let status_text = if is_indexing {

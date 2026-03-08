@@ -136,6 +136,15 @@ pub struct LayoutAreas {
 }
 
 impl AppState {
+    /// Clear search filter and associated match highlight indices.
+    ///
+    /// This is the single exit point for any search cancellation or
+    /// completion that should restore normal tree visibility.
+    pub fn clear_search(&mut self) {
+        self.tree_state.clear_search_filter();
+        self.search_match_indices.clear();
+    }
+
     /// Set a temporary status message (auto-clears after 3 seconds).
     pub fn set_status(&mut self, text: impl Into<String>) {
         self.status_message = Some(StatusMessage::new(text));

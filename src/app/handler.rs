@@ -159,9 +159,11 @@ fn dispatch_action(action: &Action, state: &mut AppState, ctx: &AppContext) {
         Action::OpenMenu(name) => {
             handle_open_menu(name, state, ctx);
         }
-        Action::Search(_search_action) => {
-            search::open_search(state);
-        }
+        Action::Search(search_action) => match search_action {
+            crate::action::SearchAction::Open => {
+                search::open_search(state);
+            }
+        },
         Action::Noop => {}
     }
 }

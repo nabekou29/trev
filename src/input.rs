@@ -111,6 +111,39 @@ impl TextBuffer {
         self.value.drain(self.cursor_pos..boundary);
     }
 
+    /// Replace the buffer value and move the cursor to the end.
+    pub fn set_value(&mut self, value: &str) {
+        self.value.clone_from(&value.to_string());
+        self.cursor_pos = self.value.len();
+    }
+
+    /// Push spans for the buffer value with an inverted-block cursor.
+    ///
+    /// Splits the text at the cursor position and renders the character
+    /// under the cursor (or a trailing space) with `bg:White fg:Black`.
+    pub fn push_cursor_spans(&self, spans: &mut Vec<ratatui::text::Span<'_>>) {
+        use ratatui::style::{
+            Color,
+            Style,
+        };
+        use ratatui::text::Span;
+
+        let (before, after) = self.value.split_at(self.cursor_pos);
+        spans.push(Span::raw(before.to_string()));
+
+        let cursor_style = Style::default().bg(Color::White).fg(Color::Black);
+        let mut after_chars = after.chars();
+        if let Some(cursor_char) = after_chars.next() {
+            spans.push(Span::styled(cursor_char.to_string(), cursor_style));
+            let rest: String = after_chars.collect();
+            if !rest.is_empty() {
+                spans.push(Span::raw(rest));
+            }
+        } else {
+            spans.push(Span::styled(" ", cursor_style));
+        }
+    }
+
     /// Handle a key event for text editing only.
     ///
     /// Returns `true` if the key was consumed as an editing action,

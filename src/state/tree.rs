@@ -423,12 +423,9 @@ impl TreeState {
     }
 
     /// Count of visible nodes (without allocating the full list).
-    ///
-    /// When a search filter is active, falls back to `visible_nodes().len()`
-    /// since the filtered tree is bounded by `max_results`.
     pub fn visible_node_count(&self) -> usize {
-        if self.search_filter.is_some() {
-            return self.visible_nodes().len();
+        if let Some(ref filter) = self.search_filter {
+            return count_visible_filtered(&self.root, filter, self.search_virtual_expand, self.options.show_root);
         }
         count_visible(&self.root, self.options.show_root)
     }
@@ -987,6 +984,39 @@ fn count_visible(node: &TreeNode, show_root: bool) -> usize {
         .filter(|_| expanded)
         .map_or(0, |children| {
             children.iter().map(|c| count_visible(c, show_root)).sum()
+        });
+    self_count + children_count
+}
+
+/// Count visible nodes filtered by a path set, without allocating.
+///
+/// Mirror of [`count_visible`] for the filtered case. Only counts nodes
+/// whose path is in `filter`, traversing expanded (or force-expanded)
+/// children of included directories.
+fn count_visible_filtered(
+    node: &TreeNode,
+    filter: &HashSet<PathBuf>,
+    force_expand: bool,
+    show_root: bool,
+) -> usize {
+    let skip_display = node.is_root && !show_root;
+    let self_count = if skip_display {
+        0
+    } else if filter.contains(&node.path) {
+        1
+    } else {
+        return 0;
+    };
+    let expanded = skip_display || force_expand || node.is_expanded;
+    let children_count = node
+        .children
+        .as_loaded()
+        .filter(|_| expanded)
+        .map_or(0, |children| {
+            children
+                .iter()
+                .map(|c| count_visible_filtered(c, filter, force_expand, show_root))
+                .sum()
         });
     self_count + children_count
 }

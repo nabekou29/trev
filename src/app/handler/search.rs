@@ -23,6 +23,9 @@ use crate::input::{
 use crate::tree::builder::TreeBuilder;
 use crate::tree::search_engine;
 
+/// Maximum number of search history entries to retain.
+const MAX_SEARCH_HISTORY: usize = 50;
+
 /// Transition from Normal mode to Search(Typing) mode.
 pub fn open_search(state: &mut AppState) {
     state.mode = AppMode::Search(SearchState::new());
@@ -61,8 +64,7 @@ fn handle_typing_key(
     match key.code {
         KeyCode::Esc => {
             // Cancel search, restore normal tree view.
-            state.tree_state.clear_search_filter();
-            state.search_match_indices.clear();
+            state.clear_search();
             state.mode = AppMode::Normal;
             state.dirty = true;
         }
@@ -70,11 +72,11 @@ fn handle_typing_key(
             confirm_search(state);
         }
         KeyCode::Up => {
-            navigate_history(state, -1);
+            navigate_history(state, HistoryDirection::Older);
             run_incremental_search(state, ctx);
         }
         KeyCode::Down => {
-            navigate_history(state, 1);
+            navigate_history(state, HistoryDirection::Newer);
             run_incremental_search(state, ctx);
         }
         KeyCode::Tab => {
@@ -111,14 +113,13 @@ fn handle_filtered_key(
     match key.code {
         KeyCode::Esc => {
             // Clear filter and return to Normal.
-            state.tree_state.clear_search_filter();
-            state.search_match_indices.clear();
+            state.clear_search();
             state.mode = AppMode::Normal;
             state.dirty = true;
         }
         KeyCode::Char('/') => {
             // Start a new search.
-            state.tree_state.clear_search_filter();
+            state.clear_search();
             open_search(state);
         }
         _ => {
@@ -145,8 +146,7 @@ fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
 
     if query.is_empty() {
         // Empty query: clear filter.
-        state.tree_state.clear_search_filter();
-        state.search_match_indices.clear();
+        state.clear_search();
         state.dirty = true;
         return;
     }
@@ -157,11 +157,10 @@ fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
         return;
     };
 
-    let root_path = ctx.root_path.clone();
     let results = search_engine::search(
         index.entries(),
         query,
-        &root_path,
+        &ctx.root_path,
         ctx.search_max_results,
         mode,
     );
@@ -173,7 +172,7 @@ fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
     }
 
     let current_path = state.tree_state.cursor_path();
-    let visible_paths = search_engine::compute_visible_paths(&results, &root_path);
+    let visible_paths = search_engine::compute_visible_paths(&results, &ctx.root_path);
 
     // Load NotLoaded directories so collect_visible_filtered can traverse them.
     let builder = TreeBuilder::new(state.show_hidden, state.show_ignored);
@@ -217,7 +216,7 @@ fn confirm_search(state: &mut AppState) {
     let query = search.buffer.value.clone();
     if query.is_empty() {
         // Empty query: cancel search.
-        state.tree_state.clear_search_filter();
+        state.clear_search();
         state.mode = AppMode::Normal;
         state.dirty = true;
         return;
@@ -226,8 +225,7 @@ fn confirm_search(state: &mut AppState) {
     // Add to search history (avoid consecutive duplicates).
     if state.search_history.last().is_none_or(|last| *last != query) {
         state.search_history.push(query);
-        // Cap history at 50 entries.
-        if state.search_history.len() > 50 {
+        if state.search_history.len() > MAX_SEARCH_HISTORY {
             state.search_history.remove(0);
         }
     }
@@ -243,8 +241,17 @@ fn confirm_search(state: &mut AppState) {
     state.dirty = true;
 }
 
+/// Direction for search history navigation.
+#[derive(Debug, Clone, Copy)]
+enum HistoryDirection {
+    /// Go to an older (previous) entry.
+    Older,
+    /// Go to a newer (next) entry.
+    Newer,
+}
+
 /// Navigate search history with Up (older) / Down (newer).
-fn navigate_history(state: &mut AppState, direction: i32) {
+fn navigate_history(state: &mut AppState, direction: HistoryDirection) {
     let AppMode::Search(ref mut search) = state.mode else {
         return;
     };
@@ -256,8 +263,7 @@ fn navigate_history(state: &mut AppState, direction: i32) {
     let history_len = state.search_history.len();
 
     match direction {
-        // Up: go to older entry.
-        -1 => {
+        HistoryDirection::Older => {
             match search.history_index {
                 None => {
                     // Save current query and jump to most recent history entry.
@@ -265,16 +271,14 @@ fn navigate_history(state: &mut AppState, direction: i32) {
                     let idx = history_len - 1;
                     search.history_index = Some(idx);
                     if let Some(entry) = state.search_history.get(idx) {
-                        search.buffer.value.clone_from(entry);
-                        search.buffer.cursor_pos = search.buffer.value.len();
+                        search.buffer.set_value(entry);
                     }
                 }
                 Some(idx) if idx > 0 => {
                     let new_idx = idx - 1;
                     search.history_index = Some(new_idx);
                     if let Some(entry) = state.search_history.get(new_idx) {
-                        search.buffer.value.clone_from(entry);
-                        search.buffer.cursor_pos = search.buffer.value.len();
+                        search.buffer.set_value(entry);
                     }
                 }
                 Some(_) => {
@@ -282,29 +286,25 @@ fn navigate_history(state: &mut AppState, direction: i32) {
                 }
             }
         }
-        // Down: go to newer entry.
-        1 => {
+        HistoryDirection::Newer => {
             match search.history_index {
                 Some(idx) if idx + 1 < history_len => {
                     let new_idx = idx + 1;
                     search.history_index = Some(new_idx);
                     if let Some(entry) = state.search_history.get(new_idx) {
-                        search.buffer.value.clone_from(entry);
-                        search.buffer.cursor_pos = search.buffer.value.len();
+                        search.buffer.set_value(entry);
                     }
                 }
                 Some(_) => {
                     // Return to the original query.
                     search.history_index = None;
-                    search.buffer.value = search.original_query.clone();
-                    search.buffer.cursor_pos = search.buffer.value.len();
+                    search.buffer.set_value(&search.original_query.clone());
                 }
                 None => {
                     // Already at the newest (current input).
                 }
             }
         }
-        _ => {}
     }
 
     state.dirty = true;
@@ -376,7 +376,7 @@ mod tests {
         state.mode = AppMode::Search(search_with_query("current"));
 
         // Up: should go to "ccc" (most recent).
-        navigate_history(&mut state, -1);
+        navigate_history(&mut state, HistoryDirection::Older);
         let AppMode::Search(ref s) = state.mode else {
             panic!("expected Search mode");
         };
@@ -384,21 +384,21 @@ mod tests {
         assert_that!(s.history_index, eq(Some(2)));
 
         // Up again: should go to "bbb".
-        navigate_history(&mut state, -1);
+        navigate_history(&mut state, HistoryDirection::Older);
         let AppMode::Search(ref s) = state.mode else {
             panic!("expected Search mode");
         };
         assert_that!(s.buffer.value.as_str(), eq("bbb"));
 
         // Down: should go back to "ccc".
-        navigate_history(&mut state, 1);
+        navigate_history(&mut state, HistoryDirection::Newer);
         let AppMode::Search(ref s) = state.mode else {
             panic!("expected Search mode");
         };
         assert_that!(s.buffer.value.as_str(), eq("ccc"));
 
         // Down again: should restore original query.
-        navigate_history(&mut state, 1);
+        navigate_history(&mut state, HistoryDirection::Newer);
         let AppMode::Search(ref s) = state.mode else {
             panic!("expected Search mode");
         };

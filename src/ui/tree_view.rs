@@ -394,11 +394,9 @@ fn push_highlighted_name(
     match_indices: &[u32],
     base_style: Style,
 ) {
-    use std::collections::HashSet;
     use unicode_width::UnicodeWidthChar;
 
     let highlight_style = base_style.add_modifier(Modifier::UNDERLINED);
-    let indices_set: HashSet<u32> = match_indices.iter().copied().collect();
 
     // If truncating, reserve 1 column for "…".
     let target_width = max_width.map(|w| w.saturating_sub(1));
@@ -420,7 +418,7 @@ fn push_highlighted_name(
             clippy::cast_possible_truncation,
             reason = "char index in a filename always fits in u32"
         )]
-        let highlighted = indices_set.contains(&(i as u32));
+        let highlighted = match_indices.binary_search(&(i as u32)).is_ok();
         if let Some(prev) = prev_highlighted
             && highlighted != prev
             && !buf.is_empty()

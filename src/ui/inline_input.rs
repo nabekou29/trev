@@ -9,10 +9,8 @@ use ratatui::style::{
     Modifier,
     Style,
 };
-use ratatui::text::{
-    Line,
-    Span,
-};
+use ratatui::text::Line;
+use ratatui::text::Span;
 use ratatui::widgets::{
     Block,
     BorderType,
@@ -48,26 +46,7 @@ pub fn render_inline_input(frame: &mut Frame<'_>, area: Rect, input: &InputState
 
     // Build the input line with cursor.
     let mut spans = Vec::new();
-
-    // Split value at cursor position to render cursor indicator.
-    let (before, after) = input.buffer.value.split_at(input.buffer.cursor_pos);
-
-    spans.push(Span::raw(before.to_string()));
-
-    // Render cursor as inverted character (or space if at end).
-    let cursor_style = Style::default().bg(Color::White).fg(Color::Black);
-
-    let mut after_chars = after.chars();
-    if let Some(cursor_char) = after_chars.next() {
-        spans.push(Span::styled(cursor_char.to_string(), cursor_style));
-        let rest: String = after_chars.collect();
-        if !rest.is_empty() {
-            spans.push(Span::raw(rest));
-        }
-    } else {
-        // Cursor at end of input — show a space block.
-        spans.push(Span::styled(" ", cursor_style));
-    }
+    input.buffer.push_cursor_spans(&mut spans);
 
     let line = Line::from(spans);
     let paragraph = Paragraph::new(line).block(block);
