@@ -2,15 +2,6 @@
 
 ## Tasks
 
-```bash
-mise run build     # Build
-mise run test      # Run tests
-mise run lint      # Run clippy
-mise run lint-fix  # Fix lint issues
-mise run format    # Format code
-mise run bench     # Run Criterion benchmarks
-```
+Run via `mise run <task>` — see `mise.toml` for full list.
 
-## Documentation
-
-- [README.md](/README.md) - Usage, keybindings, configuration, Neovim integration
+Key: `build`, `test`, `lint`, `lint-fix`, `format`, `bench`

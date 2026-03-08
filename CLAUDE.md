@@ -10,4 +10,10 @@
 - IPC: Unix Domain Socket (JSON-RPC 2.0)
 
 <!-- MANUAL ADDITIONS START -->
+
+## Performance
+
+- Always measure before optimizing — never optimize based on guesses
+- See `perf` skill for detailed measurement workflow
+
 <!-- MANUAL ADDITIONS END -->
