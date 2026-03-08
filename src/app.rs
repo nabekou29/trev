@@ -104,6 +104,8 @@ struct EventReceivers {
     watcher: tokio::sync::mpsc::UnboundedReceiver<Vec<notify_debouncer_mini::DebouncedEvent>>,
     /// IPC commands from connected editors.
     ipc: tokio::sync::mpsc::UnboundedReceiver<IpcCommand>,
+    /// Stat batch results (lazy metadata loading).
+    stat: tokio::sync::mpsc::Receiver<StatLoadResult>,
 
     // Pre-received items from `tokio::select!` (one per wake).
     /// Pre-received children load result.
@@ -118,6 +120,8 @@ struct EventReceivers {
     pre_watcher: Option<Vec<notify_debouncer_mini::DebouncedEvent>>,
     /// Pre-received IPC command.
     pre_ipc: Option<IpcCommand>,
+    /// Pre-received stat batch result.
+    pre_stat: Option<StatLoadResult>,
 }
 
 /// Generate a drain method that yields `pre_$field.take()` then `$field.try_recv()` items.
@@ -139,6 +143,7 @@ impl EventReceivers {
         self.pre_rebuild = None;
         self.pre_watcher = None;
         self.pre_ipc = None;
+        self.pre_stat = None;
     }
 
     impl_drain!(drain_children, pre_children, children, ChildrenLoadResult);
@@ -147,6 +152,7 @@ impl EventReceivers {
     impl_drain!(drain_rebuild, pre_rebuild, rebuild, TreeRebuildResult);
     impl_drain!(drain_watcher, pre_watcher, watcher, Vec<notify_debouncer_mini::DebouncedEvent>);
     impl_drain!(drain_ipc, pre_ipc, ipc, IpcCommand);
+    impl_drain!(drain_stats, pre_stat, stat, StatLoadResult);
 }
 
 /// Initialize all application state, context, channels, and terminal.
@@ -204,8 +210,7 @@ fn init_app(
     let (ipc_server, ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
 
     // --- Phase 2: restore remaining session state (expanded dirs, cursor, etc.) ---
-    let search_history =
-        session_state.as_ref().map_or_else(Vec::new, |s| s.search_history.clone());
+    let search_history = session_state.as_ref().map_or_else(Vec::new, |s| s.search_history.clone());
     let (selection, undo_history, restored_visual_row, deferred_expansion) = {
         let _span = tracing::info_span!("session_restore").entered();
         restore_session_state(session_state, &config, builder, &mut tree_state)
@@ -318,6 +323,7 @@ fn build_context_and_channels(
     let (preview_tx, preview_rx) = tokio::sync::mpsc::channel::<PreviewLoadResult>(16);
     let (git_tx, git_rx) = tokio::sync::mpsc::channel::<GitStatusResult>(4);
     let (rebuild_tx, rebuild_rx) = tokio::sync::mpsc::channel::<TreeRebuildResult>(2);
+    let (stat_tx, stat_rx) = tokio::sync::mpsc::channel::<StatLoadResult>(16);
 
     let ctx = AppContext {
         children_tx,
@@ -332,10 +338,9 @@ fn build_context_and_channels(
         root_path: root_path.to_path_buf(),
         rebuild_tx,
         menus: config.menus.clone(),
-        search_index: Arc::new(RwLock::new(
-            SearchIndex::new(),
-        )),
+        search_index: Arc::new(RwLock::new(SearchIndex::new())),
         search_max_results: config.search.max_results,
+        stat_tx,
     };
 
     let channels = EventReceivers {
@@ -345,12 +350,14 @@ fn build_context_and_channels(
         rebuild: rebuild_rx,
         watcher: watcher_rx,
         ipc: ipc_rx,
+        stat: stat_rx,
         pre_children: None,
         pre_preview: None,
         pre_git: None,
         pre_rebuild: None,
         pre_watcher: None,
         pre_ipc: None,
+        pre_stat: None,
     };
 
     (ctx, channels)
@@ -542,18 +549,14 @@ fn process_children_results(
                         deferred_snapshot =
                             Some(CursorSnapshot::capture(&state.tree_state, &state.scroll));
                     }
-                    state
-                        .tree_state
-                        .set_children(&result.path, children, true);
+                    state.tree_state.set_children(&result.path, children, true);
                 } else if kind == LoadKind::SearchFilter {
                     had_search_filter = true;
                     if search_snapshot.is_none() {
                         search_snapshot =
                             Some(CursorSnapshot::capture(&state.tree_state, &state.scroll));
                     }
-                    state
-                        .tree_state
-                        .set_children(&result.path, children, true);
+                    state.tree_state.set_children(&result.path, children, true);
                 } else {
                     apply_children_load(state, &result.path, children, kind);
                 }
@@ -634,6 +637,11 @@ fn process_async_events(
         }
     }
 
+    // Stat batch results (lazy metadata loading).
+    if handler::stat::process_stat_results(channels.drain_stats(), state) {
+        had_events = true;
+    }
+
     // Trigger preview when cursor changes.
     let current_cursor = state.tree_state.cursor();
     if current_cursor != last_cursor {
@@ -642,6 +650,9 @@ fn process_async_events(
             trigger_preview(state, ctx);
         }
     }
+
+    // Schedule stat fetches for viewport-visible nodes missing metadata.
+    handler::stat::schedule_viewport_stats(state, ctx);
 
     tracing::debug!(had_events, "async events processed");
     (last_cursor, had_events)
@@ -701,13 +712,18 @@ fn drain_terminal_events(state: &mut AppState, ctx: &AppContext) -> Result<()> {
 }
 
 /// Run the application.
+#[expect(clippy::cognitive_complexity, reason = "main event loop with many channel branches")]
 pub async fn run(args: &Args) -> Result<()> {
     let (mut state, ctx, mut channels, mut terminal) = init_app(args)?;
     let root_path = ctx.root_path.clone();
     let mut last_cursor = state.tree_state.cursor();
 
-    let search_cancelled =
-        spawn_search_index_build(&ctx.search_index, &root_path, state.show_hidden, state.show_ignored);
+    let search_cancelled = spawn_search_index_build(
+        &ctx.search_index,
+        &root_path,
+        state.show_hidden,
+        state.show_ignored,
+    );
 
     // Create the async terminal event stream.
     let mut event_stream = EventStream::new();
@@ -769,6 +785,7 @@ pub async fn run(args: &Args) -> Result<()> {
             Some(v) = channels.rebuild.recv()  => { channels.pre_rebuild = Some(v); }
             Some(v) = channels.watcher.recv()  => { channels.pre_watcher = Some(v); }
             Some(v) = channels.ipc.recv()      => { channels.pre_ipc = Some(v); }
+            Some(v) = channels.stat.recv()     => { channels.pre_stat = Some(v); }
 
             () = &mut timeout => {}
         }
@@ -822,7 +839,6 @@ pub async fn run(args: &Args) -> Result<()> {
 
     // Cancel background search index build if still running.
     search_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
-
 
     shutdown(&root_path, &state);
     Ok(())
@@ -1098,7 +1114,10 @@ fn restore_session_state(
         // Old sessions without scroll_visual_row fall back to None
         // (center_on_cursor in setup_terminal).
         restored_visual_row = session_state.scroll_visual_row;
-        tracing::info!(?restored_visual_row, "session restored (critical + viewport sync, rest deferred)");
+        tracing::info!(
+            ?restored_visual_row,
+            "session restored (critical + viewport sync, rest deferred)"
+        );
     }
 
     // Clean up expired sessions in background.

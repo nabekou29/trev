@@ -6,6 +6,7 @@ pub mod ipc;
 mod mouse;
 pub(super) mod preview;
 pub mod search;
+pub mod stat;
 pub mod tree;
 
 use std::collections::BTreeSet;
@@ -61,7 +62,11 @@ pub fn handle_key_event(key: crossterm::event::KeyEvent, state: &mut AppState, c
 }
 
 /// Handle a key event in Normal mode with multi-key sequence support.
-pub(super) fn handle_normal_mode_key(key: crossterm::event::KeyEvent, state: &mut AppState, ctx: &AppContext) {
+pub(super) fn handle_normal_mode_key(
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+    ctx: &AppContext,
+) {
     let active_contexts = build_active_contexts(state, ctx);
     let kb: KeyBinding = (key.code, key.modifiers);
 

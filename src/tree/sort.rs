@@ -81,6 +81,11 @@ fn compare_modified(
     }
 }
 
+/// Public wrapper for `compare_smart` (benchmarks).
+pub fn compare_smart_pub(a: &str, b: &str) -> std::cmp::Ordering {
+    compare_smart(a, b)
+}
+
 /// Compare two filenames using smart sort: natural sort with suffix grouping.
 ///
 /// 1. Decompose names into (base, suffix).

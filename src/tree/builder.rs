@@ -1,6 +1,9 @@
 //! File system tree builder using `ignore::WalkBuilder`.
 
-use std::path::Path;
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use anyhow::{
     Context,
@@ -78,6 +81,7 @@ impl TreeBuilder {
 
         // When showing ignored files, first collect the non-ignored path set.
         let non_ignored_paths = if self.show_ignored {
+            let _span = tracing::info_span!("collect_non_ignored").entered();
             let mut set = std::collections::HashSet::new();
             let strict_walker = ignore::WalkBuilder::new(dir_path)
                 .max_depth(Some(1))
@@ -96,71 +100,84 @@ impl TreeBuilder {
             None
         };
 
-        let mut children = Vec::new();
+        let entry_data = self.walk_entries(dir_path);
+        let children = build_tree_nodes(entry_data, non_ignored_paths.as_ref());
 
-        let walker = ignore::WalkBuilder::new(dir_path)
-            .max_depth(Some(1))
-            .hidden(!self.show_hidden)
-            .git_ignore(!self.show_ignored)
-            .git_global(!self.show_ignored)
-            .git_exclude(!self.show_ignored)
-            .build();
+        tracing::info!(count = children.len(), "load_children complete");
+        Ok(children)
+    }
 
-        for entry in walker {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(err) => {
-                    tracing::warn!("Skipping entry: {err}");
-                    continue;
+    /// Walk directory entries using `file_type()` from readdir (no stat syscalls).
+    ///
+    /// Returns `(path, is_dir, is_symlink, symlink_target)` tuples.
+    fn walk_entries(self, dir_path: &Path) -> Vec<(PathBuf, bool, bool, Option<String>)> {
+        // Collect directory entries (readdir + gitignore filtering).
+        let entries = {
+            let _span = tracing::info_span!("readdir").entered();
+            let walker = ignore::WalkBuilder::new(dir_path)
+                .max_depth(Some(1))
+                .hidden(!self.show_hidden)
+                .git_ignore(!self.show_ignored)
+                .git_global(!self.show_ignored)
+                .git_exclude(!self.show_ignored)
+                .build();
+
+            let mut entries = Vec::new();
+            for entry in walker {
+                match entry {
+                    Ok(e) if e.path() != dir_path => entries.push(e),
+                    Ok(_) => {}
+                    Err(err) => tracing::warn!("Skipping entry: {err}"),
                 }
-            };
-
-            let path = entry.path();
-
-            // Skip the root directory itself
-            if path == dir_path {
-                continue;
             }
+            entries
+        };
 
-            let metadata = match entry.metadata() {
-                Ok(m) => m,
-                Err(err) => {
-                    tracing::warn!("Failed to read metadata for {}: {err}", path.display());
-                    continue;
-                }
-            };
-
-            let is_dir = metadata.is_dir();
+        // Classify entries using file_type() from readdir (no stat syscall).
+        let _span = tracing::info_span!("classify_entries", entry_count = entries.len()).entered();
+        let mut result = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
             let is_symlink = entry.path_is_symlink();
-
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-
+            let path = entry.into_path();
             let symlink_target = if is_symlink {
-                std::fs::read_link(path).ok().map(|t| t.to_string_lossy().into_owned())
+                std::fs::read_link(&path).ok().map(|t| t.to_string_lossy().into_owned())
             } else {
                 None
             };
-
-            let is_ignored = non_ignored_paths.as_ref().is_some_and(|set| !set.contains(path));
-
-            children.push(TreeNode {
-                name,
-                path: path.to_path_buf(),
-                is_dir,
-                is_symlink,
-                symlink_target,
-                size: if is_dir { 0 } else { metadata.len() },
-                modified: metadata.modified().ok(),
-                recursive_max_mtime: None,
-                children: ChildrenState::NotLoaded,
-                is_expanded: false,
-                is_ignored,
-                is_root: false,
-            });
+            result.push((path, is_dir, is_symlink, symlink_target));
         }
-
-        Ok(children)
+        result
     }
+}
+
+/// Build `TreeNode` structs from walk results (no metadata — size=0, modified=None).
+fn build_tree_nodes(
+    entry_data: Vec<(PathBuf, bool, bool, Option<String>)>,
+    non_ignored_paths: Option<&std::collections::HashSet<PathBuf>>,
+) -> Vec<TreeNode> {
+    let _span = tracing::info_span!("build_nodes", count = entry_data.len()).entered();
+    let mut children = Vec::with_capacity(entry_data.len());
+    for (path, is_dir, is_symlink, symlink_target) in entry_data {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        let is_ignored = non_ignored_paths.is_some_and(|set| !set.contains(&*path));
+
+        children.push(TreeNode {
+            name,
+            path,
+            is_dir,
+            is_symlink,
+            symlink_target,
+            size: 0,
+            modified: None,
+            recursive_max_mtime: None,
+            children: ChildrenState::NotLoaded,
+            is_expanded: false,
+            is_ignored,
+            is_root: false,
+        });
+    }
+    children
 }
 
 #[cfg(test)]

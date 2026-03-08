@@ -6,6 +6,7 @@ use std::path::{
     PathBuf,
 };
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::time::{
     Duration,
@@ -16,8 +17,6 @@ use ratatui::layout::Rect;
 
 use super::keymap::KeyMap;
 use super::pending_keys::PendingKeys;
-use std::sync::RwLock;
-
 use crate::config::{
     FileOpConfig,
     MenuDefinition,
@@ -292,10 +291,7 @@ pub struct CursorSnapshot {
 impl CursorSnapshot {
     /// Capture current cursor position and visual row.
     pub fn capture(tree: &TreeState, scroll: &ScrollState) -> Self {
-        Self {
-            path: tree.cursor_path(),
-            visual_row: tree.cursor().saturating_sub(scroll.offset()),
-        }
+        Self { path: tree.cursor_path(), visual_row: tree.cursor().saturating_sub(scroll.offset()) }
     }
 
     /// Restore cursor to the saved path and adjust scroll to preserve visual row.
@@ -350,6 +346,8 @@ pub struct AppContext {
     pub search_index: Arc<RwLock<crate::tree::search_index::SearchIndex>>,
     /// Maximum number of search results.
     pub search_max_results: usize,
+    /// Sender for async stat batch results.
+    pub stat_tx: tokio::sync::mpsc::Sender<StatLoadResult>,
 }
 
 /// Kind of async directory children load operation.
@@ -376,6 +374,17 @@ pub struct ChildrenLoadResult {
     pub children: Result<Vec<TreeNode>, String>,
     /// What kind of load operation produced this result.
     pub kind: LoadKind,
+}
+
+/// Result of an async stat batch operation.
+///
+/// Sent through an mpsc channel from the blocking task to the event loop.
+#[derive(Debug)]
+pub struct StatLoadResult {
+    /// Directory whose children's metadata was fetched.
+    pub dir_path: PathBuf,
+    /// Per-file metadata: `(file_path, size, modified)`.
+    pub entries: Vec<(PathBuf, u64, Option<std::time::SystemTime>)>,
 }
 
 /// Deferred session restore: expanded directories to load asynchronously after first render.
@@ -555,8 +564,7 @@ pub(super) mod tests {
             is_root: true,
         };
         let tree_state = TreeState::new(root_node, TreeOptions::default());
-        let registry =
-            PreviewRegistry::new(vec![Arc::new(FallbackProvider::new())]).unwrap();
+        let registry = PreviewRegistry::new(vec![Arc::new(FallbackProvider::new())]).unwrap();
 
         AppState {
             tree_state,
@@ -585,8 +593,7 @@ pub(super) mod tests {
             pending_keys: PendingKeys::new(Duration::from_millis(500)),
             needs_redraw: false,
             dirty: true,
-            file_style_matcher: FileStyleMatcher::new(&[], &CategoryStyles::default())
-                .unwrap(),
+            file_style_matcher: FileStyleMatcher::new(&[], &CategoryStyles::default()).unwrap(),
             preview_debounce: None,
             layout_areas: LayoutAreas::default(),
             deferred_expansion: None,

@@ -354,7 +354,14 @@ impl TreeState {
     pub fn visible_nodes(&self) -> Vec<VisibleNode<'_>> {
         let mut result = Vec::new();
         if let Some(ref filter) = self.search_filter {
-            collect_visible_filtered(&self.root, 0, &mut result, filter, self.search_virtual_expand, self.options.show_root);
+            collect_visible_filtered(
+                &self.root,
+                0,
+                &mut result,
+                filter,
+                self.search_virtual_expand,
+                self.options.show_root,
+            );
         } else {
             collect_visible(&self.root, 0, &mut result, self.options.show_root);
         }
@@ -386,7 +393,15 @@ impl TreeState {
                 self.options.show_root,
             );
         } else {
-            collect_visible_range(&self.root, 0, &mut result, &mut skipped, skip, take, self.options.show_root);
+            collect_visible_range(
+                &self.root,
+                0,
+                &mut result,
+                &mut skipped,
+                skip,
+                take,
+                self.options.show_root,
+            );
         }
 
         result
@@ -395,7 +410,12 @@ impl TreeState {
     /// Count of visible nodes (without allocating the full list).
     pub fn visible_node_count(&self) -> usize {
         if let Some(ref filter) = self.search_filter {
-            return count_visible_filtered(&self.root, filter, self.search_virtual_expand, self.options.show_root);
+            return count_visible_filtered(
+                &self.root,
+                filter,
+                self.search_virtual_expand,
+                self.options.show_root,
+            );
         }
         count_visible(&self.root, self.options.show_root)
     }
@@ -410,6 +430,29 @@ impl TreeState {
         find_node_recursive(&mut self.root, path)
     }
 
+    /// Public accessor for finding a node by path (mutable).
+    ///
+    /// Used by stat result processing to update metadata on specific nodes.
+    pub fn find_node_by_path_mut(&mut self, path: &Path) -> Option<&mut TreeNode> {
+        self.find_node_mut(path)
+    }
+
+    /// Re-sort children of a specific directory using current sort settings.
+    ///
+    /// Called after stat results update `size`/`modified` fields when the
+    /// current sort order is `Size` or `Modified`.
+    pub fn resort_children(&mut self, dir_path: &Path) {
+        let order = self.options.sort_order;
+        let direction = self.options.sort_direction;
+        let dirs_first = self.options.directories_first;
+
+        if let Some(node) = self.find_node_mut(dir_path)
+            && let Some(children) = node.children.as_loaded_mut()
+        {
+            crate::tree::sort::sort_children(children, order, direction, dirs_first);
+        }
+    }
+
     /// Set loaded children for a directory at the given path.
     ///
     /// Applies current sort settings to the children.
@@ -420,13 +463,22 @@ impl TreeState {
         let direction = self.options.sort_direction;
         let dirs_first = self.options.directories_first;
 
-        crate::tree::sort::sort_children(&mut children, order, direction, dirs_first);
+        {
+            let _span = tracing::info_span!("sort_children", count = children.len()).entered();
+            crate::tree::sort::sort_children(&mut children, order, direction, dirs_first);
+        }
 
         if let Some(node) = self.find_node_mut(path) {
             // Preserve expansion state and loaded children from old nodes.
             if let ChildrenState::Loaded(old_children) =
                 std::mem::replace(&mut node.children, ChildrenState::NotLoaded)
             {
+                let _span = tracing::info_span!(
+                    "transfer_expansion",
+                    old = old_children.len(),
+                    new = children.len()
+                )
+                .entered();
                 transfer_expansion_state(old_children, &mut children);
             }
             node.recursive_max_mtime = compute_recursive_max_mtime(&children);
@@ -854,9 +906,7 @@ fn collect_visible<'a>(
     }
     let child_depth = if skip_display { depth } else { depth + 1 };
     let expanded = skip_display || node.is_expanded;
-    if expanded
-        && let Some(children) = node.children.as_loaded()
-    {
+    if expanded && let Some(children) = node.children.as_loaded() {
         for child in children {
             collect_visible(child, child_depth, result, show_root);
         }
@@ -890,9 +940,7 @@ fn collect_visible_filtered<'a>(
     }
     let child_depth = if skip_display { depth } else { depth + 1 };
     let expanded = skip_display || force_expand || node.is_expanded;
-    if expanded
-        && let Some(children) = node.children.as_loaded()
-    {
+    if expanded && let Some(children) = node.children.as_loaded() {
         for child in children {
             collect_visible_filtered(child, child_depth, result, filter, force_expand, show_root);
         }
@@ -936,12 +984,18 @@ fn collect_visible_filtered_range<'a>(
 
     let child_depth = if skip_display { depth } else { depth + 1 };
     let expanded = skip_display || force_expand || node.is_expanded;
-    if expanded
-        && let Some(children) = node.children.as_loaded()
-    {
+    if expanded && let Some(children) = node.children.as_loaded() {
         for child in children {
             collect_visible_filtered_range(
-                child, child_depth, result, skipped, skip, take, filter, force_expand, show_root,
+                child,
+                child_depth,
+                result,
+                skipped,
+                skip,
+                take,
+                filter,
+                force_expand,
+                show_root,
             );
             if result.len() >= take {
                 return;
@@ -981,9 +1035,7 @@ fn collect_visible_range<'a>(
 
     let child_depth = if skip_display { depth } else { depth + 1 };
     let expanded = skip_display || node.is_expanded;
-    if expanded
-        && let Some(children) = node.children.as_loaded()
-    {
+    if expanded && let Some(children) = node.children.as_loaded() {
         for child in children {
             collect_visible_range(child, child_depth, result, skipped, skip, take, show_root);
             if result.len() >= take {
@@ -1005,9 +1057,7 @@ fn count_visible(node: &TreeNode, show_root: bool) -> usize {
         .children
         .as_loaded()
         .filter(|_| expanded)
-        .map_or(0, |children| {
-            children.iter().map(|c| count_visible(c, show_root)).sum()
-        });
+        .map_or(0, |children| children.iter().map(|c| count_visible(c, show_root)).sum());
     self_count + children_count
 }
 
@@ -1031,16 +1081,9 @@ fn count_visible_filtered(
         return 0;
     };
     let expanded = skip_display || force_expand || node.is_expanded;
-    let children_count = node
-        .children
-        .as_loaded()
-        .filter(|_| expanded)
-        .map_or(0, |children| {
-            children
-                .iter()
-                .map(|c| count_visible_filtered(c, filter, force_expand, show_root))
-                .sum()
-        });
+    let children_count = node.children.as_loaded().filter(|_| expanded).map_or(0, |children| {
+        children.iter().map(|c| count_visible_filtered(c, filter, force_expand, show_root)).sum()
+    });
     self_count + children_count
 }
 
@@ -2316,11 +2359,7 @@ mod tests {
     #[rstest]
     fn search_filter_includes_ancestors() {
         let root = Path::new("/test/root");
-        let sub = dir_node(
-            "sub",
-            root,
-            vec![file_node("target.txt", &root.join("sub"))],
-        );
+        let sub = dir_node("sub", root, vec![file_node("target.txt", &root.join("sub"))]);
         let mut state = state_with_children(vec![sub, file_node("other.txt", root)]);
 
         // Filter includes the file AND its parent directory.
@@ -2341,11 +2380,7 @@ mod tests {
     #[rstest]
     fn search_filter_clears_correctly() {
         let root = Path::new("/test/root");
-        let mut sub = dir_node(
-            "sub",
-            root,
-            vec![file_node("x.txt", &root.join("sub"))],
-        );
+        let mut sub = dir_node("sub", root, vec![file_node("x.txt", &root.join("sub"))]);
         sub.is_expanded = true;
         let mut state = state_with_children(vec![sub, file_node("y.txt", root)]);
 
@@ -2381,11 +2416,7 @@ mod tests {
     #[rstest]
     fn search_filter_virtual_expand_shows_unexpanded_children() {
         let root = Path::new("/test/root");
-        let sub = dir_node(
-            "sub",
-            root,
-            vec![file_node("target.txt", &root.join("sub"))],
-        );
+        let sub = dir_node("sub", root, vec![file_node("target.txt", &root.join("sub"))]);
         // sub.is_expanded is false by default.
         let mut state = state_with_children(vec![sub]);
 
@@ -2404,11 +2435,7 @@ mod tests {
     #[rstest]
     fn search_filter_pinned_respects_is_expanded() {
         let root = Path::new("/test/root");
-        let sub = dir_node(
-            "sub",
-            root,
-            vec![file_node("target.txt", &root.join("sub"))],
-        );
+        let sub = dir_node("sub", root, vec![file_node("target.txt", &root.join("sub"))]);
         // sub.is_expanded is false by default.
         let mut state = state_with_children(vec![sub]);
 

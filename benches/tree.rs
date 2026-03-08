@@ -225,16 +225,13 @@ fn bench_set_children_100k(c: &mut Criterion) {
 
 fn bench_visible_node_count_filtered_1k(c: &mut Criterion) {
     let root_path = Path::new("/perf/root");
-    let children: Vec<TreeNode> = (0..10_000)
-        .map(|i| file_node(&format!("file{i:05}.txt"), root_path))
-        .collect();
+    let children: Vec<TreeNode> =
+        (0..10_000).map(|i| file_node(&format!("file{i:05}.txt"), root_path)).collect();
     let mut state = state_with_children(children);
 
     // Build filter containing ~1k paths (every 10th file + root ancestors).
-    let mut filter: HashSet<std::path::PathBuf> = (0..10_000)
-        .step_by(10)
-        .map(|i| root_path.join(format!("file{i:05}.txt")))
-        .collect();
+    let mut filter: HashSet<std::path::PathBuf> =
+        (0..10_000).step_by(10).map(|i| root_path.join(format!("file{i:05}.txt"))).collect();
     filter.insert(root_path.to_path_buf());
     state.set_search_filter(filter);
 
@@ -245,16 +242,13 @@ fn bench_visible_node_count_filtered_1k(c: &mut Criterion) {
 
 fn bench_visible_nodes_in_range_filtered_10k(c: &mut Criterion) {
     let root_path = Path::new("/perf/root");
-    let children: Vec<TreeNode> = (0..100_000)
-        .map(|i| file_node(&format!("file{i:06}.txt"), root_path))
-        .collect();
+    let children: Vec<TreeNode> =
+        (0..100_000).map(|i| file_node(&format!("file{i:06}.txt"), root_path)).collect();
     let mut state = state_with_children(children);
 
     // Broad filter: ~10k paths.
-    let mut filter: HashSet<std::path::PathBuf> = (0..100_000)
-        .step_by(10)
-        .map(|i| root_path.join(format!("file{i:06}.txt")))
-        .collect();
+    let mut filter: HashSet<std::path::PathBuf> =
+        (0..100_000).step_by(10).map(|i| root_path.join(format!("file{i:06}.txt"))).collect();
     filter.insert(root_path.to_path_buf());
     state.set_search_filter(filter);
 
@@ -429,6 +423,65 @@ fn bench_sort_1m(c: &mut Criterion) {
     });
 }
 
+fn bench_sort_1m_unstable(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+
+    c.bench_function("sort_1m_unstable", |b| {
+        b.iter_batched(
+            || {
+                (0..1_000_000)
+                    .rev()
+                    .map(|i| file_node(&format!("file{i:07}.txt"), root_path))
+                    .collect::<Vec<TreeNode>>()
+            },
+            |mut children| {
+                children.sort_unstable_by(|a, b| {
+                    trev::tree::sort::compare_smart_pub(&a.name, &b.name)
+                });
+            },
+            criterion::BatchSize::LargeInput,
+        );
+    });
+}
+
+fn bench_sort_1m_cached_key(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+
+    c.bench_function("sort_1m_cached_key", |b| {
+        b.iter_batched(
+            || {
+                (0..1_000_000)
+                    .rev()
+                    .map(|i| file_node(&format!("file{i:07}.txt"), root_path))
+                    .collect::<Vec<TreeNode>>()
+            },
+            |mut children| {
+                children.sort_by_cached_key(|n| n.name.to_lowercase());
+            },
+            criterion::BatchSize::LargeInput,
+        );
+    });
+}
+
+fn bench_sort_1m_plain_cmp(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+
+    c.bench_function("sort_1m_plain_cmp", |b| {
+        b.iter_batched(
+            || {
+                (0..1_000_000)
+                    .rev()
+                    .map(|i| file_node(&format!("file{i:07}.txt"), root_path))
+                    .collect::<Vec<TreeNode>>()
+            },
+            |mut children| {
+                children.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+            },
+            criterion::BatchSize::LargeInput,
+        );
+    });
+}
+
 fn bench_move_cursor_to_path_1m(c: &mut Criterion) {
     let root_path = Path::new("/perf/root");
     let children: Vec<TreeNode> =
@@ -465,6 +518,9 @@ criterion_group! {
     targets =
         bench_visible_node_count_1m,
         bench_sort_1m,
+        bench_sort_1m_unstable,
+        bench_sort_1m_cached_key,
+        bench_sort_1m_plain_cmp,
         bench_set_children_1m_fresh,
         bench_set_children_1m_refresh,
         bench_set_children_1m_dirs_refresh,
