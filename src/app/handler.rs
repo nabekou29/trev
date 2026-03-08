@@ -41,6 +41,15 @@ use crate::input::AppMode;
 
 /// Handle a key event and update application state.
 pub fn handle_key_event(key: crossterm::event::KeyEvent, state: &mut AppState, ctx: &AppContext) {
+    let mode_name = match state.mode {
+        AppMode::Input(_) => "input",
+        AppMode::Confirm(_) => "confirm",
+        AppMode::Menu(_) => "menu",
+        AppMode::Normal => "normal",
+        AppMode::Search(_) => "search",
+    };
+    let _span = tracing::info_span!("handle_key_event", mode = mode_name).entered();
+
     // Dispatch based on current application mode.
     match state.mode {
         AppMode::Input(_) => {
@@ -67,12 +76,20 @@ pub(super) fn handle_normal_mode_key(
     state: &mut AppState,
     ctx: &AppContext,
 ) {
-    let active_contexts = build_active_contexts(state, ctx);
+    let _span = tracing::info_span!("handle_normal_mode_key").entered();
+    let active_contexts = {
+        let _span = tracing::info_span!("build_active_contexts").entered();
+        build_active_contexts(state, ctx)
+    };
     let kb: KeyBinding = (key.code, key.modifiers);
 
     state.pending_keys.push(kb);
 
-    match ctx.keymap.lookup(state.pending_keys.keys(), &active_contexts) {
+    let lookup_result = {
+        let _span = tracing::info_span!("keymap_lookup").entered();
+        ctx.keymap.lookup(state.pending_keys.keys(), &active_contexts)
+    };
+    match lookup_result {
         TrieLookup::Resolved(action) => {
             let action = action.clone();
             state.pending_keys.clear();
@@ -135,6 +152,7 @@ fn build_active_contexts(state: &AppState, ctx: &AppContext) -> BTreeSet<KeyCont
 
 /// Dispatch a resolved action.
 fn dispatch_action(action: &Action, state: &mut AppState, ctx: &AppContext) {
+    let _span = tracing::info_span!("dispatch_action", action = %action).entered();
     match action {
         Action::Quit => {
             state.should_quit = true;

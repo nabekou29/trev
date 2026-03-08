@@ -1,5 +1,6 @@
 //! Tree state: data structures for file system tree representation and navigation.
 
+use std::cell::Cell;
 use std::collections::{
     HashMap,
     HashSet,
@@ -181,6 +182,12 @@ pub struct TreeState {
     /// visible. `false` during the Filtered phase so the user can collapse/expand
     /// directories freely.
     search_virtual_expand: bool,
+    /// Cached count of visible nodes to avoid repeated DFS walks.
+    ///
+    /// Invalidated (set to `None`) when the tree structure, expansion state,
+    /// or search filter changes. Recomputed lazily on next access.
+    /// Uses `Cell` for interior mutability so `visible_node_count` keeps `&self`.
+    cached_visible_count: Cell<Option<usize>>,
 }
 
 impl TreeNode {
@@ -218,7 +225,22 @@ impl ChildrenState {
 impl TreeState {
     /// Create a new tree state from a root node and options.
     pub const fn new(root: TreeNode, options: TreeOptions) -> Self {
-        Self { root, cursor: 0, options, search_filter: None, search_virtual_expand: false }
+        Self {
+            root,
+            cursor: 0,
+            options,
+            search_filter: None,
+            search_virtual_expand: false,
+            cached_visible_count: Cell::new(None),
+        }
+    }
+
+    /// Invalidate caches (visible count).
+    ///
+    /// Must be called whenever the tree structure, expansion state, or search
+    /// filter changes.
+    fn invalidate_caches(&self) {
+        self.cached_visible_count.set(None);
     }
 
     /// Get the current cursor position.
@@ -298,6 +320,7 @@ impl TreeState {
         target: &Path,
         builder: crate::tree::builder::TreeBuilder,
     ) -> bool {
+        self.invalidate_caches();
         // Canonicalize target to match tree paths (which are canonicalized).
         let Ok(target) = std::fs::canonicalize(target) else {
             return false;
@@ -351,7 +374,14 @@ impl TreeState {
     /// When `show_root` is true, the root directory itself appears as the first node.
     /// When a search filter is active, only nodes in the filter set are included
     /// and ancestor directories are treated as expanded.
+    ///
+    /// **Performance note**: This allocates and collects *all* visible nodes.
+    /// Prefer [`visible_nodes_in_range`] when only a subset is needed (e.g.
+    /// a single cursor node or a viewport slice). Use this method only when
+    /// the full list is truly required (e.g. path-to-index lookup across all
+    /// nodes).
     pub fn visible_nodes(&self) -> Vec<VisibleNode<'_>> {
+        let _span = tracing::info_span!("visible_nodes").entered();
         let mut result = Vec::new();
         if let Some(ref filter) = self.search_filter {
             collect_visible_filtered(
@@ -408,16 +438,27 @@ impl TreeState {
     }
 
     /// Count of visible nodes (without allocating the full list).
+    ///
+    /// Returns a cached value when available, otherwise computes via DFS and
+    /// caches the result. The cache is invalidated by any operation that
+    /// changes the tree structure, expansion state, or search filter.
     pub fn visible_node_count(&self) -> usize {
-        if let Some(ref filter) = self.search_filter {
-            return count_visible_filtered(
-                &self.root,
-                filter,
-                self.search_virtual_expand,
-                self.options.show_root,
-            );
+        if let Some(cached) = self.cached_visible_count.get() {
+            return cached;
         }
-        count_visible(&self.root, self.options.show_root)
+        let count = self.search_filter.as_ref().map_or_else(
+            || count_visible(&self.root, self.options.show_root),
+            |filter| {
+                count_visible_filtered(
+                    &self.root,
+                    filter,
+                    self.search_virtual_expand,
+                    self.options.show_root,
+                )
+            },
+        );
+        self.cached_visible_count.set(Some(count));
+        count
     }
 
     /// Find the node at the given path in the tree (mutable).
@@ -459,6 +500,7 @@ impl TreeState {
     /// When `auto_expand` is true, the directory is automatically expanded (user-initiated loads).
     /// When false, the current `is_expanded` state is preserved (prefetch loads).
     pub fn set_children(&mut self, path: &Path, mut children: Vec<TreeNode>, auto_expand: bool) {
+        self.invalidate_caches();
         let order = self.options.sort_order;
         let direction = self.options.sort_direction;
         let dirs_first = self.options.directories_first;
@@ -498,15 +540,16 @@ impl TreeState {
         let Some(node) = self.find_node_mut(path) else {
             return false;
         };
-        let is_expanded = node.is_expanded;
-        let is_loaded = matches!(node.children, ChildrenState::Loaded(_));
 
-        if is_expanded && is_loaded {
+        if node.is_expanded && matches!(node.children, ChildrenState::Loaded(_)) {
             return true;
         }
-        if is_loaded {
+        if matches!(node.children, ChildrenState::Loaded(_)) {
             node.children = ChildrenState::NotLoaded;
         }
+        // Note: invalidate_caches is not needed here because
+        // NotLoaded → NotLoaded is a no-op and the Loaded → NotLoaded
+        // transition on a collapsed node does not change visible count.
         false
     }
 
@@ -519,18 +562,22 @@ impl TreeState {
     /// Returns the path if the transition was made, `None` if the node is not
     /// found, not a directory, or not in `NotLoaded` state.
     pub fn prepare_async_load(&mut self, path: &Path, auto_expand: bool) -> Option<PathBuf> {
-        let node = {
-            let _span = tracing::info_span!("find_node_mut").entered();
-            self.find_node_mut(path)?
+        let result = {
+            let node = {
+                let _span = tracing::info_span!("find_node_mut").entered();
+                self.find_node_mut(path)?
+            };
+            if !node.is_dir || !matches!(node.children, ChildrenState::NotLoaded) {
+                return None;
+            }
+            node.children = ChildrenState::Loading;
+            if auto_expand {
+                node.is_expanded = true;
+            }
+            node.path.clone()
         };
-        if !node.is_dir || !matches!(node.children, ChildrenState::NotLoaded) {
-            return None;
-        }
-        node.children = ChildrenState::Loading;
-        if auto_expand {
-            node.is_expanded = true;
-        }
-        Some(node.path.clone())
+        self.invalidate_caches();
+        Some(result)
     }
 
     /// Batch version of `prepare_async_load` that groups paths by parent directory.
@@ -545,6 +592,7 @@ impl TreeState {
         paths: &[PathBuf],
         auto_expand: bool,
     ) -> Vec<PathBuf> {
+        self.invalidate_caches();
         // Group paths by parent directory.
         let mut by_parent: HashMap<PathBuf, Vec<&PathBuf>> = HashMap::new();
         for path in paths {
@@ -606,6 +654,7 @@ impl TreeState {
 
     /// Revert a directory to `NotLoaded` state (e.g., on load error).
     pub fn set_children_error(&mut self, path: &Path) {
+        self.invalidate_caches();
         if let Some(node) = self.find_node_mut(path) {
             node.children = ChildrenState::NotLoaded;
             node.is_expanded = false;
@@ -619,8 +668,8 @@ impl TreeState {
     /// - `AlreadyLoaded` if the directory was expanded with pre-loaded children
     /// - `None` if collapsed, not a directory, or already loading
     pub fn toggle_expand(&mut self, index: usize) -> Option<ExpandResult> {
-        let visible = self.visible_nodes();
-        let vnode = visible.get(index)?;
+        let visible = self.visible_nodes_in_range(index, 1);
+        let vnode = visible.first()?;
         let path = vnode.node.path.clone();
         let is_dir = vnode.node.is_dir;
         let is_expanded = vnode.node.is_expanded;
@@ -629,6 +678,7 @@ impl TreeState {
             return None;
         }
 
+        self.invalidate_caches();
         if is_expanded {
             let node = self.find_node_mut(&path)?;
             node.is_expanded = false;
@@ -650,7 +700,11 @@ impl TreeState {
 
     /// Move cursor by a signed delta with bounds checking.
     pub fn move_cursor(&mut self, delta: i32) {
-        let count = self.visible_node_count();
+        let _span = tracing::info_span!("move_cursor", delta).entered();
+        let count = {
+            let _span = tracing::info_span!("visible_node_count").entered();
+            self.visible_node_count()
+        };
         if count == 0 {
             self.cursor = 0;
             return;
@@ -720,11 +774,11 @@ impl TreeState {
             .and_then(|pp| visible.iter().position(|vn| vn.node.path == pp));
         drop(visible);
 
-        if is_dir
-            && is_expanded
-            && let Some(node) = self.find_node_mut(&path)
-        {
-            node.is_expanded = false;
+        if is_dir && is_expanded {
+            if let Some(node) = self.find_node_mut(&path) {
+                node.is_expanded = false;
+            }
+            self.invalidate_caches();
             return true;
         }
 
@@ -744,16 +798,16 @@ impl TreeState {
     /// - `Some(ExpandResult::OpenFile(path))` if the node is a file
     /// - `None` if already expanded or nothing to do
     pub fn expand_or_open(&mut self) -> Option<ExpandResult> {
-        let visible = self.visible_nodes();
-        let vnode = visible.get(self.cursor)?;
-        let is_dir = vnode.node.is_dir;
+        let visible = self.visible_nodes_in_range(self.cursor, 1);
+        let vnode = visible.first()?;
 
-        if !is_dir {
-            let path = vnode.node.path.clone();
-            return Some(ExpandResult::OpenFile(path));
+        if !vnode.node.is_dir {
+            return Some(ExpandResult::OpenFile(vnode.node.path.clone()));
         }
 
-        self.expand_dir()
+        let path = vnode.node.path.clone();
+        drop(visible);
+        self.expand_dir_at(&path)
     }
 
     /// Expand a directory without opening files.
@@ -763,16 +817,20 @@ impl TreeState {
     /// - `Some(ExpandResult::AlreadyLoaded(path))` if already loaded but was collapsed
     /// - `None` if cursor is on a file, already expanded, or nothing to do
     pub fn expand_dir(&mut self) -> Option<ExpandResult> {
-        let visible = self.visible_nodes();
-        let vnode = visible.get(self.cursor)?;
-        let path = vnode.node.path.clone();
-        let is_dir = vnode.node.is_dir;
-
-        if !is_dir {
+        let visible = self.visible_nodes_in_range(self.cursor, 1);
+        let vnode = visible.first()?;
+        if !vnode.node.is_dir {
             return None;
         }
+        let path = vnode.node.path.clone();
+        drop(visible);
+        self.expand_dir_at(&path)
+    }
 
-        let node = self.find_node_mut(&path)?;
+    /// Inner helper: expand the directory at the given path.
+    fn expand_dir_at(&mut self, path: &Path) -> Option<ExpandResult> {
+        self.invalidate_caches();
+        let node = self.find_node_mut(path)?;
         if node.is_expanded {
             return None;
         }
@@ -781,17 +839,18 @@ impl TreeState {
         match &node.children {
             ChildrenState::NotLoaded => {
                 node.children = ChildrenState::Loading;
-                Some(ExpandResult::NeedsLoad(path))
+                Some(ExpandResult::NeedsLoad(path.to_path_buf()))
             }
-            ChildrenState::Loaded(_) => Some(ExpandResult::AlreadyLoaded(path)),
+            ChildrenState::Loaded(_) => Some(ExpandResult::AlreadyLoaded(path.to_path_buf())),
             ChildrenState::Loading => None,
         }
     }
 
     /// Get serializable info for the node at the current cursor position.
     pub fn current_node_info(&self) -> Option<NodeInfo> {
-        let visible = self.visible_nodes();
-        visible.get(self.cursor).map(|vn| vn.node.to_node_info())
+        let _span = tracing::info_span!("current_node_info").entered();
+        let visible = self.visible_nodes_in_range(self.cursor, 1);
+        visible.first().map(|vn| vn.node.to_node_info())
     }
 
     /// Get the directory path at the current cursor position.
@@ -799,8 +858,8 @@ impl TreeState {
     /// If the cursor is on a directory, returns its path.
     /// If the cursor is on a file, returns the parent directory path.
     pub fn cursor_dir_path(&self) -> Option<PathBuf> {
-        let visible = self.visible_nodes();
-        let vnode = visible.get(self.cursor)?;
+        let visible = self.visible_nodes_in_range(self.cursor, 1);
+        let vnode = visible.first()?;
         if vnode.node.is_dir {
             Some(vnode.node.path.clone())
         } else {
@@ -815,6 +874,7 @@ impl TreeState {
     /// expanded directories, paths needing async load, and whether the limit
     /// was reached.
     pub fn expand_subtree(&mut self, path: &Path, limit: usize) -> ExpandAllResult {
+        self.invalidate_caches();
         let Some(node) = self.find_node_mut(path) else {
             return ExpandAllResult { expanded: 0, needs_load: Vec::new(), hit_limit: false };
         };
@@ -828,6 +888,7 @@ impl TreeState {
     ///
     /// Returns paths of directories that were expanded (for unwatching).
     pub fn collapse_subtree(&mut self, path: &Path) -> Vec<PathBuf> {
+        self.invalidate_caches();
         let Some(node) = self.find_node_mut(path) else {
             return Vec::new();
         };
@@ -848,6 +909,7 @@ impl TreeState {
     /// Only paths in the set (and their ancestors up to root) will be visible.
     /// Enables virtual expansion so results are visible during the Typing phase.
     pub fn set_search_filter(&mut self, mut filter: HashSet<PathBuf>) {
+        self.invalidate_caches();
         if self.options.show_root {
             filter.insert(self.root.path.clone());
         }
@@ -866,6 +928,7 @@ impl TreeState {
     ///
     /// Preserves the cursor on the same node by path lookup after clearing.
     pub fn clear_search_filter(&mut self) {
+        self.invalidate_caches();
         let cursor_path = self.cursor_path();
         self.search_filter = None;
         self.search_virtual_expand = false;
@@ -878,7 +941,8 @@ impl TreeState {
     ///
     /// Called after `expand_paths` has truly expanded filter directories,
     /// so that user collapse/expand is respected in the Filtered phase.
-    pub const fn pin_search_filter(&mut self) {
+    pub fn pin_search_filter(&mut self) {
+        self.invalidate_caches();
         self.search_virtual_expand = false;
     }
 
@@ -898,6 +962,7 @@ impl TreeState {
     /// persists after the search filter is cleared. Only recurses into
     /// children that are already loaded.
     pub fn expand_paths(&mut self, paths: &HashSet<PathBuf>) {
+        self.invalidate_caches();
         expand_paths_recursive(&mut self.root, paths);
     }
 
@@ -1479,6 +1544,7 @@ mod tests {
 
         // Collapse root
         state.root.is_expanded = false;
+        state.invalidate_caches();
 
         // Only root is visible, children are hidden
         verify_that!(state.visible_node_count(), eq(1))?;
