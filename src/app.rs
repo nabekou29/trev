@@ -537,18 +537,22 @@ fn process_children_results(
     let mut search_snapshot: Option<CursorSnapshot> = None;
     let mut had_search_filter = false;
 
+    let mut result_count: usize = 0;
     for result in channels.drain_children() {
         had_events = true;
+        result_count += 1;
         match result.children {
             Ok(children) => {
                 let loaded_path = result.path.clone();
                 let kind = result.kind;
+                let child_count = children.len();
 
                 if kind == LoadKind::DeferredRestore {
                     if deferred_snapshot.is_none() {
                         deferred_snapshot =
                             Some(CursorSnapshot::capture(&state.tree_state, &state.scroll));
                     }
+                    let _span = tracing::info_span!("set_children", ?kind, child_count).entered();
                     state.tree_state.set_children(&result.path, children, true);
                 } else if kind == LoadKind::SearchFilter {
                     had_search_filter = true;
@@ -556,12 +560,14 @@ fn process_children_results(
                         search_snapshot =
                             Some(CursorSnapshot::capture(&state.tree_state, &state.scroll));
                     }
+                    let _span = tracing::info_span!("set_children", ?kind, child_count).entered();
                     state.tree_state.set_children(&result.path, children, true);
                 } else {
                     apply_children_load(state, &result.path, children, kind);
                 }
                 // Defer SearchFilter post-processing to after the batch.
                 if kind != LoadKind::SearchFilter {
+                    let _span = tracing::info_span!("post_children_load", ?kind).entered();
                     post_children_load(state, ctx, &loaded_path, kind);
                 }
             }
@@ -574,15 +580,19 @@ fn process_children_results(
             }
         }
     }
+    tracing::info!(result_count, "drain_children complete");
 
     if let Some(snapshot) = deferred_snapshot {
+        let _span = tracing::info_span!("restore_deferred_cursor").entered();
         snapshot.restore(&mut state.tree_state, &mut state.scroll, state.viewport_height);
     }
     if let Some(snapshot) = search_snapshot {
+        let _span = tracing::info_span!("restore_search_cursor").entered();
         snapshot.restore(&mut state.tree_state, &mut state.scroll, state.viewport_height);
     }
     // Schedule next batch of search loads once, after all results are applied.
     if had_search_filter {
+        let _span = tracing::info_span!("schedule_search_loads").entered();
         handler::search::schedule_search_loads(state, ctx);
     }
 

@@ -519,7 +519,10 @@ impl TreeState {
     /// Returns the path if the transition was made, `None` if the node is not
     /// found, not a directory, or not in `NotLoaded` state.
     pub fn prepare_async_load(&mut self, path: &Path, auto_expand: bool) -> Option<PathBuf> {
-        let node = self.find_node_mut(path)?;
+        let node = {
+            let _span = tracing::info_span!("find_node_mut").entered();
+            self.find_node_mut(path)?
+        };
         if !node.is_dir || !matches!(node.children, ChildrenState::NotLoaded) {
             return None;
         }
@@ -528,6 +531,55 @@ impl TreeState {
             node.is_expanded = true;
         }
         Some(node.path.clone())
+    }
+
+    /// Batch version of `prepare_async_load` that groups paths by parent directory.
+    ///
+    /// Instead of calling `find_node_mut` per path (O(N) per call in flat dirs),
+    /// this groups paths by their parent, finds each parent once, then transitions
+    /// matching children in a single scan.
+    ///
+    /// Returns paths that were successfully transitioned to `Loading`.
+    pub fn prepare_async_loads_batch(
+        &mut self,
+        paths: &[PathBuf],
+        auto_expand: bool,
+    ) -> Vec<PathBuf> {
+        // Group paths by parent directory.
+        let mut by_parent: HashMap<PathBuf, Vec<&PathBuf>> = HashMap::new();
+        for path in paths {
+            if let Some(parent) = path.parent() {
+                by_parent.entry(parent.to_path_buf()).or_default().push(path);
+            }
+        }
+
+        let mut result = Vec::new();
+        for (parent_path, child_paths) in &by_parent {
+            let Some(parent_node) = self.find_node_mut(parent_path) else {
+                continue;
+            };
+            let Some(children) = parent_node.children.as_loaded_mut() else {
+                continue;
+            };
+
+            // Build a set for O(1) lookup.
+            let wanted: HashSet<&Path> = child_paths.iter().map(|p| p.as_path()).collect();
+
+            for child in children.iter_mut() {
+                if wanted.contains(child.path.as_path())
+                    && child.is_dir
+                    && matches!(child.children, ChildrenState::NotLoaded)
+                {
+                    child.children = ChildrenState::Loading;
+                    if auto_expand {
+                        child.is_expanded = true;
+                    }
+                    result.push(child.path.clone());
+                }
+            }
+        }
+
+        result
     }
 
     /// Prepare prefetching for child directories at the given path.

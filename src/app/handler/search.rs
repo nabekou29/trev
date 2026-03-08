@@ -234,32 +234,46 @@ fn confirm_search(state: &mut AppState) {
 /// Directories whose parent is not yet loaded are kept in the pending list
 /// and retried when their parent's load completes.
 pub fn schedule_search_loads(state: &mut AppState, ctx: &AppContext) {
+    let _span = tracing::info_span!("schedule_search_loads").entered();
+
     let Some(ref mut pending) = state.search_pending_loads else {
         return;
     };
 
     let show_hidden = state.show_hidden;
     let show_ignored = state.show_ignored;
+    let total_pending = pending.len();
 
-    let mut scheduled = Vec::new();
-    for path in pending.iter() {
-        if let Some(load_path) = state.tree_state.prepare_async_load(path, true) {
+    // Phase 1: Batch transition NotLoaded → Loading (single find_node_mut per parent).
+    let transitioned = {
+        let _span = tracing::info_span!("prepare_transitions", total_pending).entered();
+        state.tree_state.prepare_async_loads_batch(pending, true)
+    };
+
+    // Phase 2: Spawn async load tasks.
+    {
+        let _span = tracing::info_span!("spawn_tasks", count = transitioned.len()).entered();
+        for load_path in &transitioned {
             spawn_load_children(
                 &ctx.children_tx,
-                load_path,
+                load_path.clone(),
                 show_hidden,
                 show_ignored,
                 LoadKind::SearchFilter,
             );
-            scheduled.push(path.clone());
         }
     }
 
-    let remaining = pending.len() - scheduled.len();
+    let scheduled = transitioned;
+
+    let scheduled_count = scheduled.len();
+    let remaining = total_pending - scheduled_count;
     if !scheduled.is_empty() {
-        tracing::info!(scheduled = scheduled.len(), remaining, "schedule_search_loads");
-        pending.retain(|p| !scheduled.contains(p));
+        let _span = tracing::info_span!("retain_pending", scheduled = scheduled_count, remaining).entered();
+        let scheduled_set: std::collections::HashSet<std::path::PathBuf> = scheduled.into_iter().collect();
+        pending.retain(|p| !scheduled_set.contains(p));
     }
+    tracing::info!(scheduled = scheduled_count, remaining, total_pending, "schedule_search_loads complete");
     if pending.is_empty() {
         state.search_pending_loads = None;
     }
