@@ -951,6 +951,11 @@ impl TreeState {
         self.search_filter.is_some()
     }
 
+    /// Whether virtual expansion is enabled for the search filter.
+    pub const fn has_search_virtual_expand(&self) -> bool {
+        self.search_virtual_expand
+    }
+
     /// Get a reference to the active search filter paths.
     pub const fn search_filter_paths(&self) -> Option<&HashSet<PathBuf>> {
         self.search_filter.as_ref()

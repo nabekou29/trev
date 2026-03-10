@@ -203,16 +203,42 @@ fn handle_filter_action(
         FilterAction::Hidden => {
             state.show_hidden = !state.show_hidden;
             tree::rebuild_tree(state, ctx);
+            rebuild_search_index(state, ctx);
             let label = if state.show_hidden { "shown" } else { "hidden" };
             state.set_status(format!("Hidden files: {label}"));
         }
         FilterAction::Ignored => {
             state.show_ignored = !state.show_ignored;
             tree::rebuild_tree(state, ctx);
+            rebuild_search_index(state, ctx);
             let label = if state.show_ignored { "shown" } else { "hidden" };
             state.set_status(format!("Ignored files: {label}"));
         }
     }
+}
+
+/// Cancel the in-flight search index build and start a new one with current
+/// `show_hidden` / `show_ignored` settings.
+fn rebuild_search_index(state: &mut AppState, ctx: &AppContext) {
+    use std::sync::atomic::Ordering;
+
+    use crate::tree::search_index::SearchIndex;
+
+    // Cancel the previous build.
+    state.search_index_cancelled.store(true, Ordering::Relaxed);
+
+    // Clear the existing index so stale entries are not returned during rebuild.
+    if let Ok(mut guard) = ctx.search_index.write() {
+        *guard = SearchIndex::new();
+    }
+
+    // Start a new build with updated visibility settings.
+    state.search_index_cancelled = crate::app::spawn_search_index_build(
+        &ctx.search_index,
+        &ctx.root_path,
+        state.show_hidden,
+        state.show_ignored,
+    );
 }
 
 /// Open a user-defined menu by name.

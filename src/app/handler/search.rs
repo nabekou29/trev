@@ -125,6 +125,73 @@ fn handle_filtered_key(key: KeyEvent, state: &mut AppState, ctx: &AppContext) {
     }
 }
 
+/// Re-apply the current search filter after a tree rebuild.
+///
+/// Called when the tree state is replaced (e.g. after toggling hidden/ignored
+/// visibility) while a search is active, to restore the filtered view.
+///
+/// Instead of re-running a search (the index may be mid-rebuild and empty),
+/// reconstructs the filter from the still-valid `search_match_indices`.
+pub fn reapply_search(state: &mut AppState, ctx: &AppContext) {
+    let phase = match state.mode {
+        AppMode::Search(ref search) => {
+            if search.buffer.value.is_empty() {
+                return;
+            }
+            search.phase
+        }
+        _ => return,
+    };
+
+    if state.search_match_indices.is_empty() {
+        return;
+    }
+
+    // Reconstruct visible paths from stored match results (matched paths + ancestors).
+    let mut visible = std::collections::HashSet::new();
+    for path in state.search_match_indices.keys() {
+        visible.insert(path.clone());
+        let mut ancestor = path.as_path();
+        while let Some(parent) = ancestor.parent() {
+            if parent == ctx.root_path.as_path() || !visible.insert(parent.to_path_buf()) {
+                break;
+            }
+            ancestor = parent;
+        }
+    }
+
+    // Register pending loads for ancestor directories in the new tree.
+    let mut pending: Vec<std::path::PathBuf> = visible.iter().cloned().collect();
+    pending.sort_by_key(|p| p.components().count());
+    state.search_pending_loads = Some(pending);
+
+    // set_search_filter enables virtual expansion, keeping all filter paths
+    // visible even while directories are being loaded asynchronously.
+    state.tree_state.set_search_filter(visible);
+    schedule_search_loads(state, ctx);
+
+    // Restore cursor to previous position if still visible.
+    let current_path = state.tree_state.cursor_path();
+    if let Some(ref cp) = current_path {
+        state.tree_state.move_cursor_to_path(cp);
+    }
+
+    // For Filtered phase, expand loaded directories immediately but defer
+    // pinning (disabling virtual expansion) until all pending loads complete.
+    // This ensures newly revealed directories appear expanded while loading.
+    // finalize_search_filter() is called from schedule_search_loads() once done.
+    if phase == SearchPhase::Filtered {
+        if let Some(filter) = state.tree_state.search_filter_paths().cloned() {
+            state.tree_state.expand_paths(&filter);
+        }
+        if state.search_pending_loads.is_none() {
+            state.tree_state.pin_search_filter();
+        }
+    }
+
+    state.dirty = true;
+}
+
 /// Run the fuzzy search against the index and update the tree filter.
 fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
     let AppMode::Search(ref search) = state.mode else {
@@ -276,7 +343,28 @@ pub fn schedule_search_loads(state: &mut AppState, ctx: &AppContext) {
     tracing::info!(scheduled = scheduled_count, remaining, total_pending, "schedule_search_loads complete");
     if pending.is_empty() {
         state.search_pending_loads = None;
+        // All ancestor loads are done. If in Filtered phase with virtual
+        // expansion still active, finalize: expand all filter dirs and pin.
+        finalize_search_filter(state);
     }
+}
+
+/// Finalize the search filter after all pending loads complete.
+///
+/// Expands all directories in the filter set and disables virtual expansion
+/// so user collapse/expand is respected in the Filtered phase.
+/// No-op if not in Filtered phase or virtual expansion is already off.
+fn finalize_search_filter(state: &mut AppState) {
+    if !matches!(state.mode, AppMode::Search(ref s) if s.phase == SearchPhase::Filtered) {
+        return;
+    }
+    if !state.tree_state.has_search_virtual_expand() {
+        return;
+    }
+    if let Some(filter) = state.tree_state.search_filter_paths().cloned() {
+        state.tree_state.expand_paths(&filter);
+    }
+    state.tree_state.pin_search_filter();
 }
 
 /// Direction for search history navigation.
