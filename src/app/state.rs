@@ -344,8 +344,6 @@ pub struct AppContext {
     pub menus: HashMap<String, MenuDefinition>,
     /// Shared search index (built in background).
     pub search_index: Arc<RwLock<crate::tree::search_index::SearchIndex>>,
-    /// Maximum number of search results.
-    pub search_max_results: usize,
     /// Sender for async stat batch results.
     pub stat_tx: tokio::sync::mpsc::Sender<StatLoadResult>,
 }

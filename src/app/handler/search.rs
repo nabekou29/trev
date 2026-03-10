@@ -146,8 +146,7 @@ fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
         return;
     };
 
-    let results =
-        search_engine::search(index.entries(), query, &ctx.root_path, ctx.search_max_results, mode);
+    let results = search_engine::search(index.entries(), query, &ctx.root_path, mode);
 
     // Store match indices for highlight rendering.
     state.search_match_indices.clear();

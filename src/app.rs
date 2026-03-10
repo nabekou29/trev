@@ -339,7 +339,6 @@ fn build_context_and_channels(
         rebuild_tx,
         menus: config.menus.clone(),
         search_index: Arc::new(RwLock::new(SearchIndex::new())),
-        search_max_results: config.search.max_results,
         stat_tx,
     };
 

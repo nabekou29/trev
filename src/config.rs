@@ -885,21 +885,9 @@ impl Default for MouseConfig {
 }
 
 /// Search configuration.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
-pub struct SearchConfig {
-    /// Maximum number of search results to display.
-    pub max_results: usize,
-}
-
-/// Default maximum search results.
-const DEFAULT_SEARCH_MAX_RESULTS: usize = 1000;
-
-impl Default for SearchConfig {
-    fn default() -> Self {
-        Self { max_results: DEFAULT_SEARCH_MAX_RESULTS }
-    }
-}
+pub struct SearchConfig {}
 
 /// Result of loading configuration.
 ///
