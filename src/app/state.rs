@@ -125,6 +125,11 @@ pub struct AppState {
     /// Set during incremental search when ancestor directories need async loading.
     /// Cleared when search exits or all loads complete.
     pub search_pending_loads: Option<Vec<PathBuf>>,
+    /// Cancellation token for the background search index build.
+    ///
+    /// Set to `true` to cancel the in-flight build before starting a new one
+    /// (e.g. when toggling hidden/ignored file visibility).
+    pub search_index_cancelled: Arc<AtomicBool>,
 }
 
 /// Cached layout areas from the last render, used for mouse hit-testing.
@@ -598,6 +603,7 @@ pub(super) mod tests {
             search_history: vec![],
             search_match_indices: HashMap::new(),
             search_pending_loads: None,
+            search_index_cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 

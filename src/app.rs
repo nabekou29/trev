@@ -284,6 +284,7 @@ fn init_app(
         search_history,
         search_match_indices: std::collections::HashMap::new(),
         search_pending_loads: None,
+        search_index_cancelled: Arc::new(AtomicBool::new(false)),
     };
 
     let (ctx, channels) = build_context_and_channels(
@@ -727,7 +728,7 @@ pub async fn run(args: &Args) -> Result<()> {
     let root_path = ctx.root_path.clone();
     let mut last_cursor = state.tree_state.cursor();
 
-    let search_cancelled = spawn_search_index_build(
+    state.search_index_cancelled = spawn_search_index_build(
         &ctx.search_index,
         &root_path,
         state.show_hidden,
@@ -847,7 +848,7 @@ pub async fn run(args: &Args) -> Result<()> {
     }
 
     // Cancel background search index build if still running.
-    search_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+    state.search_index_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
 
     shutdown(&root_path, &state);
     Ok(())
@@ -857,7 +858,7 @@ pub async fn run(args: &Args) -> Result<()> {
 ///
 /// Returns a cancellation token that should be set to `true` when the app shuts
 /// down so the background walk stops early.
-fn spawn_search_index_build(
+pub(crate) fn spawn_search_index_build(
     index: &Arc<RwLock<SearchIndex>>,
     root_path: &Path,
     show_hidden: bool,
@@ -1370,6 +1371,8 @@ fn process_rebuild_results(
         if state.show_preview {
             trigger_preview(state, ctx);
         }
+        // Re-apply search filter if a search is active.
+        handler::search::reapply_search(state, ctx);
         tracing::info!("tree rebuild applied");
     }
     had_results
