@@ -264,6 +264,10 @@ impl ScrollState {
     /// Clamp the scroll offset so the cursor stays visible.
     ///
     /// Ensures `cursor - viewport_height + 1 <= offset <= cursor`.
+    ///
+    /// **Note:** this method does not account for the total number of items.
+    /// Call [`clamp_to_total`](Self::clamp_to_total) afterwards to prevent
+    /// over-scrolling past the end of the list.
     pub const fn clamp_to_cursor(&mut self, cursor: usize, viewport_height: usize) {
         if viewport_height == 0 {
             self.offset = 0;
@@ -276,6 +280,20 @@ impl ScrollState {
         // If cursor is below the current viewport, scroll down.
         if cursor >= self.offset + viewport_height {
             self.offset = cursor.saturating_sub(viewport_height - 1);
+        }
+    }
+
+    /// Clamp the scroll offset so it does not exceed the maximum scrollable
+    /// position.
+    ///
+    /// When `total_items <= viewport_height`, the offset is forced to 0
+    /// because all items fit on screen. Otherwise the offset is capped at
+    /// `total_items - viewport_height` so the bottom of the list aligns with
+    /// the bottom of the viewport (no blank space below the last item).
+    pub const fn clamp_to_total(&mut self, total_items: usize, viewport_height: usize) {
+        let max_offset = total_items.saturating_sub(viewport_height);
+        if self.offset > max_offset {
+            self.offset = max_offset;
         }
     }
 }
@@ -305,6 +323,7 @@ impl CursorSnapshot {
     /// cursor is clamped to the current visible range so it stays at the same
     /// index position — effectively selecting the next item, or the last item
     /// if the deleted file was at the end.
+    ///
     pub fn restore(&self, tree: &mut TreeState, scroll: &mut ScrollState, viewport_height: usize) {
         let found = self.path.as_ref().is_some_and(|p| tree.move_cursor_to_path(p));
         if !found {
@@ -314,6 +333,7 @@ impl CursorSnapshot {
         let cursor = tree.cursor();
         scroll.set_offset(cursor.saturating_sub(self.visual_row));
         scroll.clamp_to_cursor(cursor, viewport_height);
+        scroll.clamp_to_total(tree.visible_node_count(), viewport_height);
     }
 }
 
@@ -757,6 +777,53 @@ pub(super) mod tests {
         let mut scroll = ScrollState { offset: scroll_offset };
         scroll.set_offset(desired.min(max_offset));
 
+        assert_that!(scroll.offset(), eq(0));
+    }
+
+    #[rstest]
+    fn clamp_to_total_caps_offset_when_over_scrolled() {
+        let mut scroll = ScrollState { offset: 15 };
+        scroll.clamp_to_total(20, 10);
+        assert_that!(scroll.offset(), eq(10));
+    }
+
+    #[rstest]
+    fn clamp_to_total_noop_when_within_bounds() {
+        let mut scroll = ScrollState { offset: 5 };
+        scroll.clamp_to_total(20, 10);
+        assert_that!(scroll.offset(), eq(5));
+    }
+
+    #[rstest]
+    fn clamp_to_total_forces_zero_when_all_fit() {
+        let mut scroll = ScrollState { offset: 3 };
+        scroll.clamp_to_total(5, 10);
+        assert_that!(scroll.offset(), eq(0));
+    }
+
+    #[rstest]
+    fn clamp_to_total_zero_items() {
+        let mut scroll = ScrollState { offset: 5 };
+        scroll.clamp_to_total(0, 10);
+        assert_that!(scroll.offset(), eq(0));
+    }
+
+    #[rstest]
+    fn clamp_to_total_exact_boundary() {
+        let mut scroll = ScrollState { offset: 10 };
+        scroll.clamp_to_total(20, 10);
+        assert_that!(scroll.offset(), eq(10));
+    }
+
+    #[rstest]
+    fn clamp_to_cursor_then_total_prevents_over_scroll() {
+        // cursor=9, viewport=10, total=10 → max_offset=0.
+        // clamp_to_cursor keeps offset=5 (cursor 9 in [5..15)),
+        // but clamp_to_total should cap to 0.
+        let mut scroll = ScrollState { offset: 5 };
+        scroll.clamp_to_cursor(9, 10);
+        assert_that!(scroll.offset(), eq(5));
+        scroll.clamp_to_total(10, 10);
         assert_that!(scroll.offset(), eq(0));
     }
 }

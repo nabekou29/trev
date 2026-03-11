@@ -395,6 +395,7 @@ fn setup_terminal(
             state.scroll.center_on_cursor(state.tree_state.cursor(), state.viewport_height);
         }
     }
+    state.scroll.clamp_to_total(state.tree_state.visible_node_count(), state.viewport_height);
 
     terminal
 }
@@ -824,6 +825,7 @@ pub async fn run(args: &Args) -> Result<()> {
         // ── Scroll + Draw ──────────────────────────────────────
         let old_offset = state.scroll.offset();
         state.scroll.clamp_to_cursor(state.tree_state.cursor(), state.viewport_height);
+        state.scroll.clamp_to_total(state.tree_state.visible_node_count(), state.viewport_height);
         if state.scroll.offset() != old_offset {
             state.dirty = true;
         }
@@ -1354,13 +1356,10 @@ fn process_rebuild_results(
         had_results = true;
         state.tree_state = result.tree_state;
         // Restore scroll so the cursor stays at the same visual row.
-        // Clamp offset so we don't scroll past the end of the tree
-        // (which would cause blank space at the bottom of the viewport).
         let new_cursor = state.tree_state.cursor();
-        let total = state.tree_state.visible_node_count();
-        let max_offset = total.saturating_sub(state.viewport_height);
         let desired = new_cursor.saturating_sub(result.visual_row);
-        state.scroll.set_offset(desired.min(max_offset));
+        state.scroll.set_offset(desired);
+        state.scroll.clamp_to_total(state.tree_state.visible_node_count(), state.viewport_height);
         trigger_prefetch(
             &mut state.tree_state,
             &result.root_path,
