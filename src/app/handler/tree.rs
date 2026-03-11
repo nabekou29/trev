@@ -381,6 +381,7 @@ pub(super) fn rebuild_tree(state: &mut AppState, ctx: &AppContext) {
             show_ignored,
             generation,
             visual_row,
+            cursor_path,
         });
     });
 }
@@ -428,6 +429,7 @@ fn change_root(state: &mut AppState, ctx: &AppContext, new_root: &Path) {
             show_ignored,
             generation,
             visual_row: 0,
+            cursor_path: None,
         });
     });
 

@@ -106,6 +106,8 @@ struct EventReceivers {
     ipc: tokio::sync::mpsc::UnboundedReceiver<IpcCommand>,
     /// Stat batch results (lazy metadata loading).
     stat: tokio::sync::mpsc::Receiver<StatLoadResult>,
+    /// Notification that a search index build has completed.
+    search_index_ready: tokio::sync::mpsc::Receiver<()>,
 
     // Pre-received items from `tokio::select!` (one per wake).
     /// Pre-received children load result.
@@ -122,6 +124,8 @@ struct EventReceivers {
     pre_ipc: Option<IpcCommand>,
     /// Pre-received stat batch result.
     pre_stat: Option<StatLoadResult>,
+    /// Pre-received search index ready signal.
+    pre_search_index_ready: Option<()>,
 }
 
 /// Generate a drain method that yields `pre_$field.take()` then `$field.try_recv()` items.
@@ -144,6 +148,7 @@ impl EventReceivers {
         self.pre_watcher = None;
         self.pre_ipc = None;
         self.pre_stat = None;
+        self.pre_search_index_ready = None;
     }
 
     impl_drain!(drain_children, pre_children, children, ChildrenLoadResult);
@@ -153,6 +158,7 @@ impl EventReceivers {
     impl_drain!(drain_watcher, pre_watcher, watcher, Vec<notify_debouncer_mini::DebouncedEvent>);
     impl_drain!(drain_ipc, pre_ipc, ipc, IpcCommand);
     impl_drain!(drain_stats, pre_stat, stat, StatLoadResult);
+    impl_drain!(drain_search_index_ready, pre_search_index_ready, search_index_ready, ());
 }
 
 /// Initialize all application state, context, channels, and terminal.
@@ -325,6 +331,7 @@ fn build_context_and_channels(
     let (git_tx, git_rx) = tokio::sync::mpsc::channel::<GitStatusResult>(4);
     let (rebuild_tx, rebuild_rx) = tokio::sync::mpsc::channel::<TreeRebuildResult>(2);
     let (stat_tx, stat_rx) = tokio::sync::mpsc::channel::<StatLoadResult>(16);
+    let (search_index_ready_tx, search_index_ready_rx) = tokio::sync::mpsc::channel::<()>(2);
 
     let ctx = AppContext {
         children_tx,
@@ -340,6 +347,7 @@ fn build_context_and_channels(
         rebuild_tx,
         menus: config.menus.clone(),
         search_index: Arc::new(RwLock::new(SearchIndex::new())),
+        search_index_ready_tx,
         stat_tx,
     };
 
@@ -351,6 +359,7 @@ fn build_context_and_channels(
         watcher: watcher_rx,
         ipc: ipc_rx,
         stat: stat_rx,
+        search_index_ready: search_index_ready_rx,
         pre_children: None,
         pre_preview: None,
         pre_git: None,
@@ -358,6 +367,7 @@ fn build_context_and_channels(
         pre_watcher: None,
         pre_ipc: None,
         pre_stat: None,
+        pre_search_index_ready: None,
     };
 
     (ctx, channels)
@@ -653,6 +663,12 @@ fn process_async_events(
         had_events = true;
     }
 
+    // Search index build completed — re-run the active search with the fresh index.
+    if channels.drain_search_index_ready().next().is_some() {
+        had_events = true;
+        handler::search::refresh_search(state, ctx);
+    }
+
     // Trigger preview when cursor changes.
     let current_cursor = state.tree_state.cursor();
     if current_cursor != last_cursor {
@@ -734,6 +750,7 @@ pub async fn run(args: &Args) -> Result<()> {
         &root_path,
         state.show_hidden,
         state.show_ignored,
+        &ctx.search_index_ready_tx,
     );
 
     // Create the async terminal event stream.
@@ -797,6 +814,7 @@ pub async fn run(args: &Args) -> Result<()> {
             Some(v) = channels.watcher.recv()  => { channels.pre_watcher = Some(v); }
             Some(v) = channels.ipc.recv()      => { channels.pre_ipc = Some(v); }
             Some(v) = channels.stat.recv()     => { channels.pre_stat = Some(v); }
+            Some(v) = channels.search_index_ready.recv() => { channels.pre_search_index_ready = Some(v); }
 
             () = &mut timeout => {}
         }
@@ -865,11 +883,13 @@ pub(crate) fn spawn_search_index_build(
     root_path: &Path,
     show_hidden: bool,
     show_ignored: bool,
+    ready_tx: &tokio::sync::mpsc::Sender<()>,
 ) -> Arc<AtomicBool> {
     let cancelled = Arc::new(AtomicBool::new(false));
     let idx = Arc::clone(index);
     let root = root_path.to_path_buf();
     let cancel = Arc::clone(&cancelled);
+    let tx = ready_tx.clone();
     tokio::task::spawn_blocking(move || {
         search_index::build_search_index(
             &idx,
@@ -879,6 +899,8 @@ pub(crate) fn spawn_search_index_build(
             &cancel,
             DEFAULT_MAX_ENTRIES,
         );
+        // Notify the event loop that the index is ready for searching.
+        let _ = tx.blocking_send(());
     });
     cancelled
 }
@@ -1371,7 +1393,7 @@ fn process_rebuild_results(
             trigger_preview(state, ctx);
         }
         // Re-apply search filter if a search is active.
-        handler::search::reapply_search(state, ctx);
+        handler::search::reapply_search(state, ctx, result.cursor_path.as_deref());
         tracing::info!("tree rebuild applied");
     }
     had_results

@@ -238,6 +238,7 @@ fn rebuild_search_index(state: &mut AppState, ctx: &AppContext) {
         &ctx.root_path,
         state.show_hidden,
         state.show_ignored,
+        &ctx.search_index_ready_tx,
     );
 }
 

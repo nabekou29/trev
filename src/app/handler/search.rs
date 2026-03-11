@@ -11,6 +11,8 @@ use crossterm::event::{
     KeyEvent,
 };
 
+use std::path::Path;
+
 use crate::app::handler::tree::spawn_load_children;
 use crate::app::state::{
     AppContext,
@@ -132,7 +134,11 @@ fn handle_filtered_key(key: KeyEvent, state: &mut AppState, ctx: &AppContext) {
 ///
 /// Instead of re-running a search (the index may be mid-rebuild and empty),
 /// reconstructs the filter from the still-valid `search_match_indices`.
-pub fn reapply_search(state: &mut AppState, ctx: &AppContext) {
+pub fn reapply_search(
+    state: &mut AppState,
+    ctx: &AppContext,
+    original_cursor_path: Option<&Path>,
+) {
     let phase = match state.mode {
         AppMode::Search(ref search) => {
             if search.buffer.value.is_empty() {
@@ -171,8 +177,12 @@ pub fn reapply_search(state: &mut AppState, ctx: &AppContext) {
     schedule_search_loads(state, ctx);
 
     // Restore cursor to previous position if still visible.
-    let current_path = state.tree_state.cursor_path();
-    if let Some(ref cp) = current_path {
+    // Prefer the original cursor path (from before tree rebuild) over the
+    // current one, which may point to a fallback node.
+    let restore_path = original_cursor_path
+        .map(Path::to_path_buf)
+        .or_else(|| state.tree_state.cursor_path());
+    if let Some(ref cp) = restore_path {
         state.tree_state.move_cursor_to_path(cp);
     }
 
@@ -190,6 +200,18 @@ pub fn reapply_search(state: &mut AppState, ctx: &AppContext) {
     }
 
     state.dirty = true;
+}
+
+/// Re-run the active search against the (newly rebuilt) index.
+///
+/// Called when the background search index build completes to replace stale
+/// results from the previous visibility settings.
+/// No-op when no search is active.
+pub fn refresh_search(state: &mut AppState, ctx: &AppContext) {
+    if !matches!(state.mode, AppMode::Search(_)) {
+        return;
+    }
+    run_incremental_search(state, ctx);
 }
 
 /// Run the fuzzy search against the index and update the tree filter.

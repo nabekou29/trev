@@ -369,6 +369,8 @@ pub struct AppContext {
     pub menus: HashMap<String, MenuDefinition>,
     /// Shared search index (built in background).
     pub search_index: Arc<RwLock<crate::tree::search_index::SearchIndex>>,
+    /// Sender to notify when a search index build completes.
+    pub search_index_ready_tx: tokio::sync::mpsc::Sender<()>,
     /// Sender for async stat batch results.
     pub stat_tx: tokio::sync::mpsc::Sender<StatLoadResult>,
 }
@@ -524,6 +526,12 @@ pub struct TreeRebuildResult {
     /// Used to restore the scroll position so the cursor stays at the same
     /// screen row after the tree is swapped in.
     pub visual_row: usize,
+    /// Original cursor path before the rebuild.
+    ///
+    /// Used by `reapply_search` to restore cursor position after the search
+    /// filter is re-applied, since the rebuilt tree may have fallen back to a
+    /// different node if the original was filtered out.
+    pub cursor_path: Option<PathBuf>,
 }
 
 /// Result of an async preview load operation.
