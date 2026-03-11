@@ -182,8 +182,12 @@ pub fn reapply_search(
     let restore_path = original_cursor_path
         .map(Path::to_path_buf)
         .or_else(|| state.tree_state.cursor_path());
-    if let Some(ref cp) = restore_path {
-        state.tree_state.move_cursor_to_path(cp);
+    let restored = restore_path
+        .as_ref()
+        .is_some_and(|cp| state.tree_state.move_cursor_to_path(cp));
+    if !restored {
+        // Path not found — clamp cursor to valid range so it doesn't vanish.
+        state.tree_state.move_cursor_to(state.tree_state.cursor());
     }
 
     // For Filtered phase, expand loaded directories immediately but defer
