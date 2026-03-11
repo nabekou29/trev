@@ -202,6 +202,10 @@ fn handle_filter_action(
     match action {
         FilterAction::Hidden => {
             state.show_hidden = !state.show_hidden;
+            // Clear stale search results that were collected under old visibility
+            // settings. The rebuilt index will provide fresh results via
+            // refresh_search().
+            state.search_match_indices.clear();
             tree::rebuild_tree(state, ctx);
             rebuild_search_index(state, ctx);
             let label = if state.show_hidden { "shown" } else { "hidden" };
@@ -209,6 +213,8 @@ fn handle_filter_action(
         }
         FilterAction::Ignored => {
             state.show_ignored = !state.show_ignored;
+            // Clear stale search results (same reason as above).
+            state.search_match_indices.clear();
             tree::rebuild_tree(state, ctx);
             rebuild_search_index(state, ctx);
             let label = if state.show_ignored { "shown" } else { "hidden" };

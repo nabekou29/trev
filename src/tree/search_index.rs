@@ -338,4 +338,50 @@ mod tests {
         verify_that!(names.contains(&"ignored"), eq(false))?;
         Ok(())
     }
+
+    #[rstest]
+    fn test_build_index_hidden_false_ignored_true_excludes_hidden_gitignored() -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+        fs::write(dir.path().join(".gitignore"), ".vscode/\n").unwrap();
+        fs::create_dir(dir.path().join(".vscode")).unwrap();
+        fs::write(dir.path().join(".vscode/settings.json"), "{}").unwrap();
+        fs::write(dir.path().join("visible.txt"), "").unwrap();
+
+        // show_hidden=false, show_ignored=true → .vscode should NOT appear
+        let index = build_index(dir.path(), false, true);
+        let names: Vec<&str> = index.entries().iter().map(|e| e.name.as_str()).collect();
+
+        verify_that!(names.contains(&".vscode"), eq(false))?;
+        verify_that!(names.contains(&"settings.json"), eq(false))?;
+        verify_that!(names.contains(&"visible.txt"), eq(true))?;
+        Ok(())
+    }
+
+    /// Reproduces the real-world pattern: `.vscode/*` with whitelisted files.
+    #[rstest]
+    fn test_build_index_hidden_false_ignored_true_whitelist_pattern() -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+        // Same pattern as trev's own .gitignore
+        fs::write(
+            dir.path().join(".gitignore"),
+            ".vscode/*\n!.vscode/settings.json\n!.vscode/extensions.json\n",
+        )
+        .unwrap();
+        fs::create_dir(dir.path().join(".vscode")).unwrap();
+        fs::write(dir.path().join(".vscode/settings.json"), "{}").unwrap();
+        fs::write(dir.path().join(".vscode/other.json"), "{}").unwrap();
+        fs::write(dir.path().join("visible.txt"), "").unwrap();
+
+        // show_hidden=false, show_ignored=true → nothing under .vscode should appear
+        let index = build_index(dir.path(), false, true);
+        let names: Vec<&str> = index.entries().iter().map(|e| e.name.as_str()).collect();
+
+        verify_that!(names.contains(&".vscode"), eq(false))?;
+        verify_that!(names.contains(&"settings.json"), eq(false))?;
+        verify_that!(names.contains(&"other.json"), eq(false))?;
+        verify_that!(names.contains(&"visible.txt"), eq(true))?;
+        Ok(())
+    }
 }
