@@ -529,4 +529,258 @@ mod tests {
         let span = git_status_indicator(GitFileStatus::Conflicted);
         assert!(span.style.add_modifier.contains(Modifier::BOLD));
     }
+
+    // --- Helper ---
+
+    /// Create a `SearchState` with the given mode for testing.
+    fn make_search_state(mode: SearchMode) -> crate::input::SearchState {
+        crate::input::SearchState {
+            buffer: crate::input::TextBuffer::new(),
+            phase: crate::input::SearchPhase::Typing,
+            mode,
+            history_index: None,
+            original_query: String::new(),
+        }
+    }
+
+    // --- adjust_match_indices_for_name ---
+
+    #[rstest]
+    fn adjust_indices_name_mode_returns_as_is() {
+        let mode = AppMode::Search(make_search_state(SearchMode::Name));
+        let indices = vec![0, 1, 2];
+        let result = adjust_match_indices_for_name(
+            &indices,
+            "foo",
+            std::path::Path::new("/project/src/foo"),
+            &mode,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result, vec![0u32, 1, 2]);
+    }
+
+    #[rstest]
+    fn adjust_indices_path_mode_simple_remap() {
+        let mode = AppMode::Search(make_search_state(SearchMode::Path));
+        // path "src/foo.rs", root "/project", name "foo.rs"
+        // rel = "src/foo.rs" (10 chars), name = "foo.rs" (6 chars), offset = 4
+        let indices = vec![4, 5, 6];
+        let result = adjust_match_indices_for_name(
+            &indices,
+            "foo.rs",
+            std::path::Path::new("/project/src/foo.rs"),
+            &mode,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result, vec![0u32, 1, 2]);
+    }
+
+    #[rstest]
+    fn adjust_indices_path_mode_directory_prefix_filtered_out() {
+        let mode = AppMode::Search(make_search_state(SearchMode::Path));
+        // rel = "src/foo.rs", offset = 4
+        // indices [0, 1, 2, 3] are all in the "src/" prefix → filtered out
+        let indices = vec![0, 1, 2, 3];
+        let result = adjust_match_indices_for_name(
+            &indices,
+            "foo.rs",
+            std::path::Path::new("/project/src/foo.rs"),
+            &mode,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result, Vec::<u32>::new());
+    }
+
+    #[rstest]
+    fn adjust_indices_path_mode_mixed_indices() {
+        let mode = AppMode::Search(make_search_state(SearchMode::Path));
+        // rel = "src/foo.rs" (10 chars), name = "foo.rs" (6 chars), offset = 4
+        // index 0 → in prefix → filtered
+        // index 4 → 4-4=0 → kept
+        // index 9 → 9-4=5 → kept (within name_char_count=6)
+        let indices = vec![0, 4, 9];
+        let result = adjust_match_indices_for_name(
+            &indices,
+            "foo.rs",
+            std::path::Path::new("/project/src/foo.rs"),
+            &mode,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result, vec![0u32, 5]);
+    }
+
+    #[rstest]
+    fn adjust_indices_path_mode_nested_directory() {
+        let mode = AppMode::Search(make_search_state(SearchMode::Path));
+        // path "src/app/handler.rs", root "/project", name "handler.rs"
+        // rel = "src/app/handler.rs" (18 chars), name = "handler.rs" (10 chars), offset = 8
+        let indices = vec![8, 9, 10];
+        let result = adjust_match_indices_for_name(
+            &indices,
+            "handler.rs",
+            std::path::Path::new("/project/src/app/handler.rs"),
+            &mode,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result, vec![0u32, 1, 2]);
+    }
+
+    #[rstest]
+    fn adjust_indices_path_mode_root_file() {
+        let mode = AppMode::Search(make_search_state(SearchMode::Path));
+        // path "Cargo.toml", root "/project", name "Cargo.toml"
+        // rel = "Cargo.toml" (10 chars), name = "Cargo.toml" (10 chars), offset = 0
+        let indices = vec![0, 1, 2];
+        let result = adjust_match_indices_for_name(
+            &indices,
+            "Cargo.toml",
+            std::path::Path::new("/project/Cargo.toml"),
+            &mode,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result, vec![0u32, 1, 2]);
+    }
+
+    #[rstest]
+    fn adjust_indices_normal_mode_returns_as_is() {
+        let mode = AppMode::Normal;
+        let indices = vec![0, 1, 2];
+        let result = adjust_match_indices_for_name(
+            &indices,
+            "foo",
+            std::path::Path::new("/project/src/foo"),
+            &mode,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result, vec![0u32, 1, 2]);
+    }
+
+    #[rstest]
+    fn adjust_indices_path_mode_strip_prefix_failure_returns_empty() {
+        let mode = AppMode::Search(make_search_state(SearchMode::Path));
+        // path does not start with root → strip_prefix fails → empty vec
+        let indices = vec![0, 1, 2];
+        let result = adjust_match_indices_for_name(
+            &indices,
+            "foo.rs",
+            std::path::Path::new("/other/src/foo.rs"),
+            &mode,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result, Vec::<u32>::new());
+    }
+
+    // --- push_highlighted_name ---
+
+    #[rstest]
+    fn highlighted_name_no_matches() {
+        let mut spans = Vec::new();
+        push_highlighted_name(&mut spans, "hello", None, &[], Style::default());
+        assert_that!(spans.len(), eq(1));
+        assert_that!(spans[0].content.as_ref(), eq("hello"));
+        // No underline modifier
+        assert!(!spans[0].style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[rstest]
+    fn highlighted_name_all_matched() {
+        let mut spans = Vec::new();
+        push_highlighted_name(&mut spans, "abc", None, &[0, 1, 2], Style::default());
+        // All characters highlighted → single span with UNDERLINED
+        assert_that!(spans.len(), eq(1));
+        assert_that!(spans[0].content.as_ref(), eq("abc"));
+        assert!(spans[0].style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[rstest]
+    fn highlighted_name_partial_match() {
+        let mut spans = Vec::new();
+        // "hello" with indices [1, 3]:
+        // h(normal), e(highlight), l(normal), l(highlight), o(normal)
+        push_highlighted_name(&mut spans, "hello", None, &[1, 3], Style::default());
+        assert_that!(spans.len(), eq(5));
+        assert_that!(spans[0].content.as_ref(), eq("h"));
+        assert!(!spans[0].style.add_modifier.contains(Modifier::UNDERLINED));
+        assert_that!(spans[1].content.as_ref(), eq("e"));
+        assert!(spans[1].style.add_modifier.contains(Modifier::UNDERLINED));
+        assert_that!(spans[2].content.as_ref(), eq("l"));
+        assert!(!spans[2].style.add_modifier.contains(Modifier::UNDERLINED));
+        assert_that!(spans[3].content.as_ref(), eq("l"));
+        assert!(spans[3].style.add_modifier.contains(Modifier::UNDERLINED));
+        assert_that!(spans[4].content.as_ref(), eq("o"));
+        assert!(!spans[4].style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[rstest]
+    fn highlighted_name_truncation() {
+        let mut spans = Vec::new();
+        // max_width=3 on "hello" → reserves 1 for "…", so 2 chars fit → "he" + "…"
+        push_highlighted_name(&mut spans, "hello", Some(3), &[], Style::default());
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_that!(text.as_str(), eq("he…"));
+    }
+
+    #[rstest]
+    fn highlighted_name_truncation_with_highlight() {
+        let mut spans = Vec::new();
+        // max_width=3, "hello" with indices [0, 1]
+        // Target width = 2, so "h"(highlighted) + "e"(highlighted) + "…"
+        push_highlighted_name(&mut spans, "hello", Some(3), &[0, 1], Style::default());
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_that!(text.as_str(), eq("he…"));
+        // "he" should be underlined, "…" should not
+        assert!(spans[0].style.add_modifier.contains(Modifier::UNDERLINED));
+        // Last span is the ellipsis
+        let last = &spans[spans.len() - 1];
+        assert_that!(last.content.as_ref(), eq("…"));
+        assert!(!last.style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[rstest]
+    fn highlighted_name_empty() {
+        let mut spans = Vec::new();
+        push_highlighted_name(&mut spans, "", None, &[], Style::default());
+        assert_that!(spans.len(), eq(0));
+    }
+
+    #[rstest]
+    fn highlighted_name_unicode_width_truncation() {
+        let mut spans = Vec::new();
+        // "日本語" each CJK char is 2 columns wide → total width 6
+        // max_width=4 → target_width=3, "日" takes 2 cols (fits), "本" takes 2 cols (2+2=4 > 3, doesn't fit)
+        // Result: "日" + "…"
+        push_highlighted_name(&mut spans, "日本語", Some(4), &[0], Style::default());
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_that!(text.as_str(), eq("日…"));
+        // "日" should be underlined (index 0 matched)
+        assert!(spans[0].style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[rstest]
+    fn highlighted_name_consecutive_matches_grouped() {
+        let mut spans = Vec::new();
+        // "abcde" with indices [1, 2, 3]:
+        // a(normal), b+c+d(highlighted), e(normal)
+        push_highlighted_name(&mut spans, "abcde", None, &[1, 2, 3], Style::default());
+        assert_that!(spans.len(), eq(3));
+        assert_that!(spans[0].content.as_ref(), eq("a"));
+        assert!(!spans[0].style.add_modifier.contains(Modifier::UNDERLINED));
+        assert_that!(spans[1].content.as_ref(), eq("bcd"));
+        assert!(spans[1].style.add_modifier.contains(Modifier::UNDERLINED));
+        assert_that!(spans[2].content.as_ref(), eq("e"));
+        assert!(!spans[2].style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[rstest]
+    fn highlighted_name_base_style_preserved() {
+        let mut spans = Vec::new();
+        let base = Style::default().fg(Color::Red);
+        push_highlighted_name(&mut spans, "ab", None, &[1], base);
+        // "a" should have base style (fg Red, no underline)
+        assert_that!(spans[0].style.fg, some(eq(Color::Red)));
+        assert!(!spans[0].style.add_modifier.contains(Modifier::UNDERLINED));
+        // "b" should have base style + underline
+        assert_that!(spans[1].style.fg, some(eq(Color::Red)));
+        assert!(spans[1].style.add_modifier.contains(Modifier::UNDERLINED));
+    }
 }

@@ -212,9 +212,7 @@
     "search": {
       "description": "Search settings.",
       "$ref": "#/$defs/SearchConfig",
-      "default": {
-        "max_results": 1000
-      }
+      "default": {}
     },
     "session": {
       "description": "Session persistence settings.",
@@ -893,6 +891,7 @@
               "type": "string",
               "enum": [
                 "quit",
+                "help",
                 "noop",
                 "tree.move_down",
                 "tree.move_up",
@@ -1282,16 +1281,7 @@
     },
     "SearchConfig": {
       "description": "Search configuration.",
-      "type": "object",
-      "properties": {
-        "max_results": {
-          "description": "Maximum number of search results to display.",
-          "type": "integer",
-          "format": "uint",
-          "default": 1000,
-          "minimum": 0
-        }
-      }
+      "type": "object"
     },
     "SessionConfig": {
       "description": "Session persistence configuration.",

@@ -384,3 +384,237 @@ fn help_hints() -> Vec<Span<'static>> {
     let pairs = [hint("j/k", "scroll"), hint(&format!("q/{esc}"), "close")];
     pairs.into_iter().flatten().collect()
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+mod tests {
+    use googletest::prelude::*;
+    use rstest::*;
+
+    use super::*;
+    use crate::config::KeybindingConfig;
+
+    /// Build an `ActionKeyLookup` with default keybindings for testing.
+    fn default_lookup() -> ActionKeyLookup {
+        use crate::app::keymap::KeyMap;
+        let keymap = KeyMap::from_config(&KeybindingConfig::default());
+        ActionKeyLookup::from_keymap(&keymap)
+    }
+
+    // =========================================================================
+    // --- push_filter_indicator ---
+    // =========================================================================
+
+    #[rstest]
+    fn push_filter_indicator_active_with_icons() {
+        let mut spans = Vec::new();
+        let width = push_filter_indicator(&mut spans, true, ".*", Color::Yellow, true);
+
+        assert_that!(spans.len(), eq(2));
+        // Icon span should contain the eye-open icon (U+F06D0).
+        let icon_content = spans[0].content.as_ref();
+        assert!(icon_content.contains('\u{f06d0}'), "expected eye-open icon, got: {icon_content}");
+        // Label span.
+        assert_that!(spans[1].content.as_ref(), eq(".*"));
+        // Active uses the provided color.
+        assert_that!(spans[0].style.fg, eq(Some(Color::Yellow)));
+        assert_that!(spans[1].style.fg, eq(Some(Color::Yellow)));
+        // Width should match the sum of both spans.
+        let expected_width = (spans[0].width() + spans[1].width()) as u16;
+        assert_that!(width, eq(expected_width));
+    }
+
+    #[rstest]
+    fn push_filter_indicator_inactive_with_icons() {
+        let mut spans = Vec::new();
+        let width = push_filter_indicator(&mut spans, false, ".*", Color::Yellow, true);
+
+        assert_that!(spans.len(), eq(2));
+        // Icon span should contain the eye-closed icon (U+F06D1).
+        let icon_content = spans[0].content.as_ref();
+        assert!(icon_content.contains('\u{f06d1}'), "expected eye-closed icon, got: {icon_content}");
+        // Inactive uses DarkGray.
+        assert_that!(spans[0].style.fg, eq(Some(Color::DarkGray)));
+        assert_that!(spans[1].style.fg, eq(Some(Color::DarkGray)));
+        let expected_width = (spans[0].width() + spans[1].width()) as u16;
+        assert_that!(width, eq(expected_width));
+    }
+
+    #[rstest]
+    fn push_filter_indicator_active_without_icons() {
+        let mut spans = Vec::new();
+        let width = push_filter_indicator(&mut spans, true, ".*", Color::Cyan, false);
+
+        assert_that!(spans.len(), eq(1));
+        assert_that!(spans[0].content.as_ref(), eq(" .*"));
+        assert_that!(spans[0].style.fg, eq(Some(Color::Cyan)));
+        let expected_width = spans[0].width() as u16;
+        assert_that!(width, eq(expected_width));
+    }
+
+    #[rstest]
+    fn push_filter_indicator_inactive_without_icons() {
+        let mut spans = Vec::new();
+        let width = push_filter_indicator(&mut spans, false, ".git", Color::Cyan, false);
+
+        assert_that!(spans.len(), eq(1));
+        assert_that!(spans[0].content.as_ref(), eq(" .git"));
+        assert_that!(spans[0].style.fg, eq(Some(Color::DarkGray)));
+        let expected_width = spans[0].width() as u16;
+        assert_that!(width, eq(expected_width));
+    }
+
+    #[rstest]
+    fn push_filter_indicator_width_is_positive() {
+        let mut spans = Vec::new();
+        let width = push_filter_indicator(&mut spans, true, ".*", Color::Yellow, true);
+        assert!(width > 0, "width should be positive, got: {width}");
+
+        let mut spans2 = Vec::new();
+        let width2 = push_filter_indicator(&mut spans2, false, ".git", Color::Cyan, false);
+        assert!(width2 > 0, "width should be positive, got: {width2}");
+    }
+
+    // =========================================================================
+    // --- hint ---
+    // =========================================================================
+
+    #[rstest]
+    fn hint_returns_key_in_yellow_and_desc_in_gray() {
+        let [key_span, desc_span] = hint("q", "quit");
+
+        assert_that!(key_span.content.as_ref(), eq(" q"));
+        assert_that!(key_span.style.fg, eq(Some(Color::Yellow)));
+
+        assert_that!(desc_span.content.as_ref(), eq(":quit"));
+        assert_that!(desc_span.style.fg, eq(Some(Color::Gray)));
+    }
+
+    #[rstest]
+    fn hint_with_complex_key() {
+        let [key_span, desc_span] = hint("<C-a>", "select all");
+
+        assert_that!(key_span.content.as_ref(), eq(" <C-a>"));
+        assert_that!(desc_span.content.as_ref(), eq(":select all"));
+    }
+
+    // =========================================================================
+    // --- input_hints ---
+    // =========================================================================
+
+    #[rstest]
+    fn input_hints_is_non_empty() {
+        let spans = input_hints();
+        assert!(!spans.is_empty(), "input_hints should return non-empty spans");
+    }
+
+    #[rstest]
+    fn input_hints_contains_enter_and_esc() {
+        let spans = input_hints();
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("Enter"), "expected Enter in input_hints, got: {text}");
+        assert!(text.contains("Esc"), "expected Esc in input_hints, got: {text}");
+    }
+
+    #[rstest]
+    fn input_hints_contains_confirm_and_cancel() {
+        let spans = input_hints();
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("confirm"), "expected 'confirm' in input_hints, got: {text}");
+        assert!(text.contains("cancel"), "expected 'cancel' in input_hints, got: {text}");
+    }
+
+    // =========================================================================
+    // --- confirm_hints ---
+    // =========================================================================
+
+    #[rstest]
+    fn confirm_hints_is_non_empty() {
+        let spans = confirm_hints();
+        assert!(!spans.is_empty(), "confirm_hints should return non-empty spans");
+    }
+
+    #[rstest]
+    fn confirm_hints_contains_y_and_n() {
+        let spans = confirm_hints();
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains('y'), "expected 'y' in confirm_hints, got: {text}");
+        assert!(text.contains('n'), "expected 'n' in confirm_hints, got: {text}");
+    }
+
+    #[rstest]
+    fn confirm_hints_contains_confirm_and_cancel() {
+        let spans = confirm_hints();
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("confirm"), "expected 'confirm' in confirm_hints, got: {text}");
+        assert!(text.contains("cancel"), "expected 'cancel' in confirm_hints, got: {text}");
+    }
+
+    // =========================================================================
+    // --- menu_hints ---
+    // =========================================================================
+
+    #[rstest]
+    fn menu_hints_is_non_empty() {
+        let spans = menu_hints();
+        assert!(!spans.is_empty(), "menu_hints should return non-empty spans");
+    }
+
+    #[rstest]
+    fn menu_hints_contains_navigate_select_cancel() {
+        let spans = menu_hints();
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("j/k"), "expected 'j/k' in menu_hints, got: {text}");
+        assert!(text.contains("navigate"), "expected 'navigate' in menu_hints, got: {text}");
+        assert!(text.contains("select"), "expected 'select' in menu_hints, got: {text}");
+        assert!(text.contains("cancel"), "expected 'cancel' in menu_hints, got: {text}");
+    }
+
+    // =========================================================================
+    // --- help_hints ---
+    // =========================================================================
+
+    #[rstest]
+    fn help_hints_is_non_empty() {
+        let spans = help_hints();
+        assert!(!spans.is_empty(), "help_hints should return non-empty spans");
+    }
+
+    #[rstest]
+    fn help_hints_contains_scroll_and_close() {
+        let spans = help_hints();
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("j/k"), "expected 'j/k' in help_hints, got: {text}");
+        assert!(text.contains("scroll"), "expected 'scroll' in help_hints, got: {text}");
+        assert!(text.contains("close"), "expected 'close' in help_hints, got: {text}");
+        assert!(text.contains('q'), "expected 'q' in help_hints, got: {text}");
+    }
+
+    // =========================================================================
+    // --- filtered_hints ---
+    // =========================================================================
+
+    #[rstest]
+    fn filtered_hints_contains_query_string() {
+        let lookup = default_lookup();
+        let spans = filtered_hints("hello", &lookup);
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("/hello"), "expected query '/hello' in filtered_hints, got: {text}");
+    }
+
+    #[rstest]
+    fn filtered_hints_contains_esc() {
+        let lookup = default_lookup();
+        let spans = filtered_hints("test", &lookup);
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("Esc"), "expected 'Esc' in filtered_hints, got: {text}");
+    }
+
+    #[rstest]
+    fn filtered_hints_contains_clear() {
+        let lookup = default_lookup();
+        let spans = filtered_hints("test", &lookup);
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("clear"), "expected 'clear' in filtered_hints, got: {text}");
+    }
+}
