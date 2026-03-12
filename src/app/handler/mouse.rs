@@ -5,7 +5,7 @@ use crossterm::event::{
     MouseEvent,
     MouseEventKind,
 };
-use ratatui::layout::Rect;
+use ratatui::layout::Position;
 
 use crate::app::state::{
     AppContext,
@@ -18,24 +18,26 @@ use crate::input::AppMode;
 /// Mouse events are only processed in Normal mode. Scroll wheel events
 /// are dispatched to the tree or preview panel based on the cursor position.
 /// Left-click in the tree area moves the cursor to the clicked row.
-pub fn handle_mouse_event(event: MouseEvent, state: &mut AppState, _ctx: &AppContext) {
+/// Left-click on filter indicators toggles hidden/ignored file visibility.
+pub fn handle_mouse_event(event: MouseEvent, state: &mut AppState, ctx: &AppContext) {
     // Only handle mouse in Normal mode.
     if !matches!(state.mode, AppMode::Normal) {
         return;
     }
 
-    let col = event.column;
-    let row = event.row;
+    let pos = Position::new(event.column, event.row);
 
     match event.kind {
         MouseEventKind::ScrollDown => {
-            handle_scroll(state, col, row, ScrollDirection::Down);
+            handle_scroll(state, pos, ScrollDirection::Down);
         }
         MouseEventKind::ScrollUp => {
-            handle_scroll(state, col, row, ScrollDirection::Up);
+            handle_scroll(state, pos, ScrollDirection::Up);
         }
         MouseEventKind::Down(MouseButton::Left) => {
-            handle_left_click(state, col, row);
+            if !handle_filter_click(state, ctx, pos) {
+                handle_left_click(state, pos);
+            }
         }
         _ => {}
     }
@@ -51,12 +53,12 @@ enum ScrollDirection {
 }
 
 /// Handle scroll wheel: dispatches to tree or preview based on mouse position.
-fn handle_scroll(state: &mut AppState, col: u16, row: u16, direction: ScrollDirection) {
+fn handle_scroll(state: &mut AppState, pos: Position, direction: ScrollDirection) {
     let areas = state.layout_areas;
 
-    if rect_contains(areas.tree_area, col, row) {
+    if areas.tree_area.contains(pos) {
         handle_tree_scroll(state, direction);
-    } else if rect_contains(areas.preview_area, col, row) {
+    } else if areas.preview_area.contains(pos) {
         handle_preview_scroll(state, direction);
     }
 }
@@ -86,16 +88,35 @@ fn handle_preview_scroll(state: &mut AppState, direction: ScrollDirection) {
     }
 }
 
-/// Handle a left-click in the tree area: move cursor to the clicked row.
-fn handle_left_click(state: &mut AppState, col: u16, row: u16) {
+/// Handle a left-click on filter indicators in the status bar.
+///
+/// Returns `true` if the click was consumed (hit a filter area).
+fn handle_filter_click(state: &mut AppState, ctx: &AppContext, pos: Position) -> bool {
+    use crate::action::FilterAction;
+
     let areas = state.layout_areas;
 
-    if !rect_contains(areas.tree_area, col, row) {
+    if areas.filter_hidden_area.contains(pos) {
+        super::handle_filter_action(FilterAction::Hidden, state, ctx);
+        return true;
+    }
+    if areas.filter_ignored_area.contains(pos) {
+        super::handle_filter_action(FilterAction::Ignored, state, ctx);
+        return true;
+    }
+    false
+}
+
+/// Handle a left-click in the tree area: move cursor to the clicked row.
+fn handle_left_click(state: &mut AppState, pos: Position) {
+    let areas = state.layout_areas;
+
+    if !areas.tree_area.contains(pos) {
         return;
     }
 
     // Calculate which row within the tree area was clicked.
-    let row_in_area = (row.saturating_sub(areas.tree_area.y)) as usize;
+    let row_in_area = (pos.y.saturating_sub(areas.tree_area.y)) as usize;
     let target_index = state.scroll.offset().saturating_add(row_in_area);
 
     // Only move cursor if the target index is within valid bounds.
@@ -105,52 +126,46 @@ fn handle_left_click(state: &mut AppState, col: u16, row: u16) {
     }
 }
 
-/// Check whether a point (col, row) is within a `Rect`.
-const fn rect_contains(rect: Rect, col: u16, row: u16) -> bool {
-    col >= rect.x
-        && col < rect.x.saturating_add(rect.width)
-        && row >= rect.y
-        && row < rect.y.saturating_add(rect.height)
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use googletest::prelude::*;
-    use ratatui::layout::Rect;
+    use ratatui::layout::{
+        Position,
+        Rect,
+    };
     use rstest::*;
 
-    use super::*;
-
+    /// Verify that `Rect::contains` behaves as expected for hit-testing.
     #[rstest]
     fn rect_contains_inside() {
         let rect = Rect::new(10, 5, 20, 10);
-        assert_that!(rect_contains(rect, 15, 8), eq(true));
+        assert_that!(rect.contains(Position::new(15, 8)), eq(true));
     }
 
     #[rstest]
     fn rect_contains_top_left_corner() {
         let rect = Rect::new(10, 5, 20, 10);
-        assert_that!(rect_contains(rect, 10, 5), eq(true));
+        assert_that!(rect.contains(Position::new(10, 5)), eq(true));
     }
 
     #[rstest]
     fn rect_contains_bottom_right_exclusive() {
         let rect = Rect::new(10, 5, 20, 10);
         // Right edge (x=30) and bottom edge (y=15) are exclusive.
-        assert_that!(rect_contains(rect, 30, 14), eq(false));
-        assert_that!(rect_contains(rect, 29, 15), eq(false));
+        assert_that!(rect.contains(Position::new(30, 14)), eq(false));
+        assert_that!(rect.contains(Position::new(29, 15)), eq(false));
     }
 
     #[rstest]
     fn rect_contains_outside() {
         let rect = Rect::new(10, 5, 20, 10);
-        assert_that!(rect_contains(rect, 5, 3), eq(false));
+        assert_that!(rect.contains(Position::new(5, 3)), eq(false));
     }
 
     #[rstest]
     fn rect_contains_zero_size() {
         let rect = Rect::new(10, 5, 0, 0);
-        assert_that!(rect_contains(rect, 10, 5), eq(false));
+        assert_that!(rect.contains(Position::new(10, 5)), eq(false));
     }
 }
