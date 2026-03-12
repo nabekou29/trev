@@ -29,6 +29,8 @@ pub enum Action {
     Notify(String),
     /// Open a user-defined menu by name.
     OpenMenu(String),
+    /// Show the keybinding help overlay.
+    ShowHelp,
     /// No operation (used to unbind a default key).
     Noop,
 }
@@ -312,6 +314,7 @@ impl fmt::Display for Action {
             Self::FileOp(a) => a.fmt(f),
             Self::Search(a) => a.fmt(f),
             Self::Quit => f.write_str("quit"),
+            Self::ShowHelp => f.write_str("help"),
             Self::Shell { cmd, .. } => write!(f, "shell:{cmd}"),
             Self::Notify(method) => write!(f, "notify:{method}"),
             Self::OpenMenu(name) => write!(f, "menu:{name}"),
@@ -463,6 +466,7 @@ impl FromStr for Action {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "quit" => Ok(Self::Quit),
+            "help" => Ok(Self::ShowHelp),
             "noop" => Ok(Self::Noop),
             _ if s.starts_with("tree.") => s.parse::<TreeAction>().map(Self::Tree),
             _ if s.starts_with("filter.") => s.parse::<FilterAction>().map(Self::Filter),
@@ -601,13 +605,145 @@ impl FileOpAction {
 impl Action {
     /// Returns all valid action name strings for JSON Schema generation.
     pub fn all_action_names() -> Vec<&'static str> {
-        let mut names = vec!["quit", "noop"];
+        let mut names = vec!["quit", "help", "noop"];
         names.extend(TreeAction::action_names());
         names.extend(FilterAction::action_names());
         names.extend(PreviewAction::action_names());
         names.extend(FileOpAction::action_names());
         names.extend(SearchAction::action_names());
         names
+    }
+
+    /// Human-readable description of this action for the help overlay.
+    pub const fn description(&self) -> &'static str {
+        match self {
+            Self::Quit => "Quit",
+            Self::ShowHelp => "Show help",
+            Self::Noop => "No operation",
+            Self::Shell { .. } => "Run shell command",
+            Self::Notify(_) => "Send IPC notification",
+            Self::OpenMenu(_) => "Open menu",
+            Self::Tree(a) => a.description(),
+            Self::Filter(a) => a.description(),
+            Self::Preview(a) => a.description(),
+            Self::FileOp(a) => a.description(),
+            Self::Search(a) => a.description(),
+        }
+    }
+}
+
+impl TreeAction {
+    /// Human-readable description of this action for the help overlay.
+    pub const fn description(&self) -> &'static str {
+        match self {
+            Self::MoveDown => "Move down",
+            Self::MoveUp => "Move up",
+            Self::Expand => "Expand / Open",
+            Self::Collapse => "Collapse / Parent",
+            Self::ToggleExpand => "Toggle expand",
+            Self::JumpFirst => "Jump to first",
+            Self::JumpLast => "Jump to last",
+            Self::HalfPageDown => "Half page down",
+            Self::HalfPageUp => "Half page up",
+            Self::ExpandAll => "Expand all",
+            Self::CollapseAll => "Collapse all",
+            Self::Refresh => "Refresh tree",
+            Self::ChangeRoot => "Change root to selected",
+            Self::ChangeRootUp => "Change root to parent",
+            Self::CenterCursor => "Center cursor in view",
+            Self::ScrollCursorToTop => "Scroll cursor to top",
+            Self::ScrollCursorToBottom => "Scroll cursor to bottom",
+            Self::Sort(a) => a.description(),
+        }
+    }
+}
+
+impl SortAction {
+    /// Human-readable description of this action for the help overlay.
+    pub const fn description(&self) -> &'static str {
+        match self {
+            Self::Menu => "Open sort menu",
+            Self::ToggleDirection => "Toggle sort direction",
+            Self::ByName => "Sort by name",
+            Self::BySize => "Sort by size",
+            Self::ByMtime => "Sort by modified time",
+            Self::ByType => "Sort by type",
+            Self::ByExtension => "Sort by extension",
+            Self::BySmart => "Sort by natural order",
+            Self::ToggleDirectoriesFirst => "Toggle directories first",
+        }
+    }
+}
+
+impl FilterAction {
+    /// Human-readable description of this action for the help overlay.
+    pub const fn description(&self) -> &'static str {
+        match self {
+            Self::Hidden => "Toggle hidden files",
+            Self::Ignored => "Toggle ignored files",
+        }
+    }
+}
+
+impl SearchAction {
+    /// Human-readable description of this action for the help overlay.
+    pub const fn description(&self) -> &'static str {
+        match self {
+            Self::Open => "Open search",
+        }
+    }
+}
+
+impl PreviewAction {
+    /// Human-readable description of this action for the help overlay.
+    pub const fn description(&self) -> &'static str {
+        match self {
+            Self::ScrollDown => "Scroll down",
+            Self::ScrollUp => "Scroll up",
+            Self::ScrollRight => "Scroll right",
+            Self::ScrollLeft => "Scroll left",
+            Self::HalfPageDown => "Half page down",
+            Self::HalfPageUp => "Half page up",
+            Self::CycleNextProvider => "Next provider",
+            Self::CyclePrevProvider => "Previous provider",
+            Self::TogglePreview => "Toggle preview",
+            Self::ToggleWrap => "Toggle word wrap",
+        }
+    }
+}
+
+impl FileOpAction {
+    /// Human-readable description of this action for the help overlay.
+    pub const fn description(&self) -> &'static str {
+        match self {
+            Self::Yank => "Copy (yank) files",
+            Self::Cut => "Cut files",
+            Self::Paste => "Paste files",
+            Self::CreateFile => "Create file",
+            Self::CreateDirectory => "Create directory",
+            Self::Rename => "Rename",
+            Self::Delete => "Delete",
+            Self::SystemTrash => "Move to trash",
+            Self::Undo => "Undo",
+            Self::Redo => "Redo",
+            Self::ToggleMark => "Toggle mark",
+            Self::ClearSelections => "Clear selections",
+            Self::Copy(a) => a.description(),
+        }
+    }
+}
+
+impl CopyAction {
+    /// Human-readable description of this action for the help overlay.
+    pub const fn description(&self) -> &'static str {
+        match self {
+            Self::Menu => "Open copy menu",
+            Self::AbsolutePath => "Copy absolute path",
+            Self::RelativePath => "Copy relative path",
+            Self::FileName => "Copy file name",
+            Self::Stem => "Copy name without extension",
+            Self::ParentDir => "Copy parent directory",
+        }
     }
 }
 
