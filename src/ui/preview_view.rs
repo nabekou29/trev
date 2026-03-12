@@ -112,7 +112,15 @@ pub fn render_preview(
 
 /// Build the title line for the preview block.
 fn build_title(state: &PreviewState) -> Line<'static> {
-    let mut spans = vec![Span::raw(" Preview")];
+    let file_name = state
+        .current_path
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map_or_else(|| "Preview".to_string(), |n| n.to_string_lossy().into_owned());
+    let mut spans = vec![Span::styled(
+        format!(" {file_name} "),
+        Style::default().add_modifier(Modifier::BOLD),
+    )];
 
     if let Some(provider_name) = state.active_provider_name() {
         spans.push(Span::styled(format!(" [{provider_name}]"), Style::default().fg(Color::Cyan)));
