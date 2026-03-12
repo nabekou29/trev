@@ -488,6 +488,57 @@ impl SearchState {
     }
 }
 
+/// A single keybinding entry for the help overlay.
+#[derive(Debug, Clone)]
+pub struct HelpBinding {
+    /// Human-readable key display (e.g. "j", "C-d", "zz"). Empty for unbound actions.
+    pub key_display: String,
+    /// Raw action name used for grouping (e.g. `tree.move_down`).
+    pub action_name: String,
+    /// Human-readable description (e.g. "Move down").
+    pub description: String,
+    /// The resolved action for execution on Enter.
+    pub action: crate::action::Action,
+    /// Whether a keybinding is assigned to this action.
+    pub has_keybinding: bool,
+}
+
+/// State for the keybinding help overlay.
+#[derive(Debug, Clone)]
+pub struct HelpState {
+    /// Scroll offset within the binding list.
+    pub scroll_offset: usize,
+    /// Cursor index into the filtered binding list.
+    pub cursor: usize,
+    /// Pre-collected keybinding entries (all actions, bound and unbound).
+    pub bindings: Vec<HelpBinding>,
+    /// Text buffer for filtering bindings by key or description.
+    pub filter: TextBuffer,
+    /// Whether the filter input is currently active.
+    pub filtering: bool,
+}
+
+impl HelpState {
+    /// Return references to bindings that match the current filter.
+    ///
+    /// When the filter is empty, all bindings are returned.
+    /// Matching is case-insensitive against key display, description, and action name.
+    pub fn filtered_bindings(&self) -> Vec<&HelpBinding> {
+        if self.filter.value.is_empty() {
+            return self.bindings.iter().collect();
+        }
+        let query = self.filter.value.to_ascii_lowercase();
+        self.bindings
+            .iter()
+            .filter(|b| {
+                b.key_display.to_ascii_lowercase().contains(&query)
+                    || b.description.to_ascii_lowercase().contains(&query)
+                    || b.action_name.to_ascii_lowercase().contains(&query)
+            })
+            .collect()
+    }
+}
+
 /// Application mode state machine.
 #[derive(Debug, Clone, Default)]
 pub enum AppMode {
@@ -502,6 +553,8 @@ pub enum AppMode {
     Menu(MenuState),
     /// Search mode (typing or filtered).
     Search(SearchState),
+    /// Keybinding help overlay.
+    Help(HelpState),
 }
 
 #[cfg(test)]

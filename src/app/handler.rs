@@ -47,6 +47,7 @@ pub fn handle_key_event(key: crossterm::event::KeyEvent, state: &mut AppState, c
         AppMode::Menu(_) => "menu",
         AppMode::Normal => "normal",
         AppMode::Search(_) => "search",
+        AppMode::Help(_) => "help",
     };
     let _span = tracing::info_span!("handle_key_event", mode = mode_name).entered();
 
@@ -66,6 +67,9 @@ pub fn handle_key_event(key: crossterm::event::KeyEvent, state: &mut AppState, c
         }
         AppMode::Search(_) => {
             search::handle_search_mode_key(key, state, ctx);
+        }
+        AppMode::Help(_) => {
+            handle_help_mode_key(key, state, ctx);
         }
     }
 }
@@ -187,12 +191,182 @@ fn dispatch_action(action: &Action, state: &mut AppState, ctx: &AppContext) {
                 search::open_search(state);
             }
         },
+        Action::ShowHelp => {
+            open_help(state, ctx);
+        }
         Action::Noop => {}
     }
 }
 
+/// Open the keybinding help overlay.
+///
+/// Collects all actions (bound and unbound) and stores them in `HelpState`.
+/// Bound actions include their key display; unbound actions show no key.
+fn open_help(state: &mut AppState, ctx: &AppContext) {
+    use crate::input::{
+        HelpBinding,
+        HelpState,
+        TextBuffer,
+    };
+
+    let lookup = &ctx.action_key_lookup;
+
+    // Build bindings for ALL static actions using the cached key lookup.
+    let mut bindings: Vec<HelpBinding> = Action::all_action_names()
+        .into_iter()
+        .filter(|name| !matches!(*name, "noop" | "help"))
+        .filter_map(|name| {
+            let action = name.parse::<Action>().ok()?;
+            let (key_display, has_keybinding) = lookup
+                .key_for(name)
+                .map_or_else(|| (String::new(), false), |k| (k.to_string(), true));
+            Some(HelpBinding {
+                key_display,
+                action_name: name.to_string(),
+                description: action.description().to_string(),
+                action,
+                has_keybinding,
+            })
+        })
+        .collect();
+    bindings.sort_by(|a, b| {
+        help_group_sort_key(&a.action_name)
+            .cmp(&help_group_sort_key(&b.action_name))
+            .then_with(|| a.action_name.cmp(&b.action_name))
+    });
+
+    state.mode = AppMode::Help(HelpState {
+        scroll_offset: 0,
+        cursor: 0,
+        bindings,
+        filter: TextBuffer::new(),
+        filtering: false,
+    });
+    state.dirty = true;
+}
+
+/// Compute a sort key matching the help view's group display order.
+fn help_group_sort_key(action_name: &str) -> usize {
+    use crate::ui::help_view::GROUPS;
+
+    GROUPS
+        .iter()
+        .position(|g| action_name.starts_with(g.prefix))
+        .unwrap_or(GROUPS.len())
+}
+
+/// Handle a key event in Help mode.
+///
+/// When the filter input is active, keys go to the text buffer.
+/// Otherwise, vim-style navigation keys move the cursor, and Enter
+/// executes the selected action.
+fn handle_help_mode_key(
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+    ctx: &AppContext,
+) {
+    use crossterm::event::{
+        KeyCode,
+        KeyModifiers,
+    };
+
+    // Execute selected action on Enter (non-filter mode).
+    // Handled before borrowing state.mode to avoid borrow conflict
+    // with execute_help_action which needs &mut AppState.
+    if matches!(&state.mode, AppMode::Help(h) if !h.filtering)
+        && key.code == KeyCode::Enter
+    {
+        execute_help_action(state, ctx);
+        return;
+    }
+
+    let AppMode::Help(ref mut help) = state.mode else {
+        return;
+    };
+
+    // --- Filter input mode ---
+    if help.filtering {
+        match key.code {
+            KeyCode::Esc => {
+                help.filter.set_value("");
+                help.filtering = false;
+            }
+            KeyCode::Enter => {
+                help.filtering = false;
+            }
+            _ => {
+                help.filter.handle_key_event(key);
+            }
+        }
+        help.cursor = 0;
+        help.scroll_offset = 0;
+        state.dirty = true;
+        return;
+    }
+
+    let filtered_count = help.filtered_bindings().len();
+    let max_cursor = filtered_count.saturating_sub(1);
+
+    // --- Normal cursor mode ---
+    let changed = match (key.code, key.modifiers) {
+        (KeyCode::Esc | KeyCode::Char('q' | '?'), _) => {
+            state.mode = AppMode::Normal;
+            true
+        }
+        (KeyCode::Char('/'), KeyModifiers::NONE) => {
+            help.filtering = true;
+            true
+        }
+        (KeyCode::Char('j') | KeyCode::Down, _) => {
+            help.cursor = help.cursor.saturating_add(1).min(max_cursor);
+            true
+        }
+        (KeyCode::Char('k') | KeyCode::Up, _) => {
+            help.cursor = help.cursor.saturating_sub(1);
+            true
+        }
+        (KeyCode::Char('g'), KeyModifiers::NONE) => {
+            help.cursor = 0;
+            true
+        }
+        (KeyCode::Char('G'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+            help.cursor = max_cursor;
+            true
+        }
+        (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+            help.cursor = help.cursor.saturating_add(10).min(max_cursor);
+            true
+        }
+        (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+            help.cursor = help.cursor.saturating_sub(10);
+            true
+        }
+        _ => false,
+    };
+    if changed {
+        state.dirty = true;
+    }
+}
+
+/// Execute the action at the current cursor position in the help view.
+fn execute_help_action(state: &mut AppState, ctx: &AppContext) {
+    let AppMode::Help(ref help) = state.mode else {
+        return;
+    };
+    let filtered = help.filtered_bindings();
+    let Some(binding) = filtered.get(help.cursor) else {
+        return;
+    };
+    let action = binding.action.clone();
+
+    // Close help first, then dispatch.
+    state.mode = AppMode::Normal;
+    state.dirty = true;
+    dispatch_action(&action, state, ctx);
+}
+
 /// Handle a filter action (toggle hidden/ignored visibility).
-fn handle_filter_action(
+pub(super) fn handle_filter_action(
     action: crate::action::FilterAction,
     state: &mut AppState,
     ctx: &AppContext,

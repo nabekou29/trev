@@ -15,7 +15,10 @@ use std::time::{
 
 use ratatui::layout::Rect;
 
-use super::keymap::KeyMap;
+use super::keymap::{
+    ActionKeyLookup,
+    KeyMap,
+};
 use super::pending_keys::PendingKeys;
 use crate::config::{
     FileOpConfig,
@@ -142,6 +145,10 @@ pub struct LayoutAreas {
     pub tree_area: Rect,
     /// The preview area (zero-sized when preview is off).
     pub preview_area: Rect,
+    /// The hidden-filter indicator area in the status bar (for click toggle).
+    pub filter_hidden_area: Rect,
+    /// The ignored-filter indicator area in the status bar (for click toggle).
+    pub filter_ignored_area: Rect,
 }
 
 impl AppState {
@@ -353,6 +360,8 @@ pub struct AppContext {
     pub file_op_config: FileOpConfig,
     /// Key-to-action mapping.
     pub keymap: KeyMap,
+    /// Cached action-to-key-display lookup (built once from keymap).
+    pub action_key_lookup: ActionKeyLookup,
     /// Shared suppression flag for file system watcher.
     pub suppressed: Arc<AtomicBool>,
     /// IPC server handle (None if not in daemon mode).

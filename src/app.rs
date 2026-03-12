@@ -1,10 +1,10 @@
 //! Application state machine and main event loop.
 
 mod handler;
-mod key_parse;
+pub(crate) mod key_parse;
 mod key_trie;
-mod keymap;
-mod pending_keys;
+pub mod keymap;
+pub(crate) mod pending_keys;
 mod state;
 
 use std::collections::HashSet;
@@ -333,12 +333,15 @@ fn build_context_and_channels(
     let (stat_tx, stat_rx) = tokio::sync::mpsc::channel::<StatLoadResult>(16);
     let (search_index_ready_tx, search_index_ready_rx) = tokio::sync::mpsc::channel::<()>(2);
 
+    let keymap = KeyMap::from_config(&config.keybindings);
+    let action_key_lookup = keymap::ActionKeyLookup::from_keymap(&keymap);
     let ctx = AppContext {
         children_tx,
         preview_tx,
         preview_config: config.preview.clone(),
         file_op_config: config.file_op,
-        keymap: KeyMap::from_config(&config.keybindings),
+        keymap,
+        action_key_lookup,
         suppressed,
         ipc_server,
         git_tx,
@@ -758,7 +761,7 @@ pub async fn run(args: &Args) -> Result<()> {
 
     // Initial draw before entering the event loop.
     terminal.draw(|frame| {
-        crate::ui::render(frame, &mut state);
+        crate::ui::render(frame, &mut state, &ctx.action_key_lookup);
     })?;
     state.dirty = false;
 
@@ -859,7 +862,7 @@ pub async fn run(args: &Args) -> Result<()> {
             }
             let _span = tracing::info_span!("draw").entered();
             terminal.draw(|frame| {
-                crate::ui::render(frame, &mut state);
+                crate::ui::render(frame, &mut state, &ctx.action_key_lookup);
             })?;
             state.dirty = false;
         } else {

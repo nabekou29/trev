@@ -2,6 +2,7 @@
 
 pub mod column;
 pub mod file_style;
+pub mod help_view;
 pub mod inline_input;
 pub mod modal;
 pub mod preview_view;
@@ -14,13 +15,13 @@ use ratatui::layout::{
     Constraint,
     Direction,
     Layout,
-    Rect,
 };
 
 use crate::app::{
     AppState,
     LayoutAreas,
 };
+use crate::app::keymap::ActionKeyLookup;
 use crate::input::AppMode;
 
 /// Render the entire UI.
@@ -31,7 +32,7 @@ use crate::input::AppMode;
 /// - Wide (> threshold): horizontal split — tree | preview
 /// - Narrow (<= threshold): vertical split — tree / preview
 /// - Preview off: tree only (full area)
-pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
+pub fn render(frame: &mut Frame<'_>, state: &mut AppState, key_lookup: &ActionKeyLookup) {
     let chunks = Layout::vertical([
         Constraint::Min(1),    // main content
         Constraint::Length(1), // status bar
@@ -71,7 +72,7 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         };
 
         state.viewport_height = tree_area.height as usize;
-        state.layout_areas = LayoutAreas { tree_area, preview_area };
+        state.layout_areas = LayoutAreas { tree_area, preview_area, ..LayoutAreas::default() };
 
         {
             let _span = tracing::info_span!("render_tree", visible_count).entered();
@@ -84,21 +85,27 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     } else {
         // Full width tree when preview is disabled.
         state.viewport_height = main_area.height as usize;
-        state.layout_areas = LayoutAreas { tree_area: main_area, preview_area: Rect::default() };
+        state.layout_areas = LayoutAreas { tree_area: main_area, ..LayoutAreas::default() };
 
         let _span = tracing::info_span!("render_tree", visible_count).entered();
         tree_view::render_tree(frame, main_area, state, visible_count);
     }
 
-    status_bar::render_status(frame, status_area, state, visible_count);
+    let filter_areas =
+        status_bar::render_status(frame, status_area, state, visible_count, key_lookup);
+    state.layout_areas.filter_hidden_area = filter_areas.hidden;
+    state.layout_areas.filter_ignored_area = filter_areas.ignored;
 
     // Render modal overlays on top of everything.
-    match &state.mode {
+    match &mut state.mode {
         AppMode::Confirm(confirm) => {
             modal::render_confirm_dialog(frame, frame.area(), confirm);
         }
         AppMode::Menu(menu) => {
             modal::render_menu(frame, frame.area(), menu);
+        }
+        AppMode::Help(help) => {
+            help_view::render_help(frame, frame.area(), help);
         }
         AppMode::Normal | AppMode::Input(_) | AppMode::Search(_) => {}
     }

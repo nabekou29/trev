@@ -12,6 +12,8 @@ use crossterm::event::{
     KeyModifiers,
 };
 
+use std::collections::HashMap;
+
 use crate::action::{
     Action,
     CopyAction,
@@ -78,6 +80,15 @@ impl KeyMap {
             TrieLookup::Resolved(action) | TrieLookup::PendingWithFallback(action) => Some(action),
             TrieLookup::Pending | TrieLookup::NoMatch => None,
         }
+    }
+
+    /// Collect all registered bindings from the trie.
+    ///
+    /// Returns `(key_sequence, context_set, action)` tuples for building help views.
+    pub fn collect_bindings(
+        &self,
+    ) -> Vec<(Vec<KeyBinding>, BTreeSet<KeyContext>, Action)> {
+        self.trie.collect_bindings()
     }
 
     /// Look up a key sequence in the trie.
@@ -335,6 +346,7 @@ impl KeyMap {
             &[],
             Action::Tree(TreeAction::Sort(SortAction::ToggleDirection)),
         );
+        self.bind(KeyCode::Char('?'), KeyModifiers::NONE, &[], Action::ShowHelp);
     }
 
     /// Default file operation bindings.
@@ -455,6 +467,106 @@ fn resolve_entry_action(entry: &KeyBindingEntry) -> Result<Action, String> {
 
     // Unreachable due to set_count check above.
     Err(format!("keybinding '{}': invalid state", entry.key))
+}
+
+/// Action-to-key-display lookup table for rendering key hints.
+///
+/// Maps action name strings (e.g. `"tree.move_down"`) to human-readable key
+/// display strings (e.g. `"j"`). Only universal (context-free) bindings are
+/// included; context-specific overrides are excluded so the hints remain
+/// universally accurate.
+///
+/// When multiple bindings map to the same action, the "best" binding is chosen
+/// by [`binding_score`]: shorter sequences, no modifiers, and plain alphabet
+/// keys are preferred.
+#[derive(Debug)]
+pub struct ActionKeyLookup {
+    /// Action name → key display string.
+    map: HashMap<String, String>,
+}
+
+/// Compute a sort score for a key binding sequence (lower = better).
+///
+/// Priority (most important first):
+/// 1. Shorter sequences preferred (single key > multi-key)
+/// 2. No modifiers preferred (plain key > Shift > Ctrl/Alt)
+/// 3. Alphabet chars preferred > other chars > special keys
+#[expect(clippy::cast_possible_truncation, reason = "Key sequences are always short (<10 keys)")]
+fn binding_score(seq: &[KeyBinding]) -> u32 {
+    let len_score = seq.len() as u32 * 1000;
+
+    let key_score: u32 = seq
+        .iter()
+        .map(|(code, mods)| {
+            let mod_score = if *mods == KeyModifiers::NONE {
+                0
+            } else if *mods == KeyModifiers::SHIFT {
+                100
+            } else {
+                200
+            };
+            let kind_score = match code {
+                KeyCode::Char(c) if c.is_ascii_lowercase() => 0,
+                KeyCode::Char(c) if c.is_ascii_uppercase() => 10,
+                KeyCode::Char(c) if c.is_ascii_alphanumeric() => 20,
+                KeyCode::Char(_) => 30,
+                KeyCode::Enter => 40,
+                KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => 50,
+                _ => 60,
+            };
+            mod_score + kind_score
+        })
+        .sum();
+
+    len_score + key_score
+}
+
+impl ActionKeyLookup {
+    /// Build the lookup from a keymap by collecting universal bindings.
+    ///
+    /// For each action, the binding with the lowest [`binding_score`] wins.
+    pub fn from_keymap(keymap: &KeyMap) -> Self {
+        use crate::app::pending_keys::format_key_binding;
+
+        let raw = keymap.collect_bindings();
+        let mut best: HashMap<String, (u32, String)> = HashMap::new();
+
+        for (seq, when, action) in &raw {
+            // Only universal bindings (empty when-set).
+            if !when.is_empty() {
+                continue;
+            }
+            let score = binding_score(seq);
+            let action_name = action.to_string();
+
+            let replace = best.get(&action_name).is_none_or(|(prev_score, _)| score < *prev_score);
+            if replace {
+                let mut key_str = String::new();
+                for (code, mods) in seq {
+                    format_key_binding(&mut key_str, *code, *mods);
+                }
+                best.insert(action_name, (score, key_str));
+            }
+        }
+
+        let map = best.into_iter().map(|(k, (_, v))| (k, v)).collect();
+        Self { map }
+    }
+
+    /// Look up the key display string for an action name.
+    pub fn key_for(&self, action: &str) -> Option<&str> {
+        self.map.get(action).map(String::as_str)
+    }
+
+    /// Build a combined key display for two actions (e.g. "j/k" for `move_down`/`move_up`).
+    pub fn key_pair(&self, action1: &str, action2: &str) -> String {
+        match (self.key_for(action1), self.key_for(action2)) {
+            (Some(a), Some(b)) => format!("{a}/{b}"),
+            (Some(a), None) => a.to_string(),
+            (None, Some(b)) => b.to_string(),
+            (None, None) => String::new(),
+        }
+    }
 }
 
 #[cfg(test)]

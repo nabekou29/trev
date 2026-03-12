@@ -207,7 +207,7 @@ fn dispatch_custom_action(action: crate::action::Action, state: &mut AppState, c
         Action::Quit => {
             state.should_quit = true;
         }
-        Action::Search(_) | Action::OpenMenu(_) | Action::Noop => {}
+        Action::Search(_) | Action::OpenMenu(_) | Action::ShowHelp | Action::Noop => {}
     }
 }
 

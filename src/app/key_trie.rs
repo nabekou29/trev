@@ -93,6 +93,34 @@ impl KeyTrie {
             (None, false) => TrieLookup::NoMatch,
         }
     }
+
+    /// Collect all registered bindings from the trie.
+    ///
+    /// Returns a list of `(key_sequence, context_set, action)` tuples by
+    /// performing a depth-first traversal.
+    pub fn collect_bindings(&self) -> Vec<(Vec<KeyBinding>, WhenSet, Action)> {
+        let mut result = Vec::new();
+        Self::collect_node(&self.root, &mut Vec::new(), &mut result);
+        result
+    }
+
+    /// Recursively collect bindings from a trie node.
+    fn collect_node(
+        node: &TrieNode,
+        path: &mut Vec<KeyBinding>,
+        result: &mut Vec<(Vec<KeyBinding>, WhenSet, Action)>,
+    ) {
+        for (when, action) in &node.actions {
+            if !matches!(action, Action::Noop) {
+                result.push((path.clone(), when.clone(), action.clone()));
+            }
+        }
+        for (key, child) in &node.children {
+            path.push(*key);
+            Self::collect_node(child, path, result);
+            path.pop();
+        }
+    }
 }
 
 /// Find the best matching action from a set of context-guarded actions.
