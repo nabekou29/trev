@@ -79,21 +79,44 @@ impl PendingKeys {
     }
 }
 
-/// Format a single key binding for display.
-fn format_key_binding(s: &mut String, code: KeyCode, mods: KeyModifiers) {
+/// Format a key binding as a display string.
+///
+/// Convenience wrapper around [`format_key_binding`] that returns a new `String`.
+pub fn key_display(code: KeyCode, mods: KeyModifiers) -> String {
+    let mut s = String::new();
+    format_key_binding(&mut s, code, mods);
+    s
+}
+
+/// Format a single key binding, appending to an existing string.
+///
+/// Single plain characters are shown as-is (e.g. `j`).
+/// Special keys and modifier combinations are wrapped in angle brackets
+/// (e.g. `<Enter>`, `<C-a>`, `<S-Tab>`).
+pub fn format_key_binding(s: &mut String, code: KeyCode, mods: KeyModifiers) {
     use std::fmt::Write;
 
+    let has_mods = mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT);
+    let is_plain_char = matches!(code, KeyCode::Char(_)) && !has_mods;
+
+    if !is_plain_char {
+        s.push('<');
+    }
     if mods.contains(KeyModifiers::CONTROL) {
         s.push_str("C-");
     }
     if mods.contains(KeyModifiers::ALT) {
         s.push_str("A-");
     }
+    if mods.contains(KeyModifiers::SHIFT) && !matches!(code, KeyCode::BackTab) {
+        s.push_str("S-");
+    }
     match code {
         KeyCode::Char(c) => s.push(c),
-        KeyCode::Enter => s.push_str("CR"),
+        KeyCode::Enter => s.push_str("Enter"),
         KeyCode::Esc => s.push_str("Esc"),
-        KeyCode::Tab | KeyCode::BackTab => s.push_str("Tab"),
+        KeyCode::Tab => s.push_str("Tab"),
+        KeyCode::BackTab => s.push_str("S-Tab"),
         KeyCode::Backspace => s.push_str("BS"),
         KeyCode::Up => s.push_str("Up"),
         KeyCode::Down => s.push_str("Down"),
@@ -104,6 +127,9 @@ fn format_key_binding(s: &mut String, code: KeyCode, mods: KeyModifiers) {
             let _ = write!(s, "{n}");
         }
         _ => s.push('?'),
+    }
+    if !is_plain_char {
+        s.push('>');
     }
 }
 
@@ -158,7 +184,7 @@ mod tests {
     fn display_string_ctrl_key() {
         let mut pk = PendingKeys::new(Duration::from_millis(500));
         pk.push((KeyCode::Char('a'), KeyModifiers::CONTROL));
-        assert_that!(pk.display_string().as_str(), eq("C-a-"));
+        assert_that!(pk.display_string().as_str(), eq("<C-a>-"));
     }
 
     #[rstest]
