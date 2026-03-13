@@ -275,12 +275,6 @@ impl KeyMap {
             Action::Preview(PreviewAction::ScrollLeft),
         );
         self.bind(
-            KeyCode::Char('U'),
-            KeyModifiers::SHIFT,
-            &[],
-            Action::Preview(PreviewAction::HalfPageUp),
-        );
-        self.bind(
             KeyCode::Tab,
             KeyModifiers::NONE,
             &[],
