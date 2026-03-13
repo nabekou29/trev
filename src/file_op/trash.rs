@@ -13,9 +13,12 @@ use anyhow::{
 
 /// Get the custom trash directory path.
 ///
-/// Uses the platform data directory: `{data_dir}/trev/trash/`.
+/// Uses the XDG state directory: `{state_dir}/trev/trash/`.
 pub fn trash_dir() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("trev/trash")
+    crate::dirs::AppDirs::new().map_or_else(
+        |_| std::env::temp_dir().join("trev/trash"),
+        |d| d.trash_dir(),
+    )
 }
 
 /// Generate a timestamped trash path for a file.
@@ -33,10 +36,8 @@ pub fn trash_path(original: &Path) -> PathBuf {
 /// Ensure the trash directory exists.
 pub fn ensure_trash_dir() -> Result<()> {
     let dir = trash_dir();
-    if !dir.exists() {
-        std::fs::create_dir_all(&dir)
-            .with_context(|| format!("Failed to create trash directory: {}", dir.display()))?;
-    }
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("Failed to create trash directory: {}", dir.display()))?;
     Ok(())
 }
 

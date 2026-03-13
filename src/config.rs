@@ -971,26 +971,12 @@ impl Config {
         }
     }
 
-    /// Get the default configuration directory path (XDG compliant).
-    ///
-    /// Resolves `$XDG_CONFIG_HOME/trev/` first, falls back to `~/.config/trev/`.
-    fn config_dir() -> PathBuf {
-        Self::resolve_config_dir(std::env::var("XDG_CONFIG_HOME").ok().as_deref(), dirs::home_dir())
-    }
-
-    /// Resolve config directory from explicit XDG and home directory values.
-    ///
-    /// Extracted for testability (avoids `unsafe` env var manipulation in tests).
-    fn resolve_config_dir(xdg_config_home: Option<&str>, home_dir: Option<PathBuf>) -> PathBuf {
-        xdg_config_home.map_or_else(
-            || home_dir.unwrap_or_else(|| PathBuf::from(".")).join(".config/trev"),
-            |xdg| PathBuf::from(xdg).join("trev"),
-        )
-    }
-
-    /// Get the default configuration file path.
+    /// Get the default configuration file path via [`AppDirs`](crate::dirs::AppDirs).
     fn config_path() -> PathBuf {
-        Self::config_dir().join("config.yml")
+        crate::dirs::AppDirs::new().map_or_else(
+            |_| std::env::temp_dir().join("trev/config.yml"),
+            |d| d.config_path(),
+        )
     }
 
     /// Generate JSON Schema for the configuration file.
@@ -1011,31 +997,6 @@ mod tests {
     use rstest::*;
 
     use super::*;
-
-    // --- config_dir respects XDG_CONFIG_HOME ---
-
-    #[rstest]
-    fn config_dir_uses_xdg_config_home() {
-        let dir = Config::resolve_config_dir(Some("/tmp/xdg_test"), None);
-        assert_eq!(dir, PathBuf::from("/tmp/xdg_test/trev"));
-    }
-
-    // --- config_dir falls back to ~/.config/trev ---
-
-    #[rstest]
-    fn config_dir_falls_back_to_home_config() {
-        let home = PathBuf::from("/home/testuser");
-        let dir = Config::resolve_config_dir(None, Some(home.clone()));
-        assert_eq!(dir, home.join(".config/trev"));
-    }
-
-    // --- config_dir falls back to "." when no home dir ---
-
-    #[rstest]
-    fn config_dir_falls_back_to_dot_when_no_home() {
-        let dir = Config::resolve_config_dir(None, None);
-        assert_eq!(dir, PathBuf::from("./.config/trev"));
-    }
 
     // --- missing config file returns default ---
 

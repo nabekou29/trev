@@ -27,10 +27,10 @@ async fn main() -> Result<()> {
     let mut profile_path: Option<PathBuf> = None;
 
     if is_tui_mode {
-        let log_dir = dirs::state_dir()
-            .or_else(dirs::data_dir)
-            .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join("trev");
+        let log_dir = trev::dirs::AppDirs::new().map_or_else(
+            |_| PathBuf::from("/tmp/trev"),
+            |d| d.log_dir().to_path_buf(),
+        );
 
         let file_appender = tracing_appender::rolling::daily(&log_dir, "trev.log");
         let fmt_layer = tracing_subscriber::fmt::layer()

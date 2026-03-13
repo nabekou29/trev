@@ -15,6 +15,7 @@ pub mod action;
 pub mod app;
 pub mod cli;
 pub mod config;
+pub mod dirs;
 pub mod file_op;
 pub mod git;
 pub mod input;

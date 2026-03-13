@@ -89,10 +89,10 @@ pub struct SessionState {
 
 /// Get the session storage directory path.
 ///
-/// Returns `{data_dir}/trev/sessions/`.
+/// Returns `{state_dir}/trev/sessions/` (XDG state directory).
 fn session_dir() -> Result<PathBuf> {
-    let data_dir = dirs::data_dir().context("could not determine data directory")?;
-    Ok(data_dir.join("trev").join("sessions"))
+    let dirs = crate::dirs::AppDirs::new()?;
+    Ok(dirs.sessions_dir())
 }
 
 /// Compute the session file path for a given root path.
