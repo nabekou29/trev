@@ -420,7 +420,7 @@ mod tests {
         assert_that!(spans[0].style.fg, eq(Some(Color::Yellow)));
         assert_that!(spans[1].style.fg, eq(Some(Color::Yellow)));
         // Width should match the sum of both spans.
-        let expected_width = (spans[0].width() + spans[1].width()) as u16;
+        let expected_width = u16::try_from(spans[0].width() + spans[1].width()).unwrap();
         assert_that!(width, eq(expected_width));
     }
 
@@ -436,7 +436,7 @@ mod tests {
         // Inactive uses DarkGray.
         assert_that!(spans[0].style.fg, eq(Some(Color::DarkGray)));
         assert_that!(spans[1].style.fg, eq(Some(Color::DarkGray)));
-        let expected_width = (spans[0].width() + spans[1].width()) as u16;
+        let expected_width = u16::try_from(spans[0].width() + spans[1].width()).unwrap();
         assert_that!(width, eq(expected_width));
     }
 
@@ -448,7 +448,7 @@ mod tests {
         assert_that!(spans.len(), eq(1));
         assert_that!(spans[0].content.as_ref(), eq(" .*"));
         assert_that!(spans[0].style.fg, eq(Some(Color::Cyan)));
-        let expected_width = spans[0].width() as u16;
+        let expected_width = u16::try_from(spans[0].width()).unwrap();
         assert_that!(width, eq(expected_width));
     }
 
@@ -460,7 +460,7 @@ mod tests {
         assert_that!(spans.len(), eq(1));
         assert_that!(spans[0].content.as_ref(), eq(" .git"));
         assert_that!(spans[0].style.fg, eq(Some(Color::DarkGray)));
-        let expected_width = spans[0].width() as u16;
+        let expected_width = u16::try_from(spans[0].width()).unwrap();
         assert_that!(width, eq(expected_width));
     }
 

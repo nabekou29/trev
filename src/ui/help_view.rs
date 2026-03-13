@@ -525,7 +525,7 @@ mod tests {
 
         // Should have: Navigation header + binding + empty line + File Operations header + binding
         // trailing empty line removed → 5 lines
-        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let text: String = lines.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n");
         assert_that!(text, contains_substring("Navigation"));
         assert_that!(text, contains_substring("File Operations"));
     }
@@ -536,7 +536,7 @@ mod tests {
         let bindings: Vec<&HelpBinding> = vec![&b1];
         let (lines, _cursor_line) = build_content_lines(&bindings, 8, 60, 0);
 
-        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let text: String = lines.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n");
         assert_that!(text, contains_substring("General"));
     }
 
