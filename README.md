@@ -91,7 +91,6 @@ trev schema               # Print config JSON Schema
 | `K`         | Scroll preview up         |
 | `L`         | Scroll preview right      |
 | `H`         | Scroll preview left       |
-| `U`         | Half page up in preview   |
 | `Tab`       | Next preview provider     |
 | `Shift+Tab` | Previous preview provider |
 | `P`         | Toggle preview            |
@@ -105,6 +104,7 @@ trev schema               # Print config JSON Schema
 | `W` | Collapse all                                         |
 | `.` | Toggle hidden files (`filter.hidden`)                |
 | `I` | Toggle ignored files (`filter.ignored`)              |
+| `R` | Refresh tree                                         |
 | `S` | Sort order menu (`tree.sort.menu`)                   |
 | `s` | Toggle sort direction (`tree.sort.toggle_direction`) |
 
@@ -142,6 +142,14 @@ trev schema               # Print config JSON Schema
 | ----- | ------------- |
 | `/`   | Fuzzy search  |
 | `Esc` | Cancel search |
+
+### General
+
+| Key | Action                                        |
+| --- | --------------------------------------------- |
+| `q` | Quit                                          |
+| `e` | Open in editor (`$VISUAL` / `$EDITOR` / `vi`) |
+| `?` | Show help                                     |
 
 ## Configuration
 
@@ -266,13 +274,14 @@ keybindings:
 
 **Available actions**:
 
-- **General**: `quit`, `noop`
+- **General**: `quit`, `open_editor`, `help`, `noop`
 - **Tree**: `tree.move_down`, `tree.move_up`, `tree.expand`, `tree.collapse`, `tree.toggle_expand`, `tree.change_root`, `tree.change_root_up`, `tree.jump_first`, `tree.jump_last`, `tree.half_page_down`, `tree.half_page_up`, `tree.center_cursor`, `tree.scroll_cursor_to_top`, `tree.scroll_cursor_to_bottom`, `tree.expand_all`, `tree.collapse_all`, `tree.refresh`
 - **Sort**: `tree.sort.menu`, `tree.sort.toggle_direction`, `tree.sort.toggle_directories_first`, `tree.sort.by_name`, `tree.sort.by_size`, `tree.sort.by_mtime`, `tree.sort.by_type`, `tree.sort.by_extension`, `tree.sort.by_smart`
 - **Filter**: `filter.hidden`, `filter.ignored`
 - **Preview**: `preview.scroll_down`, `preview.scroll_up`, `preview.scroll_right`, `preview.scroll_left`, `preview.half_page_down`, `preview.half_page_up`, `preview.cycle_next_provider`, `preview.cycle_prev_provider`, `preview.toggle_preview`, `preview.toggle_wrap`
 - **File operations**: `file_op.yank`, `file_op.cut`, `file_op.paste`, `file_op.create_file`, `file_op.create_directory`, `file_op.rename`, `file_op.delete`, `file_op.system_trash`, `file_op.undo`, `file_op.redo`, `file_op.toggle_mark`, `file_op.clear_selections`
 - **Copy**: `file_op.copy.menu`, `file_op.copy.absolute_path`, `file_op.copy.relative_path`, `file_op.copy.file_name`, `file_op.copy.stem`, `file_op.copy.parent_dir`
+- **Search**: `search.open`
 - **Menu**: `menu:<name>` (open a user-defined menu)
 
 ### Full Keybinding Override Example
@@ -285,8 +294,6 @@ keybindings:
   universal:
     bindings:
       # --- Navigation ---
-      - key: q
-        action: quit
       - key: j
         action: tree.move_down
       - key: "<Down>"
@@ -343,8 +350,6 @@ keybindings:
         action: preview.scroll_right
       - key: H
         action: preview.scroll_left
-      - key: U
-        action: preview.half_page_up
       - key: "<Tab>"
         action: preview.cycle_next_provider
       - key: "<S-Tab>"
@@ -383,6 +388,18 @@ keybindings:
         action: file_op.clear_selections
       - key: c
         action: file_op.copy.menu
+
+      # --- Search ---
+      - key: "/"
+        action: search.open
+
+      # --- General ---
+      - key: q
+        action: quit
+      - key: e
+        action: open_editor
+      - key: "?"
+        action: help
 
   directory:
     bindings:
@@ -424,7 +441,7 @@ menus:
         run: "git log --oneline -20"
       - key: o
         label: Open in editor
-        action: quit
+        action: open_editor
 
 keybindings:
   universal:
