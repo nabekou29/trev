@@ -204,7 +204,7 @@ fn bench_full_frame_render_100k(c: &mut Criterion) {
     let children: Vec<TreeNode> =
         (0..100_000).map(|i| file_node(&format!("file{i:06}.txt"), root_path)).collect();
     let mut state = app_state_from_tree(tree_with_children(children));
-    let keymap = trev::app::keymap::KeyMap::from_config(&trev::config::KeybindingConfig::default());
+    let keymap = trev::app::keymap::KeyMap::from_config(&trev::config::KeybindingConfig::default(), &std::collections::HashMap::new());
     let key_lookup = trev::app::keymap::ActionKeyLookup::from_keymap(&keymap);
     let mut terminal = Terminal::new(TestBackend::new(120, 50)).unwrap();
 
@@ -257,7 +257,7 @@ fn bench_full_frame_render_100k_filtered(c: &mut Criterion) {
     filter.insert(root_path.to_path_buf());
     state.tree_state.set_search_filter(filter);
 
-    let keymap = trev::app::keymap::KeyMap::from_config(&trev::config::KeybindingConfig::default());
+    let keymap = trev::app::keymap::KeyMap::from_config(&trev::config::KeybindingConfig::default(), &std::collections::HashMap::new());
     let key_lookup = trev::app::keymap::ActionKeyLookup::from_keymap(&keymap);
     let mut terminal = Terminal::new(TestBackend::new(120, 50)).unwrap();
 

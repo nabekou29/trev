@@ -397,7 +397,7 @@ mod tests {
     /// Build an `ActionKeyLookup` with default keybindings for testing.
     fn default_lookup() -> ActionKeyLookup {
         use crate::app::keymap::KeyMap;
-        let keymap = KeyMap::from_config(&KeybindingConfig::default());
+        let keymap = KeyMap::from_config(&KeybindingConfig::default(), &std::collections::HashMap::new());
         ActionKeyLookup::from_keymap(&keymap)
     }
 

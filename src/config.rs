@@ -16,6 +16,7 @@ use serde::{
     Serialize,
 };
 
+use crate::action::ShellMode;
 use crate::cli::Args;
 
 /// Application configuration.
@@ -45,6 +46,9 @@ pub struct Config {
     /// User-defined menus.
     #[serde(default)]
     pub menus: HashMap<String, MenuDefinition>,
+    /// User-defined named actions with descriptions for help display.
+    #[serde(default)]
+    pub custom_actions: HashMap<String, CustomActionDef>,
 }
 
 /// Keybinding configuration with context-based sections.
@@ -109,9 +113,9 @@ pub struct KeyBindingEntry {
     /// User-defined menu name to open.
     #[serde(default)]
     pub menu: Option<String>,
-    /// Run the shell command in the background without suspending the TUI.
+    /// Shell command execution mode (`foreground`, `background`, or `interactive`).
     #[serde(default)]
-    pub background: bool,
+    pub run_mode: ShellMode,
 }
 
 /// A user-defined menu definition.
@@ -140,9 +144,52 @@ pub struct MenuItemDef {
     /// IPC notification method name.
     #[serde(default)]
     pub notify: Option<String>,
-    /// Run the shell command in the background without suspending the TUI.
+    /// Shell command execution mode (`foreground`, `background`, or `interactive`).
     #[serde(default)]
-    pub background: bool,
+    pub run_mode: ShellMode,
+}
+
+/// A user-defined named action with a description for help display.
+///
+/// Custom actions are defined in the `custom_actions` config section and
+/// referenced from keybindings or menus via `action: "custom.<name>"`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CustomActionDef {
+    /// Human-readable description shown in the help overlay.
+    pub description: String,
+    /// Built-in action name (e.g. `"filter.hidden"`).
+    #[serde(default)]
+    pub action: Option<String>,
+    /// Shell command to execute (template string).
+    #[serde(default)]
+    pub run: Option<String>,
+    /// IPC notification method name.
+    #[serde(default)]
+    pub notify: Option<String>,
+    /// Shell command execution mode (`foreground`, `background`, or `interactive`).
+    #[serde(default)]
+    pub run_mode: ShellMode,
+}
+
+/// Resolve a [`CustomActionDef`] to an [`Action`].
+///
+/// Priority: `action` > `run` > `notify`. Returns an error if none is set
+/// or the action string is invalid.
+pub fn resolve_custom_action_def(def: &CustomActionDef) -> Result<crate::action::Action, String> {
+    use crate::action::Action;
+
+    if let Some(ref action_str) = def.action {
+        return action_str
+            .parse::<Action>()
+            .map_err(|e| format!("custom action: {e}"));
+    }
+    if let Some(ref cmd) = def.run {
+        return Ok(Action::Shell { cmd: cmd.clone(), run_mode: def.run_mode });
+    }
+    if let Some(ref method) = def.notify {
+        return Ok(Action::Notify(method.clone()));
+    }
+    Err("custom action has no action, run, or notify".to_string())
 }
 
 impl JsonSchema for KeyBindingEntry {
@@ -175,9 +222,13 @@ impl JsonSchema for KeyBindingEntry {
                             "type": "string",
                             "enum": action_names
                         },
+                        {
+                            "type": "string",
+                            "pattern": "^custom\\."
+                        },
                         { "type": "null" }
                     ],
-                    "description": "Built-in action name"
+                    "description": "Built-in action name or custom action reference (custom.<name>)"
                 },
                 "run": {
                     "anyOf": [
@@ -200,10 +251,11 @@ impl JsonSchema for KeyBindingEntry {
                     ],
                     "description": "User-defined menu name to open"
                 },
-                "background": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Run shell command in background without suspending TUI"
+                "run_mode": {
+                    "type": "string",
+                    "enum": ["foreground", "background", "interactive"],
+                    "default": "foreground",
+                    "description": "Shell command execution mode: foreground (default, waits for ENTER), background (detached), or interactive (no ENTER prompt, for TUI apps)"
                 }
             },
             "additionalProperties": false

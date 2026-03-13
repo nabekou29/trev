@@ -3,6 +3,19 @@
 use std::fmt;
 use std::str::FromStr;
 
+/// Execution mode for shell commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ShellMode {
+    /// Suspend TUI, run command, show "Press ENTER to continue...", resume TUI.
+    #[default]
+    Foreground,
+    /// Run command in the background without suspending the TUI.
+    Background,
+    /// Suspend TUI, run command, resume TUI immediately (for full-screen TUI apps).
+    Interactive,
+}
+
 /// Top-level application actions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -22,8 +35,8 @@ pub enum Action {
     Shell {
         /// The command template to execute.
         cmd: String,
-        /// Whether to run in the background without suspending the TUI.
-        background: bool,
+        /// How the command should be executed.
+        run_mode: ShellMode,
     },
     /// Send an IPC notification with the given method name.
     Notify(String),
@@ -868,7 +881,7 @@ mod tests {
 
     #[rstest]
     fn shell_action_display() {
-        let action = Action::Shell { cmd: "open {path}".to_string(), background: false };
+        let action = Action::Shell { cmd: "open {path}".to_string(), run_mode: ShellMode::Foreground };
         assert_that!(action.to_string().as_str(), eq("shell:open {path}"));
     }
 

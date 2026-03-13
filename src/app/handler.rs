@@ -173,12 +173,8 @@ fn dispatch_action(action: &Action, state: &mut AppState, ctx: &AppContext) {
         Action::Filter(filter_action) => {
             handle_filter_action(*filter_action, state, ctx);
         }
-        Action::Shell { cmd, background } => {
-            if *background {
-                handle_shell_background(cmd, state);
-            } else {
-                handle_shell_action(cmd, state);
-            }
+        Action::Shell { cmd, run_mode } => {
+            handle_shell_with_mode(cmd, *run_mode, state);
         }
         Action::Notify(method) => {
             handle_notify_action(method, state, ctx);
@@ -232,6 +228,24 @@ fn open_help(state: &mut AppState, ctx: &AppContext) {
             })
         })
         .collect();
+
+    // Append custom actions from config.
+    for (name, def) in &ctx.custom_actions {
+        let Ok(action) = crate::config::resolve_custom_action_def(def) else {
+            continue;
+        };
+        let action_display = action.to_string();
+        let (key_display, has_keybinding) = lookup
+            .key_for(&action_display)
+            .map_or_else(|| (String::new(), false), |k| (k.to_string(), true));
+        bindings.push(HelpBinding {
+            key_display,
+            action_name: format!("custom.{name}"),
+            description: def.description.clone(),
+            action,
+            has_keybinding,
+        });
+    }
     bindings.sort_by(|a, b| {
         help_group_sort_key(&a.action_name)
             .cmp(&help_group_sort_key(&b.action_name))
@@ -444,7 +458,7 @@ fn handle_open_menu(name: &str, state: &mut AppState, ctx: &AppContext) {
     let mut item_actions = Vec::with_capacity(menu_def.items.len());
 
     for item_def in &menu_def.items {
-        let resolved = resolve_menu_item_action(item_def);
+        let resolved = resolve_menu_item_action(item_def, &ctx.custom_actions);
         let Some(action) = resolved else {
             tracing::warn!(key = %item_def.key, label = %item_def.label, "skipping menu item with invalid action");
             continue;
@@ -474,12 +488,20 @@ fn handle_open_menu(name: &str, state: &mut AppState, ctx: &AppContext) {
 /// Resolve a menu item definition to an `Action`.
 ///
 /// Returns `None` if the item has no valid action/run/notify or if parsing fails.
-fn resolve_menu_item_action(item: &crate::config::MenuItemDef) -> Option<Action> {
+/// Supports `custom.<name>` references to user-defined custom actions.
+fn resolve_menu_item_action(
+    item: &crate::config::MenuItemDef,
+    custom_actions: &std::collections::HashMap<String, crate::config::CustomActionDef>,
+) -> Option<Action> {
     if let Some(ref action_str) = item.action {
+        if let Some(name) = action_str.strip_prefix("custom.") {
+            let def = custom_actions.get(name)?;
+            return crate::config::resolve_custom_action_def(def).ok();
+        }
         return action_str.parse::<Action>().ok();
     }
     if let Some(ref cmd) = item.run {
-        return Some(Action::Shell { cmd: cmd.clone(), background: item.background });
+        return Some(Action::Shell { cmd: cmd.clone(), run_mode: item.run_mode });
     }
     if let Some(ref method) = item.notify {
         return Some(Action::Notify(method.clone()));
@@ -502,17 +524,35 @@ pub(super) fn handle_open_editor(state: &mut AppState) {
         .unwrap_or_else(|_| "vi".to_string());
 
     let cmd = format!("{editor} {}", path.display());
-    handle_shell_action(&cmd, state);
+    handle_shell_foreground(&cmd, state, false);
 }
 
-/// Execute a shell command with template variable substitution.
+/// Execute a shell command using the specified [`ShellMode`].
 ///
-/// Suspends the TUI (alternate screen + raw mode + keyboard enhancement),
-/// runs the command via `sh -c`, waits for the user to press Enter,
-/// then resumes the TUI and requests a full redraw.
+/// - `Foreground`: Suspend TUI, run command, show "Press ENTER to continue...", resume.
+/// - `Background`: Run detached without suspending the TUI.
+/// - `Interactive`: Suspend TUI, run command, resume immediately (for full-screen TUI apps).
 ///
 /// Template variables: `{path}`, `{dir}`, `{name}`, `{root}`.
-fn handle_shell_action(cmd: &str, state: &mut AppState) {
+pub(super) fn handle_shell_with_mode(
+    cmd: &str,
+    mode: crate::action::ShellMode,
+    state: &mut AppState,
+) {
+    use crate::action::ShellMode;
+
+    match mode {
+        ShellMode::Background => handle_shell_background(cmd, state),
+        ShellMode::Foreground => handle_shell_foreground(cmd, state, true),
+        ShellMode::Interactive => handle_shell_foreground(cmd, state, false),
+    }
+}
+
+/// Execute a shell command in the foreground, optionally waiting for ENTER.
+///
+/// Suspends the TUI, runs the command via `sh -c`, optionally waits for the
+/// user to press Enter, then resumes the TUI and requests a full redraw.
+fn handle_shell_foreground(cmd: &str, state: &mut AppState, wait_for_enter: bool) {
     use std::io::Write;
 
     use crossterm::event::{
@@ -534,20 +574,23 @@ fn handle_shell_action(cmd: &str, state: &mut AppState) {
     // Execute command.
     let result = std::process::Command::new("sh").arg("-c").arg(&expanded).status();
 
-    // Show result and wait for user to press Enter.
-    match &result {
-        Ok(status) if !status.success() => {
-            let code = status.code().map_or_else(|| "unknown".to_string(), |c| c.to_string());
-            let _ = writeln!(std::io::stdout(), "\nProcess exited with code {code}");
+    if wait_for_enter {
+        // Show result and wait for user to press Enter.
+        match &result {
+            Ok(status) if !status.success() => {
+                let code =
+                    status.code().map_or_else(|| "unknown".to_string(), |c| c.to_string());
+                let _ = writeln!(std::io::stdout(), "\nProcess exited with code {code}");
+            }
+            Err(e) => {
+                let _ = writeln!(std::io::stdout(), "\nFailed to execute command: {e}");
+            }
+            Ok(_) => {}
         }
-        Err(e) => {
-            let _ = writeln!(std::io::stdout(), "\nFailed to execute command: {e}");
-        }
-        Ok(_) => {}
+        let _ = write!(std::io::stdout(), "\nPress ENTER to continue...");
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stdin().read_line(&mut String::new());
     }
-    let _ = write!(std::io::stdout(), "\nPress ENTER to continue...");
-    let _ = std::io::stdout().flush();
-    let _ = std::io::stdin().read_line(&mut String::new());
 
     // Resume TUI.
     let _ = crossterm::terminal::enable_raw_mode();
@@ -792,9 +835,9 @@ mod tests {
             action: Some("tree.sort.by_name".to_string()),
             run: None,
             notify: None,
-            background: false,
+            run_mode: crate::action::ShellMode::default(),
         };
-        let result = super::resolve_menu_item_action(&item);
+        let result = super::resolve_menu_item_action(&item, &std::collections::HashMap::new());
         assert!(result.is_some());
         let action = result.unwrap();
         assert_that!(action.to_string().as_str(), eq("tree.sort.by_name"));
@@ -808,9 +851,9 @@ mod tests {
             action: None,
             run: Some("git status".to_string()),
             notify: None,
-            background: false,
+            run_mode: crate::action::ShellMode::default(),
         };
-        let result = super::resolve_menu_item_action(&item);
+        let result = super::resolve_menu_item_action(&item, &std::collections::HashMap::new());
         assert!(result.is_some());
         assert_that!(result.unwrap().to_string().as_str(), eq("shell:git status"));
     }
@@ -823,9 +866,9 @@ mod tests {
             action: None,
             run: None,
             notify: Some("open_file".to_string()),
-            background: false,
+            run_mode: crate::action::ShellMode::default(),
         };
-        let result = super::resolve_menu_item_action(&item);
+        let result = super::resolve_menu_item_action(&item, &std::collections::HashMap::new());
         assert!(result.is_some());
         assert_that!(result.unwrap().to_string().as_str(), eq("notify:open_file"));
     }
@@ -838,9 +881,9 @@ mod tests {
             action: Some("not_a_real_action".to_string()),
             run: None,
             notify: None,
-            background: false,
+            run_mode: crate::action::ShellMode::default(),
         };
-        let result = super::resolve_menu_item_action(&item);
+        let result = super::resolve_menu_item_action(&item, &std::collections::HashMap::new());
         assert!(result.is_none());
     }
 
@@ -852,9 +895,9 @@ mod tests {
             action: None,
             run: None,
             notify: None,
-            background: false,
+            run_mode: crate::action::ShellMode::default(),
         };
-        let result = super::resolve_menu_item_action(&item);
+        let result = super::resolve_menu_item_action(&item, &std::collections::HashMap::new());
         assert!(result.is_none());
     }
 
@@ -866,9 +909,9 @@ mod tests {
             action: Some("quit".to_string()),
             run: Some("echo hello".to_string()),
             notify: None,
-            background: false,
+            run_mode: crate::action::ShellMode::default(),
         };
-        let result = super::resolve_menu_item_action(&item);
+        let result = super::resolve_menu_item_action(&item, &std::collections::HashMap::new());
         assert!(result.is_some());
         assert_that!(result.unwrap().to_string().as_str(), eq("quit"));
     }
@@ -886,7 +929,7 @@ mod tests {
                     action: Some("quit".to_string()),
                     run: None,
                     notify: None,
-                    background: false,
+                    run_mode: crate::action::ShellMode::default(),
                 },
                 crate::config::MenuItemDef {
                     key: "b".to_string(),
@@ -894,7 +937,7 @@ mod tests {
                     run: Some("echo beta".to_string()),
                     action: None,
                     notify: None,
-                    background: false,
+                    run_mode: crate::action::ShellMode::default(),
                 },
                 crate::config::MenuItemDef {
                     key: "c".to_string(),
@@ -902,7 +945,7 @@ mod tests {
                     notify: Some("do_thing".to_string()),
                     action: None,
                     run: None,
-                    background: false,
+                    run_mode: crate::action::ShellMode::default(),
                 },
             ],
         }
@@ -916,7 +959,7 @@ mod tests {
         let mut item_actions = Vec::new();
 
         for item_def in &menu_def.items {
-            let Some(action) = super::resolve_menu_item_action(item_def) else {
+            let Some(action) = super::resolve_menu_item_action(item_def, &std::collections::HashMap::new()) else {
                 continue;
             };
             let key = item_def.key.chars().next().unwrap_or(' ');
@@ -954,7 +997,7 @@ mod tests {
                     action: Some("quit".to_string()),
                     run: None,
                     notify: None,
-                    background: false,
+                    run_mode: crate::action::ShellMode::default(),
                 },
                 crate::config::MenuItemDef {
                     key: "b".to_string(),
@@ -962,7 +1005,7 @@ mod tests {
                     action: Some("not_real".to_string()),
                     run: None,
                     notify: None,
-                    background: false,
+                    run_mode: crate::action::ShellMode::default(),
                 },
                 crate::config::MenuItemDef {
                     key: "c".to_string(),
@@ -970,14 +1013,14 @@ mod tests {
                     run: Some("ls".to_string()),
                     action: None,
                     notify: None,
-                    background: false,
+                    run_mode: crate::action::ShellMode::default(),
                 },
             ],
         };
 
         let mut items = Vec::new();
         for item_def in &menu_def.items {
-            let Some(_action) = super::resolve_menu_item_action(item_def) else {
+            let Some(_action) = super::resolve_menu_item_action(item_def, &std::collections::HashMap::new()) else {
                 continue;
             };
             items.push(item_def.label.clone());

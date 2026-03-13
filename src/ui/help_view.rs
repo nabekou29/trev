@@ -57,6 +57,7 @@ pub const GROUPS: &[BindingGroup] = &[
     BindingGroup { label: "Preview", prefix: "preview." },
     BindingGroup { label: "Search", prefix: "search." },
     BindingGroup { label: "Filters", prefix: "filter." },
+    BindingGroup { label: "Custom", prefix: "custom." },
 ];
 
 /// Render the keybinding help overlay.

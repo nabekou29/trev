@@ -382,6 +382,8 @@ pub struct AppContext {
     pub search_index_ready_tx: tokio::sync::mpsc::Sender<()>,
     /// Sender for async stat batch results.
     pub stat_tx: tokio::sync::mpsc::Sender<StatLoadResult>,
+    /// User-defined custom action definitions (from config).
+    pub custom_actions: HashMap<String, crate::config::CustomActionDef>,
 }
 
 /// Kind of async directory children load operation.

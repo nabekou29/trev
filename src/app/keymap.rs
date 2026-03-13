@@ -34,6 +34,7 @@ use crate::app::key_trie::{
 };
 use crate::config::{
     ContextBindings,
+    CustomActionDef,
     KeyBindingEntry,
     KeybindingConfig,
 };
@@ -104,7 +105,12 @@ impl KeyMap {
     ///
     /// Loads defaults first (unless disabled), then applies user bindings on top.
     /// Each section's bindings are registered with the corresponding context set.
-    pub fn from_config(config: &KeybindingConfig) -> Self {
+    /// Custom action references (`action: "custom.<name>"`) are resolved via
+    /// the provided `custom_actions` map.
+    pub fn from_config(
+        config: &KeybindingConfig,
+        custom_actions: &HashMap<String, CustomActionDef>,
+    ) -> Self {
         let mut km = Self::empty();
 
         // Load defaults (universal + context-specific defaults like daemon.file).
@@ -124,7 +130,7 @@ impl KeyMap {
 
         for (section, when_set) in sections {
             for entry in &section.bindings {
-                if let Err(e) = km.apply_entry(entry, when_set) {
+                if let Err(e) = km.apply_entry(entry, when_set, custom_actions) {
                     tracing::warn!("skipping keybinding: {e}");
                 }
             }
@@ -139,8 +145,13 @@ impl KeyMap {
     }
 
     /// Apply a single keybinding entry with the given context set.
-    fn apply_entry(&mut self, entry: &KeyBindingEntry, when_set: &WhenSet) -> Result<(), String> {
-        let action = resolve_entry_action(entry)?;
+    fn apply_entry(
+        &mut self,
+        entry: &KeyBindingEntry,
+        when_set: &WhenSet,
+        custom_actions: &HashMap<String, CustomActionDef>,
+    ) -> Result<(), String> {
+        let action = resolve_entry_action(entry, custom_actions)?;
         let expanded_sequences = key_parse::parse_key_sequence_expanded(&entry.key)?;
 
         for sequence in expanded_sequences {
@@ -425,8 +436,13 @@ impl KeyMap {
 
 /// Resolve the action from a keybinding entry.
 ///
-/// Exactly one of `action`, `run`, or `notify` must be set.
-fn resolve_entry_action(entry: &KeyBindingEntry) -> Result<Action, String> {
+/// Exactly one of `action`, `run`, `notify`, or `menu` must be set.
+/// Action strings starting with `"custom."` are resolved via the
+/// `custom_actions` map.
+fn resolve_entry_action(
+    entry: &KeyBindingEntry,
+    custom_actions: &HashMap<String, CustomActionDef>,
+) -> Result<Action, String> {
     let set_count = u8::from(entry.action.is_some())
         + u8::from(entry.run.is_some())
         + u8::from(entry.notify.is_some())
@@ -443,13 +459,20 @@ fn resolve_entry_action(entry: &KeyBindingEntry) -> Result<Action, String> {
     }
 
     if let Some(ref action_str) = entry.action {
+        if let Some(name) = action_str.strip_prefix("custom.") {
+            let def = custom_actions
+                .get(name)
+                .ok_or_else(|| format!("keybinding '{}': unknown custom action '{name}'", entry.key))?;
+            return crate::config::resolve_custom_action_def(def)
+                .map_err(|e| format!("keybinding '{}': {e}", entry.key));
+        }
         return action_str
             .parse::<Action>()
             .map_err(|e| format!("keybinding '{}': {e}", entry.key));
     }
 
     if let Some(ref cmd) = entry.run {
-        return Ok(Action::Shell { cmd: cmd.clone(), background: entry.background });
+        return Ok(Action::Shell { cmd: cmd.clone(), run_mode: entry.run_mode });
     }
 
     if let Some(ref method) = entry.notify {
@@ -570,10 +593,11 @@ mod tests {
     use rstest::*;
 
     use super::*;
+    use crate::action::ShellMode;
     use crate::config::DaemonBindings;
 
     fn default_keymap() -> KeyMap {
-        KeyMap::from_config(&KeybindingConfig::default())
+        KeyMap::from_config(&KeybindingConfig::default(), &HashMap::new())
     }
 
     /// Build a context set from a slice of contexts.
@@ -604,7 +628,7 @@ mod tests {
             run: None,
             notify: None,
             menu: None,
-            background: false,
+            run_mode: ShellMode::default(),
         }
     }
 
@@ -764,7 +788,7 @@ mod tests {
     #[rstest]
     fn from_config_defaults_included() {
         let config = KeybindingConfig::default();
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
         assert_eq!(km.resolve(key, &file_ctx()), Some(&Action::Tree(TreeAction::MoveDown)));
     }
@@ -772,7 +796,7 @@ mod tests {
     #[rstest]
     fn from_config_disable_default_starts_empty() {
         let config = KeybindingConfig { disable_default: true, ..KeybindingConfig::default() };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
         assert_eq!(km.resolve(key, &file_ctx()), None);
     }
@@ -783,7 +807,7 @@ mod tests {
             universal: ContextBindings { disable_default: true, ..Default::default() },
             ..KeybindingConfig::default()
         };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
         assert_eq!(km.resolve(key, &file_ctx()), None);
     }
@@ -797,7 +821,7 @@ mod tests {
             },
             ..KeybindingConfig::default()
         };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
         assert_eq!(km.resolve(key, &file_ctx()), Some(&Action::Tree(TreeAction::MoveUp)));
     }
@@ -808,7 +832,7 @@ mod tests {
             universal: ContextBindings { bindings: vec![entry("q", "noop")], ..Default::default() },
             ..KeybindingConfig::default()
         };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
         assert_eq!(km.resolve(key, &file_ctx()), None);
     }
@@ -823,7 +847,7 @@ mod tests {
             file: ContextBindings { bindings: vec![entry("<CR>", "quit")], ..Default::default() },
             ..KeybindingConfig::default()
         };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
 
         // Directory context → directory section's toggle_expand (more specific than universal default).
@@ -845,7 +869,7 @@ mod tests {
             },
             ..KeybindingConfig::default()
         };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
 
         // Directory → directory-specific binding (more specific).
@@ -864,17 +888,17 @@ mod tests {
                     run: Some("open {path}".to_string()),
                     notify: None,
                     menu: None,
-                    background: false,
+                    run_mode: ShellMode::default(),
                 }],
                 ..Default::default()
             },
             ..KeybindingConfig::default()
         };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let key = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE);
         assert_eq!(
             km.resolve(key, &file_ctx()),
-            Some(&Action::Shell { cmd: "open {path}".to_string(), background: false })
+            Some(&Action::Shell { cmd: "open {path}".to_string(), run_mode: ShellMode::default() })
         );
     }
 
@@ -888,13 +912,13 @@ mod tests {
                     run: None,
                     notify: Some("open_file".to_string()),
                     menu: None,
-                    background: false,
+                    run_mode: ShellMode::default(),
                 }],
                 ..Default::default()
             },
             ..KeybindingConfig::default()
         };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let key = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL);
         assert_eq!(km.resolve(key, &file_ctx()), Some(&Action::Notify("open_file".to_string())));
     }
@@ -909,7 +933,7 @@ mod tests {
             },
             ..KeybindingConfig::default()
         };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
 
         let key_shift = KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT);
         assert_eq!(km.resolve(key_shift, &file_ctx()), Some(&Action::Tree(TreeAction::JumpLast)));
@@ -933,7 +957,7 @@ mod tests {
             },
             ..KeybindingConfig::default()
         };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
 
         // Matches in daemon+file context.
@@ -959,7 +983,7 @@ mod tests {
             },
             ..KeybindingConfig::default()
         };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
 
         // daemon+file → daemon.file (2 contexts) beats file (1 context).
@@ -981,7 +1005,7 @@ mod tests {
             },
             ..KeybindingConfig::default()
         };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
 
         // daemon+directory → matches.
@@ -1021,7 +1045,7 @@ mod tests {
             },
             ..KeybindingConfig::default()
         };
-        let km = KeyMap::from_config(&config);
+        let km = KeyMap::from_config(&config, &HashMap::new());
         let g = (KeyCode::Char('g'), KeyModifiers::NONE);
         let result = km.lookup(&[g, g], &file_ctx());
         assert_eq!(result, TrieLookup::Resolved(&Action::Tree(TreeAction::JumpLast)));

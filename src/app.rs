@@ -333,7 +333,7 @@ fn build_context_and_channels(
     let (stat_tx, stat_rx) = tokio::sync::mpsc::channel::<StatLoadResult>(16);
     let (search_index_ready_tx, search_index_ready_rx) = tokio::sync::mpsc::channel::<()>(2);
 
-    let keymap = KeyMap::from_config(&config.keybindings);
+    let keymap = KeyMap::from_config(&config.keybindings, &config.custom_actions);
     let action_key_lookup = keymap::ActionKeyLookup::from_keymap(&keymap);
     let ctx = AppContext {
         children_tx,
@@ -352,6 +352,7 @@ fn build_context_and_channels(
         search_index: Arc::new(RwLock::new(SearchIndex::new())),
         search_index_ready_tx,
         stat_tx,
+        custom_actions: config.custom_actions.clone(),
     };
 
     let channels = EventReceivers {
