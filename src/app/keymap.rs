@@ -347,6 +347,7 @@ impl KeyMap {
             Action::Tree(TreeAction::Sort(SortAction::ToggleDirection)),
         );
         self.bind(KeyCode::Char('?'), KeyModifiers::NONE, &[], Action::ShowHelp);
+        self.bind(KeyCode::Char('e'), KeyModifiers::NONE, &[], Action::OpenEditor);
     }
 
     /// Default file operation bindings.

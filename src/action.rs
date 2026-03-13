@@ -29,6 +29,8 @@ pub enum Action {
     Notify(String),
     /// Open a user-defined menu by name.
     OpenMenu(String),
+    /// Open the current file in `$VISUAL` / `$EDITOR` (falls back to `vi`).
+    OpenEditor,
     /// Show the keybinding help overlay.
     ShowHelp,
     /// No operation (used to unbind a default key).
@@ -315,6 +317,7 @@ impl fmt::Display for Action {
             Self::Search(a) => a.fmt(f),
             Self::Quit => f.write_str("quit"),
             Self::ShowHelp => f.write_str("help"),
+            Self::OpenEditor => f.write_str("open_editor"),
             Self::Shell { cmd, .. } => write!(f, "shell:{cmd}"),
             Self::Notify(method) => write!(f, "notify:{method}"),
             Self::OpenMenu(name) => write!(f, "menu:{name}"),
@@ -466,6 +469,7 @@ impl FromStr for Action {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "quit" => Ok(Self::Quit),
+            "open_editor" => Ok(Self::OpenEditor),
             "help" => Ok(Self::ShowHelp),
             "noop" => Ok(Self::Noop),
             _ if s.starts_with("tree.") => s.parse::<TreeAction>().map(Self::Tree),
@@ -605,7 +609,7 @@ impl FileOpAction {
 impl Action {
     /// Returns all valid action name strings for JSON Schema generation.
     pub fn all_action_names() -> Vec<&'static str> {
-        let mut names = vec!["quit", "help", "noop"];
+        let mut names = vec!["quit", "open_editor", "help", "noop"];
         names.extend(TreeAction::action_names());
         names.extend(FilterAction::action_names());
         names.extend(PreviewAction::action_names());
@@ -618,6 +622,7 @@ impl Action {
     pub const fn description(&self) -> &'static str {
         match self {
             Self::Quit => "Quit",
+            Self::OpenEditor => "Open in editor",
             Self::ShowHelp => "Show help",
             Self::Noop => "No operation",
             Self::Shell { .. } => "Run shell command",

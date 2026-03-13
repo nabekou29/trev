@@ -207,6 +207,9 @@ fn dispatch_custom_action(action: crate::action::Action, state: &mut AppState, c
         Action::Quit => {
             state.should_quit = true;
         }
+        Action::OpenEditor => {
+            super::handle_open_editor(state);
+        }
         Action::Search(_) | Action::OpenMenu(_) | Action::ShowHelp | Action::Noop => {}
     }
 }

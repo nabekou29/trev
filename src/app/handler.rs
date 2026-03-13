@@ -186,6 +186,9 @@ fn dispatch_action(action: &Action, state: &mut AppState, ctx: &AppContext) {
         Action::OpenMenu(name) => {
             handle_open_menu(name, state, ctx);
         }
+        Action::OpenEditor => {
+            handle_open_editor(state);
+        }
         Action::Search(search_action) => match search_action {
             crate::action::SearchAction::Open => {
                 search::open_search(state);
@@ -482,6 +485,24 @@ fn resolve_menu_item_action(item: &crate::config::MenuItemDef) -> Option<Action>
         return Some(Action::Notify(method.clone()));
     }
     None
+}
+
+/// Open the current cursor path in the user's preferred editor.
+///
+/// Resolves the editor from `$VISUAL`, then `$EDITOR`, falling back to `vi`.
+/// Suspends the TUI, runs the editor, then resumes.
+pub(super) fn handle_open_editor(state: &mut AppState) {
+    let Some(path) = state.tree_state.cursor_path() else {
+        state.set_status("No file selected".to_string());
+        return;
+    };
+
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| "vi".to_string());
+
+    let cmd = format!("{editor} {}", path.display());
+    handle_shell_action(&cmd, state);
 }
 
 /// Execute a shell command with template variable substitution.

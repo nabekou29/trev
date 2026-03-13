@@ -891,6 +891,7 @@
               "type": "string",
               "enum": [
                 "quit",
+                "open_editor",
                 "help",
                 "noop",
                 "tree.move_down",
