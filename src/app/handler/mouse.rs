@@ -35,9 +35,10 @@ pub fn handle_mouse_event(event: MouseEvent, state: &mut AppState, ctx: &AppCont
             handle_scroll(state, pos, ScrollDirection::Up);
         }
         MouseEventKind::Down(MouseButton::Left) => {
-            if !handle_filter_click(state, ctx, pos) {
-                handle_left_click(state, pos);
+            if handle_filter_click(state, ctx, pos) || handle_provider_click(state, ctx, pos) {
+                return;
             }
+            handle_left_click(state, ctx, pos);
         }
         _ => {}
     }
@@ -54,7 +55,7 @@ enum ScrollDirection {
 
 /// Handle scroll wheel: dispatches to tree or preview based on mouse position.
 fn handle_scroll(state: &mut AppState, pos: Position, direction: ScrollDirection) {
-    let areas = state.layout_areas;
+    let areas = &state.layout_areas;
 
     if areas.tree_area.contains(pos) {
         handle_tree_scroll(state, direction);
@@ -94,7 +95,7 @@ fn handle_preview_scroll(state: &mut AppState, direction: ScrollDirection) {
 fn handle_filter_click(state: &mut AppState, ctx: &AppContext, pos: Position) -> bool {
     use crate::action::FilterAction;
 
-    let areas = state.layout_areas;
+    let areas = &state.layout_areas;
 
     if areas.filter_hidden_area.contains(pos) {
         super::handle_filter_action(FilterAction::Hidden, state, ctx);
@@ -107,9 +108,29 @@ fn handle_filter_click(state: &mut AppState, ctx: &AppContext, pos: Position) ->
     false
 }
 
+/// Handle a left-click on a provider indicator in the preview title.
+///
+/// Returns `true` if the click was consumed (hit a provider area).
+fn handle_provider_click(state: &mut AppState, ctx: &AppContext, pos: Position) -> bool {
+    let areas = &state.layout_areas;
+
+    for (i, rect) in areas.provider_areas.iter().enumerate() {
+        if rect.contains(pos) {
+            if i != state.preview_state.active_provider_index {
+                state.preview_state.active_provider_index = i;
+                state.preview_state.scroll_row = 0;
+                state.preview_state.scroll_col = 0;
+                super::preview::reload_preview(state, ctx);
+            }
+            return true;
+        }
+    }
+    false
+}
+
 /// Handle a left-click in the tree area: move cursor to the clicked row.
-fn handle_left_click(state: &mut AppState, pos: Position) {
-    let areas = state.layout_areas;
+fn handle_left_click(state: &mut AppState, _ctx: &AppContext, pos: Position) {
+    let areas = &state.layout_areas;
 
     if !areas.tree_area.contains(pos) {
         return;

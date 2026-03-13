@@ -157,10 +157,10 @@ pub fn fire_pending_preview(state: &mut AppState, ctx: &AppContext) {
     prefetch_adjacent(state, ctx);
 }
 
-/// Reload the current file with the (already-cycled) provider.
+/// Reload the current file with the current active provider.
 ///
-/// Preserves the provider index set by `cycle_next_provider()`/`cycle_prev_provider()`.
-fn reload_preview(state: &mut AppState, ctx: &AppContext) {
+/// Used after changing `active_provider_index` (via cycle or direct set).
+pub(super) fn reload_preview(state: &mut AppState, ctx: &AppContext) {
     let Some((path, providers)) = resolve_preview_providers(state) else {
         return;
     };

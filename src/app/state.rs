@@ -139,7 +139,7 @@ pub struct AppState {
 ///
 /// Stores the tree and preview panel rectangles so the mouse event handler
 /// can determine which panel a click or scroll event targets.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct LayoutAreas {
     /// The tree view area.
     pub tree_area: Rect,
@@ -149,6 +149,8 @@ pub struct LayoutAreas {
     pub filter_hidden_area: Rect,
     /// The ignored-filter indicator area in the status bar (for click toggle).
     pub filter_ignored_area: Rect,
+    /// Click areas for each preview provider indicator (for click-to-switch).
+    pub provider_areas: Vec<Rect>,
 }
 
 impl AppState {

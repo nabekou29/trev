@@ -32,8 +32,11 @@ use crate::ui::column::truncate_to_width;
 /// `PreviewContent` in the `PreviewState`.
 ///
 /// The preview block uses full borders on all sides.
-pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewState) {
-    let provider_title = build_provider_title(state);
+///
+/// Returns click-target rectangles for each provider indicator (empty if
+/// only one provider is available).
+pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewState) -> Vec<Rect> {
+    let (provider_title, provider_entry_widths) = build_provider_title(state);
     let provider_width = provider_title.as_ref().map_or(0, Line::width);
     let top_title = build_top_title(state, area.width as usize, provider_width);
     let lang_title = build_language_title(state);
@@ -45,6 +48,9 @@ pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewStat
     if let Some(lang) = lang_title {
         block = block.title_bottom(lang.right_aligned());
     }
+
+    let provider_areas =
+        calculate_provider_areas(area, provider_width, &provider_entry_widths);
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -111,6 +117,8 @@ pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewStat
             frame.render_stateful_widget(widget, inner, &mut **protocol);
         }
     }
+
+    provider_areas
 }
 
 /// Build the top-left title: file name, truncated with `…` if needed.
@@ -140,11 +148,14 @@ fn build_top_title(
 ///
 /// Only shown when multiple providers are available.
 /// Active: `● Name` (cyan+bold), inactive: `○ Name` (dim).
-fn build_provider_title(state: &PreviewState) -> Option<Line<'static>> {
+///
+/// Returns the title line and per-provider display widths (for click areas).
+fn build_provider_title(state: &PreviewState) -> (Option<Line<'static>>, Vec<u16>) {
     if state.available_providers.len() <= 1 {
-        return None;
+        return (None, Vec::new());
     }
     let mut spans = Vec::new();
+    let mut entry_widths = Vec::new();
     for (i, name) in state.available_providers.iter().enumerate() {
         let is_active = i == state.active_provider_index;
         let (dot_label, style) = if is_active {
@@ -152,11 +163,43 @@ fn build_provider_title(state: &PreviewState) -> Option<Line<'static>> {
         } else {
             (" ○ ", Style::default().fg(Color::DarkGray))
         };
+        // " ● " (3 columns) + name width
+        let name_width = unicode_width::UnicodeWidthStr::width(name.as_str());
+        entry_widths.push(u16::try_from(3 + name_width).unwrap_or(u16::MAX));
         spans.push(Span::styled(dot_label, style));
         spans.push(Span::styled(name.clone(), style));
     }
     spans.push(Span::raw(" "));
-    Some(Line::from(spans))
+    (Some(Line::from(spans)), entry_widths)
+}
+
+/// Calculate click-target rectangles for each provider indicator.
+///
+/// The provider title is right-aligned on the top border, so positions
+/// are computed from the right edge of the preview area.
+fn calculate_provider_areas(
+    area: Rect,
+    total_provider_width: usize,
+    entry_widths: &[u16],
+) -> Vec<Rect> {
+    if entry_widths.is_empty() {
+        return Vec::new();
+    }
+    // Right-aligned title starts at: right_border - 1 - total_width
+    // right_border is at area.x + area.width - 1
+    let title_start_x = (area.x + area.width)
+        .saturating_sub(1)
+        .saturating_sub(u16::try_from(total_provider_width).unwrap_or(u16::MAX));
+    let y = area.y;
+    let mut x = title_start_x;
+    entry_widths
+        .iter()
+        .map(|&w| {
+            let rect = Rect::new(x, y, w, 1);
+            x += w;
+            rect
+        })
+        .collect()
 }
 
 /// Build the right-aligned language label for syntax-highlighted content.
