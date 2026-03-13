@@ -205,7 +205,7 @@ fn init_app(
         tree_options.directories_first,
     );
 
-    let (git_state, preview_registry) = detect_terminal_and_build_registry(&config)?;
+    let (git_state, preview_registry) = detect_terminal_and_build_registry(&config, &root_path)?;
 
     // Create watcher channel and instance.
     let (watcher_tx, watcher_rx) =
@@ -434,12 +434,13 @@ fn load_config(args: &Args) -> Result<(Config, PathBuf)> {
 /// theme detection (OSC 11 query would corrupt Picker's font-size detection).
 fn detect_terminal_and_build_registry(
     config: &Config,
+    root_path: &Path,
 ) -> Result<(Arc<RwLock<Option<GitState>>>, PreviewRegistry)> {
     let picker =
         Picker::from_query_stdio().unwrap_or_else(|_| ImagePreviewProvider::fallback_picker());
     crate::preview::highlight::init_theme();
     let git_state: Arc<RwLock<Option<GitState>>> = Arc::new(RwLock::new(None));
-    let preview_registry = build_preview_registry(picker, config, &git_state)?;
+    let preview_registry = build_preview_registry(picker, config, &git_state, root_path)?;
     Ok((git_state, preview_registry))
 }
 
@@ -942,10 +943,18 @@ fn build_preview_registry(
     picker: Picker,
     config: &Config,
     git_state: &Arc<RwLock<Option<GitState>>>,
+    root_path: &Path,
 ) -> Result<PreviewRegistry> {
+    use crate::preview::providers::diff::DiffPreviewProvider;
+
     let mut providers: Vec<Arc<dyn PreviewProvider>> = vec![
         Arc::new(ImagePreviewProvider::new(picker)),
         Arc::new(TextPreviewProvider::new()),
+        Arc::new(DiffPreviewProvider::new(
+            Arc::clone(git_state),
+            root_path.to_path_buf(),
+            config.preview.command_timeout,
+        )),
         Arc::new(FallbackProvider::new()),
     ];
     for cmd in &config.preview.commands {
