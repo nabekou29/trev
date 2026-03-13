@@ -24,24 +24,27 @@ use ratatui_image::StatefulImage;
 
 use crate::preview::content::PreviewContent;
 use crate::preview::state::PreviewState;
+use crate::ui::column::truncate_to_width;
 
 /// Render the preview panel into the given area.
 ///
 /// Dispatches to variant-specific rendering based on the current
 /// `PreviewContent` in the `PreviewState`.
 ///
-/// When `is_narrow` is true, the preview is below the tree and uses a top border;
-/// otherwise it is beside the tree and uses a left border.
-pub fn render_preview(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    state: &mut PreviewState,
-    is_narrow: bool,
-) {
-    let title = build_title(state);
+/// The preview block uses full borders on all sides.
+pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewState) {
+    let provider_title = build_provider_title(state);
+    let provider_width = provider_title.as_ref().map_or(0, Line::width);
+    let top_title = build_top_title(state, area.width as usize, provider_width);
+    let lang_title = build_language_title(state);
 
-    let border = if is_narrow { Borders::TOP } else { Borders::LEFT };
-    let block = Block::default().borders(border).title(title).title_alignment(Alignment::Left);
+    let mut block = Block::default().borders(Borders::ALL).title_top(top_title);
+    if let Some(providers) = provider_title {
+        block = block.title_top(providers.right_aligned());
+    }
+    if let Some(lang) = lang_title {
+        block = block.title_bottom(lang.right_aligned());
+    }
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -110,38 +113,62 @@ pub fn render_preview(
     }
 }
 
-/// Build the title line for the preview block.
-fn build_title(state: &PreviewState) -> Line<'static> {
+/// Build the top-left title: file name, truncated with `…` if needed.
+fn build_top_title(
+    state: &PreviewState,
+    total_width: usize,
+    provider_width: usize,
+) -> Line<'static> {
     let file_name = state
         .current_path
         .as_ref()
         .and_then(|p| p.file_name())
         .map_or_else(|| "Preview".to_string(), |n| n.to_string_lossy().into_owned());
-    let mut spans = vec![Span::styled(
-        format!(" {file_name} "),
+
+    // Available space: total - 2 (border corners) - provider_width
+    // The padding spaces ` name ` are part of the rendered width, so subtract them too.
+    let max_name_len = total_width.saturating_sub(provider_width + 2 + 2);
+    let display_name = truncate_to_width(&file_name, max_name_len);
+
+    Line::from(Span::styled(
+        format!(" {display_name} "),
         Style::default().add_modifier(Modifier::BOLD),
-    )];
+    ))
+}
 
-    if let Some(provider_name) = state.active_provider_name() {
-        spans.push(Span::styled(format!(" [{provider_name}]"), Style::default().fg(Color::Cyan)));
+/// Build the top-right provider indicator title.
+///
+/// Only shown when multiple providers are available.
+/// Active: `● Name` (cyan+bold), inactive: `○ Name` (dim).
+fn build_provider_title(state: &PreviewState) -> Option<Line<'static>> {
+    if state.available_providers.len() <= 1 {
+        return None;
     }
-
-    if state.available_providers.len() > 1 {
-        spans.push(Span::styled(
-            format!(" ({}/{})", state.active_provider_index + 1, state.available_providers.len()),
-            Style::default().fg(Color::DarkGray),
-        ));
+    let mut spans = Vec::new();
+    for (i, name) in state.available_providers.iter().enumerate() {
+        let is_active = i == state.active_provider_index;
+        let (dot_label, style) = if is_active {
+            (" ● ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        } else {
+            (" ○ ", Style::default().fg(Color::DarkGray))
+        };
+        spans.push(Span::styled(dot_label, style));
+        spans.push(Span::styled(name.clone(), style));
     }
+    spans.push(Span::raw(" "));
+    Some(Line::from(spans))
+}
 
-    // Show language for highlighted text.
+/// Build the right-aligned language label for syntax-highlighted content.
+fn build_language_title(state: &PreviewState) -> Option<Line<'static>> {
     if let PreviewContent::HighlightedText { language, .. } = &state.content {
-        spans.push(Span::styled(
-            format!(" {language}"),
+        Some(Line::from(Span::styled(
+            format!("{language} "),
             Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC),
-        ));
+        )))
+    } else {
+        None
     }
-
-    Line::from(spans)
 }
 
 /// Apply word wrap or horizontal scroll to a paragraph.

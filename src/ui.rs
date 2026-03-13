@@ -80,7 +80,7 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState, key_lookup: &ActionKe
         }
         {
             let _span = tracing::info_span!("render_preview").entered();
-            preview_view::render_preview(frame, preview_area, &mut state.preview_state, is_narrow);
+            preview_view::render_preview(frame, preview_area, &mut state.preview_state);
         }
     } else {
         // Full width tree when preview is disabled.
