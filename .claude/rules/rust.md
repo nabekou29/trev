@@ -1,10 +1,15 @@
 ---
-paths: "src/**/*.rs"
+paths: "src/**/*.rs, benches/**/*.rs, Cargo.toml"
 ---
 
 # Rust Conventions
 
-- Rust 2024 edition with strict lints (see Cargo.toml)
+- Rust 2024 edition, nightly-2026-01-24
+- TUI: ratatui 0.30, crossterm 0.29
+- Async: tokio (full)
+- Config: YAML (`~/.config/trev/config.yml`), schemars for JSON Schema
+- Session: JSON (`{data_dir}/trev/sessions/`)
+- IPC: Unix Domain Socket (JSON-RPC 2.0)
 - No `mod.rs` - use modern module style (`foo.rs` + `foo/`)
 - Prefer functional style: `iter()`, `filter()`, `map()`, `find_map()`
 

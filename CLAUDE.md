@@ -1,19 +1,13 @@
-# trev Development Guidelines
+# trev
 
-## Tech Stack
+Rust TUI file tree viewer.
 
-- Rust 2024 edition, nightly-2026-01-24
-- TUI: ratatui 0.30, crossterm 0.29
-- Async: tokio (full)
-- Config: YAML (`~/.config/trev/config.yml`), schemars for JSON Schema
-- Session: JSON (`{data_dir}/trev/sessions/`)
-- IPC: Unix Domain Socket (JSON-RPC 2.0)
+## Tasks
 
-<!-- MANUAL ADDITIONS START -->
+Run via `mise run <task>` — see `mise.toml` for full list.
 
-## Performance
+Key: `build`, `test`, `lint`, `lint-fix`, `format`, `bench`
 
-- Always measure before optimizing — never optimize based on guesses
-- See `perf` skill for detailed measurement workflow
+## Gotchas
 
-<!-- MANUAL ADDITIONS END -->
+- After changing `config.rs` or `src/ui/column.rs`, run `mise run schema` to regenerate `config.schema.json`

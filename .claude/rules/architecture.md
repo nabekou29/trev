@@ -1,5 +1,5 @@
 ---
-paths: "src/**/*.rs, Cargo.toml"
+paths: "src/**/*.rs, benches/**/*.rs, Cargo.toml"
 ---
 
 # Architecture
