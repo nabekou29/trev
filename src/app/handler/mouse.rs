@@ -129,7 +129,11 @@ fn handle_provider_click(state: &mut AppState, ctx: &AppContext, pos: Position) 
 }
 
 /// Handle a left-click in the tree area: move cursor to the clicked row.
-fn handle_left_click(state: &mut AppState, _ctx: &AppContext, pos: Position) {
+///
+/// If the clicked node is a directory, also toggles expand/collapse.
+fn handle_left_click(state: &mut AppState, ctx: &AppContext, pos: Position) {
+    use crate::action::TreeAction;
+
     let areas = &state.layout_areas;
 
     if !areas.tree_area.contains(pos) {
@@ -144,6 +148,11 @@ fn handle_left_click(state: &mut AppState, _ctx: &AppContext, pos: Position) {
     let total = state.tree_state.visible_node_count();
     if target_index < total {
         state.tree_state.move_cursor_to(target_index);
+
+        // Toggle expand/collapse if the clicked node is a directory.
+        if state.tree_state.current_node_info().is_some_and(|info| info.is_dir) {
+            super::tree::handle_tree_action(TreeAction::ToggleExpand, state, ctx);
+        }
     }
 }
 
