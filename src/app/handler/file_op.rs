@@ -305,8 +305,28 @@ pub fn execute_delete(confirm: crate::input::ConfirmState, state: &mut AppState,
     }
 }
 
+/// Validate that a user-supplied name does not escape the parent directory.
+///
+/// Rejects absolute paths and `..` components to prevent path traversal attacks.
+fn validate_name(name: &str) -> Result<(), &'static str> {
+    let path = Path::new(name);
+    if path.is_absolute() {
+        return Err("Absolute paths are not allowed");
+    }
+    for component in path.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err("Path traversal (..) is not allowed");
+        }
+    }
+    Ok(())
+}
+
 /// Execute file/directory creation.
 pub fn execute_create(parent_dir: &Path, name: &str, state: &mut AppState, ctx: &AppContext) {
+    if let Err(msg) = validate_name(name) {
+        state.set_status(msg.to_string());
+        return;
+    }
     let _guard = SuppressGuard::new(&ctx.suppressed);
     let new_path = parent_dir.join(name);
 
@@ -352,6 +372,10 @@ pub fn execute_create_directory(
     state: &mut AppState,
     ctx: &AppContext,
 ) {
+    if let Err(msg) = validate_name(name) {
+        state.set_status(msg.to_string());
+        return;
+    }
     let _guard = SuppressGuard::new(&ctx.suppressed);
     let new_path = parent_dir.join(name);
 
@@ -373,6 +397,10 @@ pub fn execute_create_directory(
 
 /// Execute file/directory rename.
 pub fn execute_rename(target: &Path, new_name: &str, state: &mut AppState, ctx: &AppContext) {
+    if let Err(msg) = validate_name(new_name) {
+        state.set_status(msg.to_string());
+        return;
+    }
     let _guard = SuppressGuard::new(&ctx.suppressed);
     let parent = target.parent().unwrap_or_else(|| Path::new(""));
     let new_path = parent.join(new_name);
@@ -597,4 +625,38 @@ fn collect_affected_parents(ops: &[FsOp]) -> HashSet<PathBuf> {
         }
     }
     parents
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+mod tests {
+    use googletest::prelude::*;
+    use rstest::*;
+
+    use super::*;
+
+    #[rstest]
+    fn validate_name_allows_simple_name() {
+        assert_that!(validate_name("file.txt"), ok(eq(())));
+    }
+
+    #[rstest]
+    fn validate_name_allows_nested_path() {
+        assert_that!(validate_name("dir/file.txt"), ok(eq(())));
+    }
+
+    #[rstest]
+    fn validate_name_rejects_parent_traversal() {
+        assert_that!(validate_name("../evil.txt"), err(anything()));
+    }
+
+    #[rstest]
+    fn validate_name_rejects_nested_parent_traversal() {
+        assert_that!(validate_name("foo/../../evil.txt"), err(anything()));
+    }
+
+    #[rstest]
+    fn validate_name_rejects_absolute_path() {
+        assert_that!(validate_name("/etc/passwd"), err(anything()));
+    }
 }
