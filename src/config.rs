@@ -728,7 +728,12 @@ impl Default for Priority {
 
 impl Serialize for Priority {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.value().serialize(serializer)
+        match *self {
+            Self::HIGH => serializer.serialize_str("high"),
+            Self::MID => serializer.serialize_str("mid"),
+            Self::LOW => serializer.serialize_str("low"),
+            other => other.value().serialize(serializer),
+        }
     }
 }
 
@@ -776,7 +781,7 @@ impl JsonSchema for Priority {
     fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "description": "Priority for ordering (lower = higher priority). Number or named constant: high (0), mid (100), low (1000)",
-            "default": 100,
+            "default": "mid",
             "anyOf": [
                 { "type": "integer", "minimum": 0 },
                 { "type": "string", "enum": ["high", "mid", "low"] }

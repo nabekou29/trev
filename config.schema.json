@@ -758,7 +758,7 @@
         "priority": {
           "description": "Priority for ordering (lower = higher priority, default: 100).\n\nAccepts a number or a named constant: `high` (0), `mid` (100), `low` (1000).",
           "$ref": "#/$defs/Priority",
-          "default": 100
+          "default": "mid"
         }
       },
       "required": [
@@ -1337,7 +1337,7 @@
           ]
         }
       ],
-      "default": 100
+      "default": "mid"
     },
     "SearchConfig": {
       "description": "Search configuration.",
