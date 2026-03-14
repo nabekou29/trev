@@ -79,6 +79,13 @@ impl IpcServer {
 
         let listener = UnixListener::bind(&socket_path)?;
 
+        // Restrict socket permissions to owner only (0o600).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600));
+        }
+
         info!(path = %socket_path.display(), "IPC server listening");
 
         let notification_writer = Arc::new(Mutex::new(None));
@@ -160,6 +167,12 @@ async fn accept_loop(
     }
 }
 
+/// Maximum length of a single IPC message line (64 KiB).
+///
+/// Prevents denial-of-service via unbounded memory allocation from
+/// a malicious client sending an extremely long line without a newline.
+const MAX_IPC_LINE_BYTES: usize = 64 * 1024;
+
 /// Handle a single client connection: read lines and dispatch JSON-RPC messages.
 async fn handle_connection(
     read_half: tokio::net::unix::OwnedReadHalf,
@@ -174,6 +187,10 @@ async fn handle_connection(
         match reader.read_line(&mut line).await {
             Ok(0) => break, // EOF — client disconnected
             Ok(_) => {
+                if line.len() > MAX_IPC_LINE_BYTES {
+                    warn!(len = line.len(), "IPC message too large, dropping");
+                    continue;
+                }
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
                     continue;

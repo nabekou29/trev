@@ -117,7 +117,7 @@ pub fn save(state: &SessionState) -> Result<()> {
 
     let json = serde_json::to_string_pretty(state).context("failed to serialize session state")?;
 
-    let tmp_path = path.with_extension("json.tmp");
+    let tmp_path = path.with_extension(format!("json.{}.tmp", std::process::id()));
     std::fs::write(&tmp_path, json).context("failed to write temporary session file")?;
     std::fs::rename(&tmp_path, &path).context("failed to rename session file")?;
 
