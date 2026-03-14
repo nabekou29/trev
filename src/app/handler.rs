@@ -523,7 +523,7 @@ pub(super) fn handle_open_editor(state: &mut AppState) {
         .or_else(|_| std::env::var("EDITOR"))
         .unwrap_or_else(|_| "vi".to_string());
 
-    let cmd = format!("{editor} {}", path.display());
+    let cmd = format!("{editor} {}", shell_escape(&path.display().to_string()));
     handle_shell_foreground(&cmd, state, false);
 }
 
@@ -671,17 +671,37 @@ fn expand_shell_template(template: &str, tree_state: &crate::state::tree::TreeSt
     let info = tree_state.current_node_info();
     let root = tree_state.root_path();
 
-    let path_str = info.as_ref().map_or_else(String::new, |i| i.path.display().to_string());
-    let dir_str =
-        tree_state.cursor_dir_path().map_or_else(String::new, |p| p.display().to_string());
-    let name_str = info.as_ref().map_or_else(String::new, |i| i.name.clone());
-    let root_str = root.display().to_string();
+    let path_str =
+        info.as_ref().map_or_else(String::new, |i| shell_escape(&i.path.display().to_string()));
+    let dir_str = tree_state
+        .cursor_dir_path()
+        .map_or_else(String::new, |p| shell_escape(&p.display().to_string()));
+    let name_str = info.as_ref().map_or_else(String::new, |i| shell_escape(&i.name));
+    let root_str = shell_escape(&root.display().to_string());
 
     template
         .replace("{path}", &path_str)
         .replace("{dir}", &dir_str)
         .replace("{name}", &name_str)
         .replace("{root}", &root_str)
+}
+
+/// Escape a string for safe use in POSIX shell commands.
+///
+/// Wraps the value in single quotes and escapes any embedded single quotes.
+/// Result: `'value'` or `'val'\''ue'` if the value contains `'`.
+fn shell_escape(s: &str) -> String {
+    let mut escaped = String::with_capacity(s.len() + 2);
+    escaped.push('\'');
+    for ch in s.chars() {
+        if ch == '\'' {
+            escaped.push_str("'\\''");
+        } else {
+            escaped.push(ch);
+        }
+    }
+    escaped.push('\'');
+    escaped
 }
 
 #[cfg(test)]
@@ -774,7 +794,7 @@ mod tests {
         let root = Path::new("/test/root");
         let state = state_with_file("test.txt", root);
         let result = super::expand_shell_template("open {path}", &state);
-        assert_that!(result.as_str(), eq("open /test/root/test.txt"));
+        assert_that!(result.as_str(), eq("open '/test/root/test.txt'"));
     }
 
     #[rstest]
@@ -782,7 +802,7 @@ mod tests {
         let root = Path::new("/test/root");
         let state = state_with_file("hello.rs", root);
         let result = super::expand_shell_template("echo {name}", &state);
-        assert_that!(result.as_str(), eq("echo hello.rs"));
+        assert_that!(result.as_str(), eq("echo 'hello.rs'"));
     }
 
     #[rstest]
@@ -790,7 +810,7 @@ mod tests {
         let root = Path::new("/test/root");
         let state = state_with_file("test.txt", root);
         let result = super::expand_shell_template("ls {root}", &state);
-        assert_that!(result.as_str(), eq("ls /test/root"));
+        assert_that!(result.as_str(), eq("ls '/test/root'"));
     }
 
     #[rstest]
@@ -798,7 +818,7 @@ mod tests {
         let root = Path::new("/test/root");
         let state = state_with_file("test.txt", root);
         let result = super::expand_shell_template("cd {dir}", &state);
-        assert_that!(result.as_str(), eq("cd /test/root"));
+        assert_that!(result.as_str(), eq("cd '/test/root'"));
     }
 
     #[rstest]
@@ -806,7 +826,7 @@ mod tests {
         let root = Path::new("/test/root");
         let state = state_with_dir("subdir", root);
         let result = super::expand_shell_template("cd {dir}", &state);
-        assert_that!(result.as_str(), eq("cd /test/root/subdir"));
+        assert_that!(result.as_str(), eq("cd '/test/root/subdir'"));
     }
 
     #[rstest]
@@ -814,7 +834,10 @@ mod tests {
         let root = Path::new("/test/root");
         let state = state_with_file("test.txt", root);
         let result = super::expand_shell_template("cp {path} {dir}/{name}.bak", &state);
-        assert_that!(result.as_str(), eq("cp /test/root/test.txt /test/root/test.txt.bak"));
+        assert_that!(
+            result.as_str(),
+            eq("cp '/test/root/test.txt' '/test/root'/'test.txt'.bak")
+        );
     }
 
     #[rstest]
@@ -823,6 +846,37 @@ mod tests {
         let state = state_with_file("test.txt", root);
         let result = super::expand_shell_template("echo hello", &state);
         assert_that!(result.as_str(), eq("echo hello"));
+    }
+
+    // --- shell_escape ---
+
+    #[rstest]
+    fn shell_escape_simple_string() {
+        assert_that!(super::shell_escape("hello").as_str(), eq("'hello'"));
+    }
+
+    #[rstest]
+    fn shell_escape_with_semicolon() {
+        assert_that!(super::shell_escape("a;b").as_str(), eq("'a;b'"));
+    }
+
+    #[rstest]
+    fn shell_escape_with_single_quote() {
+        assert_that!(super::shell_escape("it's").as_str(), eq("'it'\\''s'"));
+    }
+
+    #[rstest]
+    fn shell_escape_with_dollar_and_backtick() {
+        assert_that!(super::shell_escape("$(rm -rf /)").as_str(), eq("'$(rm -rf /)'"));
+        assert_that!(super::shell_escape("`id`").as_str(), eq("'`id`'"));
+    }
+
+    #[rstest]
+    fn expand_template_escapes_shell_metacharacters() {
+        let root = Path::new("/test/root");
+        let state = state_with_file("file;rm -rf /.txt", root);
+        let result = super::expand_shell_template("cat {name}", &state);
+        assert_that!(result.as_str(), eq("cat 'file;rm -rf /.txt'"));
     }
 
     // --- resolve_menu_item_action ---
