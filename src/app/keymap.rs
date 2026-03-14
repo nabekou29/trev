@@ -195,7 +195,6 @@ impl KeyMap {
         self.load_default_preview();
         self.load_default_display();
         self.load_default_file_ops();
-        self.load_default_daemon();
     }
 
     /// Default navigation and quit bindings.
@@ -212,7 +211,6 @@ impl KeyMap {
         self.bind(KeyCode::Char('h'), KeyModifiers::NONE, &[], Action::Tree(TreeAction::Collapse));
         self.bind(KeyCode::Left, KeyModifiers::NONE, &[], Action::Tree(TreeAction::Collapse));
         // Enter on directories: change root to that directory.
-        // Enter on files in daemon mode is handled by load_default_daemon().
         self.bind(
             KeyCode::Enter,
             KeyModifiers::NONE,
@@ -417,21 +415,6 @@ impl KeyMap {
         );
     }
 
-    /// Default daemon-mode keybindings.
-    fn load_default_daemon(&mut self) {
-        use KeyContext::{
-            Daemon,
-            File,
-        };
-
-        // Enter on a file in daemon mode: send open_file notification to the editor.
-        self.bind(
-            KeyCode::Enter,
-            KeyModifiers::NONE,
-            &[Daemon, File],
-            Action::Notify("open_file".to_string()),
-        );
-    }
 }
 
 /// Resolve the action from a keybinding entry.
@@ -690,13 +673,10 @@ mod tests {
     }
 
     #[rstest]
-    fn resolve_enter_on_daemon_file_to_notify_open_file() {
+    fn resolve_enter_on_daemon_file_has_no_default() {
         let km = default_keymap();
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-        assert_eq!(
-            km.resolve(key, &daemon_file_ctx()),
-            Some(&Action::Notify("open_file".to_string()))
-        );
+        assert_eq!(km.resolve(key, &daemon_file_ctx()), None);
     }
 
     #[rstest]
