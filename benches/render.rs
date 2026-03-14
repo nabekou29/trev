@@ -136,7 +136,7 @@ fn bench_render_tree_100k_flat(c: &mut Criterion) {
     let root_path = Path::new("/test/root");
     let children: Vec<TreeNode> =
         (0..100_000).map(|i| file_node(&format!("file{i:06}.txt"), root_path)).collect();
-    let state = app_state_from_tree(tree_with_children(children));
+    let mut state = app_state_from_tree(tree_with_children(children));
     let mut terminal = Terminal::new(TestBackend::new(120, 50)).unwrap();
 
     c.bench_function("render_tree_100k_flat", |b| {
@@ -144,7 +144,7 @@ fn bench_render_tree_100k_flat(c: &mut Criterion) {
             terminal
                 .draw(|frame| {
                     let visible_count = state.tree_state.visible_node_count();
-                    trev::ui::tree_view::render_tree(frame, frame.area(), &state, visible_count);
+                    trev::ui::tree_view::render_tree(frame, frame.area(), &mut state, visible_count);
                 })
                 .unwrap();
         });
@@ -163,7 +163,7 @@ fn bench_render_tree_100k_nested(c: &mut Criterion) {
             d
         })
         .collect();
-    let state = app_state_from_tree(tree_with_children(children));
+    let mut state = app_state_from_tree(tree_with_children(children));
     let mut terminal = Terminal::new(TestBackend::new(120, 50)).unwrap();
 
     c.bench_function("render_tree_100k_nested", |b| {
@@ -171,7 +171,7 @@ fn bench_render_tree_100k_nested(c: &mut Criterion) {
             terminal
                 .draw(|frame| {
                     let visible_count = state.tree_state.visible_node_count();
-                    trev::ui::tree_view::render_tree(frame, frame.area(), &state, visible_count);
+                    trev::ui::tree_view::render_tree(frame, frame.area(), &mut state, visible_count);
                 })
                 .unwrap();
         });
@@ -192,7 +192,7 @@ fn bench_render_tree_100k_scrolled(c: &mut Criterion) {
             terminal
                 .draw(|frame| {
                     let visible_count = state.tree_state.visible_node_count();
-                    trev::ui::tree_view::render_tree(frame, frame.area(), &state, visible_count);
+                    trev::ui::tree_view::render_tree(frame, frame.area(), &mut state, visible_count);
                 })
                 .unwrap();
         });
@@ -238,7 +238,7 @@ fn bench_render_tree_100k_filtered(c: &mut Criterion) {
             terminal
                 .draw(|frame| {
                     let visible_count = state.tree_state.visible_node_count();
-                    trev::ui::tree_view::render_tree(frame, frame.area(), &state, visible_count);
+                    trev::ui::tree_view::render_tree(frame, frame.area(), &mut state, visible_count);
                 })
                 .unwrap();
         });

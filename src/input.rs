@@ -17,19 +17,24 @@ pub struct TextBuffer {
     pub value: String,
     /// Cursor position within the value (byte offset).
     pub cursor_pos: usize,
+    /// Horizontal scroll offset in display columns (stateful).
+    ///
+    /// Updated by [`push_viewport_cursor_spans`] to keep the cursor visible.
+    /// Only scrolls when the cursor would exit the visible viewport.
+    pub(crate) scroll_offset: usize,
 }
 
 impl TextBuffer {
     /// Create a new, empty text buffer.
     #[must_use]
     pub const fn new() -> Self {
-        Self { value: String::new(), cursor_pos: 0 }
+        Self { value: String::new(), cursor_pos: 0, scroll_offset: 0 }
     }
 
     /// Create a text buffer with initial value and cursor position.
     #[must_use]
     pub const fn with_value(value: String, cursor_pos: usize) -> Self {
-        Self { value, cursor_pos }
+        Self { value, cursor_pos, scroll_offset: 0 }
     }
 
     /// Insert a character at the current cursor position.
@@ -113,8 +118,10 @@ impl TextBuffer {
 
     /// Replace the buffer value and move the cursor to the end.
     pub fn set_value(&mut self, value: &str) {
-        self.value.clone_from(&value.to_string());
+        self.value.clear();
+        self.value.push_str(value);
         self.cursor_pos = self.value.len();
+        self.scroll_offset = 0;
     }
 
     /// Push spans for the buffer value with an inverted-block cursor.
@@ -141,6 +148,129 @@ impl TextBuffer {
             }
         } else {
             spans.push(Span::styled(" ", cursor_style));
+        }
+    }
+
+    /// Push spans for the buffer value with viewport-aware horizontal scrolling.
+    ///
+    /// Adjusts the stored `scroll_offset` so the cursor stays visible, then
+    /// renders only the visible portion with `◀`/`▶` overflow indicators.
+    /// Scroll only changes when the cursor would exit the current viewport.
+    pub fn push_viewport_cursor_spans(
+        &mut self,
+        spans: &mut Vec<ratatui::text::Span<'_>>,
+        viewport_width: usize,
+    ) {
+        use ratatui::style::{
+            Color,
+            Style,
+        };
+        use ratatui::text::Span;
+        use unicode_width::UnicodeWidthChar;
+
+        // Single pass: compute cursor_col, total_width, and collect visible chars.
+        let mut col: usize = 0;
+        let mut cursor_col: usize = 0;
+        let mut before_cursor = String::new();
+        let mut cursor_char_str = String::new();
+        let mut after_cursor = String::new();
+
+        // First, compute cursor_col and total_width in one pass,
+        // deferring visible-char collection to after adjust_scroll.
+        for (byte_idx, ch) in self.value.char_indices() {
+            let ch_width = ch.width().unwrap_or(0);
+            if byte_idx == self.cursor_pos {
+                cursor_col = col;
+            }
+            col += ch_width;
+        }
+        if self.cursor_pos >= self.value.len() {
+            cursor_col = col;
+        }
+        let total_width = col;
+
+        // Adjust scroll offset — only moves when cursor would exit viewport.
+        self.adjust_scroll(cursor_col, total_width, viewport_width);
+
+        // Determine arrow indicators from stored scroll.
+        let has_left_arrow = self.scroll_offset > 0;
+        let left_cols = usize::from(has_left_arrow);
+        let effective_scroll = self.scroll_offset + left_cols;
+        let content_cols = viewport_width.saturating_sub(left_cols);
+        let has_right_arrow = total_width > effective_scroll + content_cols;
+        let right_cols = usize::from(has_right_arrow);
+        let effective_viewport = viewport_width.saturating_sub(left_cols + right_cols);
+
+        // Second pass: collect only visible characters.
+        col = 0;
+        for (byte_idx, ch) in self.value.char_indices() {
+            let ch_width = ch.width().unwrap_or(0);
+            let next_col = col + ch_width;
+
+            if next_col > effective_scroll && col < effective_scroll + effective_viewport {
+                match byte_idx.cmp(&self.cursor_pos) {
+                    std::cmp::Ordering::Equal => cursor_char_str.push(ch),
+                    std::cmp::Ordering::Less => before_cursor.push(ch),
+                    std::cmp::Ordering::Greater => after_cursor.push(ch),
+                }
+            }
+
+            col = next_col;
+        }
+
+        let arrow_style = Style::default().fg(Color::DarkGray);
+        if has_left_arrow {
+            spans.push(Span::styled("◀", arrow_style));
+        }
+
+        if !before_cursor.is_empty() {
+            spans.push(Span::raw(before_cursor));
+        }
+
+        let cursor_style = Style::default().bg(Color::White).fg(Color::Black);
+        if cursor_char_str.is_empty() {
+            if self.cursor_pos >= self.value.len() {
+                spans.push(Span::styled(" ", cursor_style));
+            }
+        } else {
+            spans.push(Span::styled(cursor_char_str, cursor_style));
+        }
+
+        if !after_cursor.is_empty() {
+            spans.push(Span::raw(after_cursor));
+        }
+
+        if has_right_arrow {
+            spans.push(Span::styled("▶", arrow_style));
+        }
+    }
+
+    /// Adjust `scroll_offset` so the cursor stays visible within the viewport.
+    ///
+    /// Only changes scroll when the cursor would exit the current visible area.
+    /// Accounts for arrow indicator columns at viewport edges.
+    const fn adjust_scroll(&mut self, cursor_col: usize, total_width: usize, viewport_width: usize) {
+        // Everything fits — no scroll needed.
+        if total_width <= viewport_width {
+            self.scroll_offset = 0;
+            return;
+        }
+
+        // Cursor moved left past the visible area.
+        // Account for left arrow: if scroll > 0, arrow takes 1 col,
+        // so content starts at scroll + 1. Cursor must be >= scroll + 1
+        // (or scroll = 0 if cursor is at col 0).
+        if cursor_col <= self.scroll_offset {
+            self.scroll_offset = cursor_col.saturating_sub(1);
+            return;
+        }
+
+        // Cursor moved right past the visible area.
+        // Reserve 1 col margin at right edge for potential right arrow.
+        let right_boundary = self.scroll_offset + viewport_width.saturating_sub(1);
+        if cursor_col >= right_boundary {
+            // Place cursor 1 col from the right edge (with left arrow).
+            self.scroll_offset = cursor_col.saturating_sub(viewport_width.saturating_sub(2));
         }
     }
 
@@ -899,5 +1029,118 @@ mod tests {
         let mut b = buf("foo.bar baz", 0);
         b.move_word_forward();
         assert_that!(b.cursor_pos, eq(4)); // foo.|bar baz
+    }
+
+    // --- TextBuffer stateful scroll tests ---
+
+    /// Helper: collect rendered span text from `push_viewport_cursor_spans`.
+    fn render_viewport(b: &mut TextBuffer, viewport: usize) -> String {
+        let mut spans = Vec::new();
+        b.push_viewport_cursor_spans(&mut spans, viewport);
+        spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[rstest]
+    fn scroll_stays_zero_while_cursor_within_viewport() {
+        // "abcdefghijklmno" (15 chars), cursor at 0, viewport 10
+        // Moving cursor right within viewport should NOT scroll.
+        let mut b = buf("abcdefghijklmno", 0);
+        let text = render_viewport(&mut b, 10);
+        assert_that!(text.as_str(), not(starts_with("◀")));
+        assert_that!(text.as_str(), ends_with("▶"));
+
+        // Move cursor to position 5 — still within viewport, no scroll.
+        b.cursor_pos = 5;
+        let text = render_viewport(&mut b, 10);
+        assert_that!(b.scroll_offset, eq(0));
+        assert_that!(text.as_str(), not(starts_with("◀")));
+    }
+
+    #[rstest]
+    fn scroll_activates_when_cursor_hits_right_edge() {
+        // Cursor moves past viewport right boundary → scroll activates.
+        let mut b = buf("abcdefghijklmno", 0);
+        render_viewport(&mut b, 10); // initial render, scroll = 0
+
+        // Move cursor to position 9 (right margin, triggers scroll)
+        b.cursor_pos = 9;
+        let text = render_viewport(&mut b, 10);
+        assert_that!(b.scroll_offset, gt(0));
+        assert_that!(text.as_str(), starts_with("◀"));
+    }
+
+    #[rstest]
+    fn scroll_does_not_change_when_cursor_moves_within_viewport() {
+        // After scrolling right, moving cursor left within viewport should NOT change scroll.
+        let mut b = buf("abcdefghijklmnopqrst", 0); // 20 chars
+        // Scroll right by moving cursor to end
+        b.cursor_pos = 20;
+        render_viewport(&mut b, 10);
+        let scroll_after_right = b.scroll_offset;
+
+        // Move cursor left by a few positions (still within viewport)
+        b.cursor_pos = 15;
+        render_viewport(&mut b, 10);
+        assert_that!(b.scroll_offset, eq(scroll_after_right));
+    }
+
+    #[rstest]
+    fn scroll_reduces_when_cursor_hits_left_edge() {
+        // After scrolling right, moving cursor past left boundary reduces scroll.
+        let mut b = buf("abcdefghijklmnopqrst", 0); // 20 chars
+        b.cursor_pos = 20;
+        render_viewport(&mut b, 10);
+        let scroll_at_end = b.scroll_offset;
+        assert_that!(scroll_at_end, gt(0));
+
+        // Move cursor back to start
+        b.cursor_pos = 0;
+        render_viewport(&mut b, 10);
+        assert_that!(b.scroll_offset, eq(0));
+    }
+
+    #[rstest]
+    fn scroll_zero_when_text_fits_viewport() {
+        let mut b = buf("hello", 3);
+        render_viewport(&mut b, 10);
+        assert_that!(b.scroll_offset, eq(0));
+    }
+
+    #[rstest]
+    fn viewport_shows_right_arrow_for_right_overflow() {
+        let mut b = buf("abcdefghijklmno", 0);
+        let text = render_viewport(&mut b, 10);
+        assert_that!(text.as_str(), not(starts_with("◀")));
+        assert_that!(text.as_str(), ends_with("▶"));
+    }
+
+    #[rstest]
+    fn viewport_shows_left_arrow_when_scrolled() {
+        let mut b = buf("abcdefghijklmno", 15); // cursor at end
+        let text = render_viewport(&mut b, 10);
+        assert_that!(text.as_str(), starts_with("◀"));
+    }
+
+    #[rstest]
+    fn viewport_shows_both_arrows_for_middle_cursor() {
+        let mut b = buf("abcdefghijklmnopqrst", 10); // 20 chars, cursor in middle
+        let text = render_viewport(&mut b, 10);
+        assert_that!(text.as_str(), starts_with("◀"));
+        assert_that!(text.as_str(), ends_with("▶"));
+    }
+
+    #[rstest]
+    fn viewport_no_arrows_when_text_fits() {
+        let mut b = buf("hello", 3);
+        let text = render_viewport(&mut b, 10);
+        assert_that!(text.as_str(), not(starts_with("◀")));
+        assert_that!(text.as_str(), not(ends_with("▶")));
+    }
+
+    #[rstest]
+    fn viewport_short_text_unchanged() {
+        let mut b = buf("hi", 2);
+        let text = render_viewport(&mut b, 10);
+        assert_that!(text.as_str(), eq("hi "));
     }
 }

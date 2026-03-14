@@ -29,7 +29,7 @@ use crate::input::InputState;
 /// │ input_value█                     │
 /// ╰──────────────────────────────────╯
 /// ```
-pub fn render_inline_input(frame: &mut Frame<'_>, area: Rect, input: &InputState) {
+pub fn render_inline_input(frame: &mut Frame<'_>, area: Rect, input: &mut InputState) {
     // Clear the area behind the input box.
     frame.render_widget(Clear, area);
 
@@ -44,9 +44,13 @@ pub fn render_inline_input(frame: &mut Frame<'_>, area: Rect, input: &InputState
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ));
 
-    // Build the input line with cursor.
+    // Compute inner width for viewport-aware text clipping.
+    let inner = block.inner(area);
+    let viewport_width = inner.width as usize;
+
+    // Build the input line with cursor (clipped to viewport).
     let mut spans = Vec::new();
-    input.buffer.push_cursor_spans(&mut spans);
+    input.buffer.push_viewport_cursor_spans(&mut spans, viewport_width);
 
     let line = Line::from(spans);
     let paragraph = Paragraph::new(line).block(block);

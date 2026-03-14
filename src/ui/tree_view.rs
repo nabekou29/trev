@@ -38,7 +38,7 @@ use crate::ui::column::{
 ///
 /// `visible_count` is the pre-computed total visible node count for this frame,
 /// avoiding redundant full tree walks.
-pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState, visible_count: usize) {
+pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &mut AppState, visible_count: usize) {
     // When in Search(Typing) mode, reserve the bottom row for the search input bar.
     let (tree_area, search_bar_area) = if let AppMode::Search(ref search) = state.mode {
         if search.phase == crate::input::SearchPhase::Typing && area.height > 1 {
@@ -82,7 +82,7 @@ pub fn render_tree(frame: &mut Frame<'_>, area: Rect, state: &AppState, visible_
     frame.render_widget(paragraph, tree_area);
 
     // Render inline input overlay when in Input mode.
-    if let AppMode::Input(ref input) = state.mode {
+    if let AppMode::Input(ref mut input) = state.mode {
         render_input_overlay(frame, tree_area, cursor, offset, height, input);
     }
 
@@ -471,7 +471,7 @@ fn render_input_overlay(
     cursor: usize,
     offset: usize,
     height: usize,
-    input: &crate::input::InputState,
+    input: &mut crate::input::InputState,
 ) {
     let cursor_row = cursor.saturating_sub(offset);
     // Place input box below the cursor row.
