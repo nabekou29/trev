@@ -45,13 +45,19 @@ impl PreviewState {
         }
     }
 
-    /// Request a preview for a new file.
+    /// Request a preview for a file.
     ///
-    /// Cancels any in-flight load, resets scroll and provider index,
-    /// and sets content to `Loading`.
+    /// When switching to a different file, resets scroll position and provider
+    /// index. Re-requesting the same file (e.g. after a file-watcher event)
+    /// preserves both so the user's view is not disrupted.
     pub fn request_preview(&mut self, path: PathBuf) {
-        self.active_provider_index = 0;
-        self.begin_load(path);
+        let same_file = self.current_path.as_ref() == Some(&path);
+        if same_file {
+            self.begin_reload();
+        } else {
+            self.active_provider_index = 0;
+            self.begin_load(path);
+        }
     }
 
     /// Reload the current file with a different provider.
@@ -62,7 +68,7 @@ impl PreviewState {
         self.begin_load(path);
     }
 
-    /// Common loading setup: cancel in-flight, reset scroll, set Loading.
+    /// Loading setup for a new file: cancel in-flight, reset scroll, set Loading.
     fn begin_load(&mut self, path: PathBuf) {
         self.cancel_token.cancel();
         self.cancel_token = CancellationToken::new();
@@ -72,14 +78,28 @@ impl PreviewState {
         self.content = PreviewContent::Loading;
     }
 
+    /// Reload setup for the same file: cancel in-flight but preserve scroll.
+    fn begin_reload(&mut self) {
+        self.cancel_token.cancel();
+        self.cancel_token = CancellationToken::new();
+    }
+
     /// Set the preview content (called when loading completes).
     pub fn set_content(&mut self, content: PreviewContent) {
         self.content = content;
     }
 
     /// Set the list of available provider names for the current file.
+    ///
+    /// Clamps the active provider index to a valid range when the list
+    /// shrinks (e.g. switching between files with different provider sets).
     pub fn set_available_providers(&mut self, providers: Vec<String>) {
         self.available_providers = providers;
+        if !self.available_providers.is_empty()
+            && self.active_provider_index >= self.available_providers.len()
+        {
+            self.active_provider_index = 0;
+        }
     }
 
     /// Get the total number of content lines for scroll calculations.
@@ -162,14 +182,27 @@ mod tests {
     use super::*;
 
     #[rstest]
-    fn request_preview_resets_scroll() {
+    fn request_preview_different_file_resets_scroll() {
         let mut state = PreviewState::new();
+        state.request_preview(PathBuf::from("/a.rs"));
         state.scroll_row = 10;
         state.scroll_col = 5;
-        state.request_preview(PathBuf::from("/test.rs"));
 
+        state.request_preview(PathBuf::from("/b.rs"));
         assert_that!(state.scroll_row, eq(0));
         assert_that!(state.scroll_col, eq(0));
+    }
+
+    #[rstest]
+    fn request_preview_same_file_preserves_scroll() {
+        let mut state = PreviewState::new();
+        state.request_preview(PathBuf::from("/test.rs"));
+        state.scroll_row = 10;
+        state.scroll_col = 5;
+
+        state.request_preview(PathBuf::from("/test.rs"));
+        assert_that!(state.scroll_row, eq(10));
+        assert_that!(state.scroll_col, eq(5));
     }
 
     #[rstest]
@@ -261,5 +294,45 @@ mod tests {
         assert_that!(state.active_provider_name(), some(eq("Image")));
         state.cycle_next_provider();
         assert_that!(state.active_provider_name(), some(eq("Text")));
+    }
+
+    #[rstest]
+    fn request_preview_same_file_preserves_provider_index() {
+        let mut state = PreviewState::new();
+        state.request_preview(PathBuf::from("/test.rs"));
+        state.active_provider_index = 2;
+
+        // Same file — index should be preserved.
+        state.request_preview(PathBuf::from("/test.rs"));
+        assert_that!(state.active_provider_index, eq(2));
+    }
+
+    #[rstest]
+    fn request_preview_different_file_resets_provider_index() {
+        let mut state = PreviewState::new();
+        state.request_preview(PathBuf::from("/test.rs"));
+        state.active_provider_index = 2;
+
+        // Different file — index should reset.
+        state.request_preview(PathBuf::from("/other.rs"));
+        assert_that!(state.active_provider_index, eq(0));
+    }
+
+    #[rstest]
+    fn set_available_providers_clamps_out_of_bounds_index() {
+        let mut state = PreviewState::new();
+        state.active_provider_index = 2;
+
+        state.set_available_providers(vec!["A".to_string(), "B".to_string()]);
+        assert_that!(state.active_provider_index, eq(0));
+    }
+
+    #[rstest]
+    fn set_available_providers_preserves_valid_index() {
+        let mut state = PreviewState::new();
+        state.active_provider_index = 1;
+
+        state.set_available_providers(vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+        assert_that!(state.active_provider_index, eq(1));
     }
 }
