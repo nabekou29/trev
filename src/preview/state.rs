@@ -87,6 +87,7 @@ impl PreviewState {
         match &self.content {
             PreviewContent::HighlightedText { lines, .. } => lines.len(),
             PreviewContent::PlainText { lines, .. } => lines.len(),
+            PreviewContent::AnsiText { text } => text.lines.len(),
             _ => 0,
         }
     }
