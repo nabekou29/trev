@@ -1469,6 +1469,13 @@ fn process_watcher_events(
             state.preview_cache.invalidate_path(&event.path);
         }
 
+        // Re-trigger preview if the currently previewed file was modified.
+        if let Some(ref preview_path) = state.preview_state.current_path
+            && events.iter().any(|e| e.path == *preview_path)
+        {
+            handler::preview::trigger_preview_immediate(state, ctx);
+        }
+
         let affected_dirs: HashSet<PathBuf> =
             events.iter().filter_map(|event| event.path.parent().map(Path::to_path_buf)).collect();
 
