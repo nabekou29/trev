@@ -167,36 +167,54 @@ impl PreviewProvider for ExternalCmdProvider {
 /// Wait for a child process with a timeout.
 ///
 /// If the timeout expires, kills the process and returns an error.
+/// Stdout and stderr are drained in separate threads to prevent pipe deadlocks.
 fn wait_with_timeout(
-    child: std::process::Child,
+    mut child: std::process::Child,
     timeout: Duration,
 ) -> anyhow::Result<std::process::Output> {
-    // Use a thread to implement timeout since std::process doesn't have native timeout.
-    let (tx, rx) = std::sync::mpsc::channel();
-    let handle = std::thread::spawn(move || {
-        let child = child;
-        let result = child.wait_with_output();
-        let _ = tx.send(());
-        result
+    // Take stdout/stderr handles for concurrent draining.
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+
+    let stdout_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stdout_pipe {
+            let _ = std::io::Read::read_to_end(&mut pipe, &mut buf);
+        }
+        buf
     });
 
-    match rx.recv_timeout(timeout) {
-        Ok(()) => {
-            // Thread finished within timeout.
-            handle
-                .join()
-                .map_err(|_| anyhow::anyhow!("Command thread panicked"))?
-                .map_err(Into::into)
+    let stderr_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stderr_pipe {
+            let _ = std::io::Read::read_to_end(&mut pipe, &mut buf);
         }
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            // Timeout — thread is still running. We can't easily kill from here,
-            // but the thread will eventually complete. Return an error.
-            Err(anyhow::anyhow!("External command timed out"))
+        buf
+    });
+
+    // Poll try_wait with timeout.
+    let start = std::time::Instant::now();
+    let poll_interval = Duration::from_millis(50);
+
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if start.elapsed() > timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_handle.join();
+                let _ = stderr_handle.join();
+                return Err(anyhow::anyhow!("External command timed out"));
+            }
+            Ok(None) => std::thread::sleep(poll_interval),
+            Err(e) => return Err(e.into()),
         }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            Err(anyhow::anyhow!("Command thread disconnected"))
-        }
-    }
+    };
+
+    let stdout = stdout_handle.join().map_err(|_| anyhow::anyhow!("stdout reader panicked"))?;
+    let stderr = stderr_handle.join().map_err(|_| anyhow::anyhow!("stderr reader panicked"))?;
+
+    Ok(std::process::Output { status, stdout, stderr })
 }
 
 #[cfg(test)]
