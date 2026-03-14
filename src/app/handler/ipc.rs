@@ -72,6 +72,7 @@ mod tests {
             show_preview: false,
             show_hidden: true,
             show_ignored: true,
+            git_enabled: true,
             viewport_height: 20,
             scroll: ScrollState::new(),
             status_message: None,

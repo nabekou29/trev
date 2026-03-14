@@ -73,6 +73,8 @@ pub struct AppState {
     pub show_hidden: bool,
     /// Whether to show gitignored files.
     pub show_ignored: bool,
+    /// Whether git integration is enabled.
+    pub git_enabled: bool,
     /// Current viewport height (tree area rows).
     pub viewport_height: usize,
     /// Scroll state for the tree view.
@@ -624,6 +626,7 @@ pub(super) mod tests {
             show_preview: false,
             show_hidden: true,
             show_ignored: true,
+            git_enabled: true,
             viewport_height: 20,
             scroll: ScrollState::new(),
             status_message: None,

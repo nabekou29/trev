@@ -181,7 +181,8 @@ fn init_app(
     };
 
     let show_hidden = overrides.show_hidden;
-    let show_ignored = overrides.show_ignored;
+    // When git is disabled, gitignore filtering is not applicable — always show all files.
+    let show_ignored = if config.git.enabled { overrides.show_ignored } else { true };
     let show_preview = overrides.show_preview;
 
     let (builder, root) = {
@@ -268,6 +269,7 @@ fn init_app(
         show_preview,
         show_hidden,
         show_ignored,
+        git_enabled,
         viewport_height: 0,
         scroll: ScrollState::new(),
         status_message: None,

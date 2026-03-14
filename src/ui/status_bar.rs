@@ -204,13 +204,19 @@ fn build_filter_spans(state: &AppState) -> FilterSpans {
         Color::Yellow,
         state.show_icons,
     );
-    let ignored_width = push_filter_indicator(
-        &mut spans,
-        state.show_ignored,
-        ".git",
-        Color::Cyan,
-        state.show_icons,
-    );
+
+    // Hide the gitignore filter indicator when git is disabled.
+    let ignored_width = if state.git_enabled {
+        push_filter_indicator(
+            &mut spans,
+            state.show_ignored,
+            ".git",
+            Color::Cyan,
+            state.show_icons,
+        )
+    } else {
+        0
+    };
 
     spans.push(Span::raw(" "));
 

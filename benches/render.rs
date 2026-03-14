@@ -82,6 +82,7 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
         show_preview: false,
         show_hidden: false,
         show_ignored: false,
+        git_enabled: true,
         viewport_height: 50,
         scroll: ScrollState::new(),
         status_message: None,

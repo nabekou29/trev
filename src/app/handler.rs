@@ -403,6 +403,10 @@ pub(super) fn handle_filter_action(
             state.set_status(format!("Hidden files: {label}"));
         }
         FilterAction::Ignored => {
+            // When git is disabled, gitignore filtering is not applicable.
+            if !ctx.git_enabled {
+                return;
+            }
             state.show_ignored = !state.show_ignored;
             // Clear stale search results (same reason as above).
             state.search_match_indices.clear();
