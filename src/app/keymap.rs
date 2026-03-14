@@ -540,21 +540,27 @@ fn binding_score(seq: &[KeyBinding]) -> u32 {
 }
 
 impl ActionKeyLookup {
-    /// Build the lookup from a keymap by collecting universal bindings.
+    /// Build the lookup from a keymap by collecting all bindings.
+    ///
+    /// Universal bindings (empty when-set) are preferred. Context-specific
+    /// bindings are included as fallbacks with a score penalty so that
+    /// custom actions from editor plugins (typically registered in daemon
+    /// context sections) still appear in the help overlay.
     ///
     /// For each action, the binding with the lowest [`binding_score`] wins.
     pub fn from_keymap(keymap: &KeyMap) -> Self {
         use crate::app::pending_keys::format_key_binding;
 
+        /// Penalty added to context-specific bindings so that universal
+        /// bindings (available in all contexts) are preferred.
+        const CONTEXT_PENALTY: u32 = 1000;
+
         let raw = keymap.collect_bindings();
         let mut best: HashMap<String, (u32, String)> = HashMap::new();
 
         for (seq, when, action) in &raw {
-            // Only universal bindings (empty when-set).
-            if !when.is_empty() {
-                continue;
-            }
-            let score = binding_score(seq);
+            let base_score = binding_score(seq);
+            let score = if when.is_empty() { base_score } else { base_score + CONTEXT_PENALTY };
             let action_name = action.to_string();
 
             let replace = best.get(&action_name).is_none_or(|(prev_score, _)| score < *prev_score);

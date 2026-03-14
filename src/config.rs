@@ -84,6 +84,22 @@ pub struct ContextBindings {
     pub bindings: Vec<KeyBindingEntry>,
 }
 
+impl KeybindingConfig {
+    /// Merge keybindings from another config (additive).
+    ///
+    /// Appends bindings from `other` to each section. Later entries take
+    /// precedence over earlier ones when the [`KeyMap`](crate::app::KeyMap)
+    /// resolves duplicate keys.
+    pub fn merge(&mut self, other: Self) {
+        self.universal.bindings.extend(other.universal.bindings);
+        self.file.bindings.extend(other.file.bindings);
+        self.directory.bindings.extend(other.directory.bindings);
+        self.daemon.universal.bindings.extend(other.daemon.universal.bindings);
+        self.daemon.file.bindings.extend(other.daemon.file.bindings);
+        self.daemon.directory.bindings.extend(other.daemon.directory.bindings);
+    }
+}
+
 /// Daemon-mode keybindings, subdivided by node context.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
@@ -957,6 +973,15 @@ pub struct ConfigLoadResult {
     pub warnings: Vec<String>,
 }
 
+impl ConfigLoadResult {
+    /// Log all warnings via [`tracing::warn`].
+    pub fn log_warnings(&self) {
+        for warning in &self.warnings {
+            tracing::warn!("{warning}");
+        }
+    }
+}
+
 impl Config {
     /// Load configuration from the default config file path.
     ///
@@ -990,6 +1015,17 @@ impl Config {
             .collect();
 
         Ok(ConfigLoadResult { config, warnings })
+    }
+
+    /// Merge another config on top of this one.
+    ///
+    /// Additive for collections (keybindings, `custom_actions`, menus).
+    /// Scalar fields are not overridden — override configs typically only
+    /// contain keybindings and `custom_actions`.
+    pub fn merge(&mut self, other: Self) {
+        self.keybindings.merge(other.keybindings);
+        self.custom_actions.extend(other.custom_actions);
+        self.menus.extend(other.menus);
     }
 
     /// Apply CLI argument overrides to the configuration.
@@ -1940,6 +1976,122 @@ keybindings:
         let entry = &json["$defs"]["KeyBindingEntry"];
         let json_str = entry.to_string();
         assert!(json_str.contains("menu"), "KeyBindingEntry schema missing menu field");
+    }
+
+    // --- Config::merge ---
+
+    #[rstest]
+    fn merge_custom_actions() {
+        let mut base = Config::default();
+        let mut other = Config::default();
+        other.custom_actions.insert(
+            "split".to_string(),
+            CustomActionDef {
+                description: "Open in split".to_string(),
+                action: None,
+                run: None,
+                notify: Some("nvim.split".to_string()),
+                run_mode: ShellMode::default(),
+            },
+        );
+
+        base.merge(other);
+
+        assert_that!(base.custom_actions.len(), eq(1));
+        assert!(base.custom_actions.contains_key("split"));
+    }
+
+    #[rstest]
+    fn merge_menus() {
+        let mut base = Config::default();
+        let mut other = Config::default();
+        other.menus.insert(
+            "tools".to_string(),
+            MenuDefinition { title: "Tools".to_string(), items: vec![] },
+        );
+
+        base.merge(other);
+
+        assert_that!(base.menus.len(), eq(1));
+        assert!(base.menus.contains_key("tools"));
+    }
+
+    #[rstest]
+    fn merge_keybindings_daemon_file() {
+        let mut base = Config::default();
+        let mut other = Config::default();
+        other.keybindings.daemon.file.bindings.push(KeyBindingEntry {
+            key: "s".to_string(),
+            action: None,
+            run: None,
+            notify: Some("nvim.split".to_string()),
+            menu: None,
+            run_mode: ShellMode::default(),
+        });
+
+        base.merge(other);
+
+        assert_that!(base.keybindings.daemon.file.bindings.len(), eq(1));
+        assert_that!(base.keybindings.daemon.file.bindings[0].key.as_str(), eq("s"));
+    }
+
+    #[rstest]
+    fn merge_keybindings_all_sections() {
+        let entry = || KeyBindingEntry {
+            key: "x".to_string(),
+            action: Some("noop".to_string()),
+            run: None,
+            notify: None,
+            menu: None,
+            run_mode: ShellMode::default(),
+        };
+
+        let mut base = Config::default();
+        let mut other = Config::default();
+        other.keybindings.universal.bindings.push(entry());
+        other.keybindings.file.bindings.push(entry());
+        other.keybindings.directory.bindings.push(entry());
+        other.keybindings.daemon.universal.bindings.push(entry());
+        other.keybindings.daemon.file.bindings.push(entry());
+        other.keybindings.daemon.directory.bindings.push(entry());
+
+        base.merge(other);
+
+        assert_that!(base.keybindings.universal.bindings.len(), eq(1));
+        assert_that!(base.keybindings.file.bindings.len(), eq(1));
+        assert_that!(base.keybindings.directory.bindings.len(), eq(1));
+        assert_that!(base.keybindings.daemon.universal.bindings.len(), eq(1));
+        assert_that!(base.keybindings.daemon.file.bindings.len(), eq(1));
+        assert_that!(base.keybindings.daemon.directory.bindings.len(), eq(1));
+    }
+
+    #[rstest]
+    fn merge_keybindings_preserves_existing() {
+        let mut base = Config::default();
+        base.keybindings.universal.bindings.push(KeyBindingEntry {
+            key: "j".to_string(),
+            action: Some("tree.move_down".to_string()),
+            run: None,
+            notify: None,
+            menu: None,
+            run_mode: ShellMode::default(),
+        });
+
+        let mut other = Config::default();
+        other.keybindings.universal.bindings.push(KeyBindingEntry {
+            key: "s".to_string(),
+            action: None,
+            run: None,
+            notify: Some("nvim.split".to_string()),
+            menu: None,
+            run_mode: ShellMode::default(),
+        });
+
+        base.merge(other);
+
+        assert_that!(base.keybindings.universal.bindings.len(), eq(2));
+        assert_that!(base.keybindings.universal.bindings[0].key.as_str(), eq("j"));
+        assert_that!(base.keybindings.universal.bindings[1].key.as_str(), eq("s"));
     }
 
     #[rstest]

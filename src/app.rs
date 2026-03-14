@@ -417,13 +417,23 @@ fn setup_terminal(
 }
 
 /// Load configuration, apply CLI overrides, and canonicalize the root path.
+///
+/// When `--config-override <path>` is given, that file is loaded and merged
+/// on top of the base config before CLI overrides are applied. This lets
+/// editor plugins inject keybindings and custom actions at startup.
 fn load_config(args: &Args) -> Result<(Config, PathBuf)> {
     let _span = tracing::info_span!("config_load").entered();
     let load_result = Config::load()?;
-    for warning in &load_result.warnings {
-        tracing::warn!("{warning}");
-    }
+    load_result.log_warnings();
     let mut config = load_result.config;
+
+    // Apply override config (used by editor plugins to inject keybindings).
+    if let Some(override_path) = &args.config_override {
+        let override_result = Config::load_from(override_path)?;
+        override_result.log_warnings();
+        config.merge(override_result.config);
+    }
+
     config.apply_cli_overrides(args);
     tracing::info!(?args, "starting trev");
     let root_path = std::fs::canonicalize(&args.path)?;

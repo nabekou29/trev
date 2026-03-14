@@ -77,6 +77,12 @@ pub struct Args {
     #[arg(long)]
     pub reveal: Option<PathBuf>,
 
+    /// Additional config file to merge on top of the base config.
+    ///
+    /// Used by editor plugins to inject keybindings and custom actions at startup.
+    #[arg(long)]
+    pub config_override: Option<PathBuf>,
+
     /// Enable performance profiling (outputs Chrome Trace JSON).
     #[arg(long)]
     pub profile: bool,
@@ -153,6 +159,7 @@ impl Default for Args {
             no_restore: false,
             daemon: false,
             reveal: None,
+            config_override: None,
             profile: false,
             command: None,
         }
@@ -179,5 +186,19 @@ mod tests {
     fn no_git_flag_parsed_from_cli() {
         let args = Args::try_parse_from(["trev", "--no-git", "."]).unwrap();
         assert_that!(args.no_git, eq(true));
+    }
+
+    // --- --config-override CLI flag parsing ---
+
+    #[rstest]
+    fn config_override_defaults_to_none() {
+        let args = Args::default();
+        assert_that!(args.config_override, none());
+    }
+
+    #[rstest]
+    fn config_override_parsed_from_cli() {
+        let args = Args::try_parse_from(["trev", "--config-override", "/tmp/x.yml", "."]).unwrap();
+        assert_eq!(args.config_override, Some(PathBuf::from("/tmp/x.yml")));
     }
 }

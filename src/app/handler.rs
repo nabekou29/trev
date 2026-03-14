@@ -643,15 +643,29 @@ fn handle_shell_background(cmd: &str, state: &mut AppState) {
 
 /// Send an IPC notification to the connected client.
 ///
-/// Includes the cursor file path in the notification params.
-/// Silently drops if no IPC server is running (non-daemon mode).
+/// Includes rich context about the cursor node: path, directory, name, root,
+/// and whether it is a directory. Silently drops if no IPC server is running.
 fn handle_notify_action(method: &str, state: &AppState, ctx: &AppContext) {
     let Some(server) = &ctx.ipc_server else {
         return;
     };
-    let path = state.tree_state.cursor_path().unwrap_or_default();
+    let info = state.tree_state.current_node_info();
+    let root = state.tree_state.root_path();
+
+    // Derive dir from NodeInfo to avoid a redundant tree walk via cursor_dir_path().
+    let dir_str = info
+        .as_ref()
+        .and_then(|i| {
+            if i.is_dir { Some(i.path.display().to_string()) } else { i.path.parent().map(|p| p.display().to_string()) }
+        })
+        .unwrap_or_default();
+
     let params = serde_json::json!({
-        "path": path,
+        "path": info.as_ref().map(|i| i.path.display().to_string()).unwrap_or_default(),
+        "dir": dir_str,
+        "name": info.as_ref().map_or_else(String::new, |i| i.name.clone()),
+        "root": root.display().to_string(),
+        "is_dir": info.as_ref().is_some_and(|i| i.is_dir),
     });
     let server = Arc::clone(server);
     let method = method.to_string();
