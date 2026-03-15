@@ -35,11 +35,7 @@ Built in Rust for speed and safety.
 ### GitHub Releases
 
 ```sh
-# macOS / Linux
 curl -LsSf https://github.com/nabekou29/trev/releases/latest/download/trev-installer.sh | sh
-
-# Windows
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/nabekou29/trev/releases/latest/download/trev-installer.ps1 | iex"
 ```
 
 ### Homebrew
@@ -57,9 +53,7 @@ cargo install --git https://github.com/nabekou29/trev
 ### mise
 
 ```sh
-mise use -g cargo:trev
-# or
-mise use -g github:nabekou29/trev
+mise use -g cargo:trev@https://github.com/nabekou29/trev
 ```
 
 ### Requirements
