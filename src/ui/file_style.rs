@@ -99,12 +99,12 @@ impl FileStyleMatcher {
         is_symlink: bool,
         is_ignored: bool,
     ) -> &StyleConfig {
-        if is_dir {
+        if is_ignored {
+            &self.category_styles.gitignored
+        } else if is_dir {
             &self.category_styles.directory
         } else if is_symlink {
             &self.category_styles.symlink
-        } else if is_ignored {
-            &self.category_styles.gitignored
         } else {
             // Default file style: empty (no overrides).
             &DEFAULT_FILE_STYLE

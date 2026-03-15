@@ -1,0 +1,38 @@
+# Demo config for trev — showcases file_styles, smart sort, and display options.
+# Usage: trev --config-override demo/config.yml /tmp/trev-demo
+
+display:
+  show_hidden: false
+  show_ignored: false
+  show_preview: true
+  show_icons: true
+  columns:
+    - git_status
+    - size
+    - modified_at
+  column_options:
+    modified_at:
+      format: relative
+  file_styles:
+    # Dim test files
+    - pattern:
+        - "*_test.go"
+        - "*_test.ts"
+        - "*_test.tsx"
+        - "*.test.ts"
+        - "*.test.tsx"
+        - "*.spec.ts"
+        - "*.spec.tsx"
+      style:
+        dim: true
+    # Bold README
+    - pattern: "README.md"
+      style:
+        bold: true
+
+file_op:
+  delete_mode: custom_trash
+
+sort:
+  order: smart
+  directories_first: true
