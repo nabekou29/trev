@@ -249,7 +249,12 @@ impl TextBuffer {
     ///
     /// Only changes scroll when the cursor would exit the current visible area.
     /// Accounts for arrow indicator columns at viewport edges.
-    const fn adjust_scroll(&mut self, cursor_col: usize, total_width: usize, viewport_width: usize) {
+    const fn adjust_scroll(
+        &mut self,
+        cursor_col: usize,
+        total_width: usize,
+        viewport_width: usize,
+    ) {
         // Everything fits — no scroll needed.
         if total_width <= viewport_width {
             self.scroll_offset = 0;

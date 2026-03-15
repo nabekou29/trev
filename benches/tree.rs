@@ -435,9 +435,8 @@ fn bench_sort_1m_unstable(c: &mut Criterion) {
                     .collect::<Vec<TreeNode>>()
             },
             |mut children| {
-                children.sort_unstable_by(|a, b| {
-                    trev::tree::sort::compare_smart_pub(&a.name, &b.name)
-                });
+                children
+                    .sort_unstable_by(|a, b| trev::tree::sort::compare_smart_pub(&a.name, &b.name));
             },
             criterion::BatchSize::LargeInput,
         );

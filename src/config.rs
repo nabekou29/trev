@@ -195,9 +195,7 @@ pub fn resolve_custom_action_def(def: &CustomActionDef) -> Result<crate::action:
     use crate::action::Action;
 
     if let Some(ref action_str) = def.action {
-        return action_str
-            .parse::<Action>()
-            .map_err(|e| format!("custom action: {e}"));
+        return action_str.parse::<Action>().map_err(|e| format!("custom action: {e}"));
     }
     if let Some(ref cmd) = def.run {
         return Ok(Action::Shell { cmd: cmd.clone(), run_mode: def.run_mode });
@@ -1066,10 +1064,8 @@ impl Config {
 
     /// Get the default configuration file path via [`AppDirs`](crate::dirs::AppDirs).
     fn config_path() -> PathBuf {
-        crate::dirs::AppDirs::new().map_or_else(
-            |_| std::env::temp_dir().join("trev/config.yml"),
-            |d| d.config_path(),
-        )
+        crate::dirs::AppDirs::new()
+            .map_or_else(|_| std::env::temp_dir().join("trev/config.yml"), |d| d.config_path())
     }
 
     /// Generate JSON Schema for the configuration file.

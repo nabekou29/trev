@@ -4,7 +4,17 @@ use std::fmt;
 use std::str::FromStr;
 
 /// Execution mode for shell commands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ShellMode {
     /// Suspend TUI, run command, show "Press ENTER to continue...", resume TUI.
@@ -881,7 +891,8 @@ mod tests {
 
     #[rstest]
     fn shell_action_display() {
-        let action = Action::Shell { cmd: "open {path}".to_string(), run_mode: ShellMode::Foreground };
+        let action =
+            Action::Shell { cmd: "open {path}".to_string(), run_mode: ShellMode::Foreground };
         assert_that!(action.to_string().as_str(), eq("shell:open {path}"));
     }
 

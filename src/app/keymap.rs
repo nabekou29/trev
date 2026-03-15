@@ -5,14 +5,13 @@
 //! More specific context sets take priority over less specific ones.
 
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 
 use crossterm::event::{
     KeyCode,
     KeyEvent,
     KeyModifiers,
 };
-
-use std::collections::HashMap;
 
 use crate::action::{
     Action,
@@ -86,9 +85,7 @@ impl KeyMap {
     /// Collect all registered bindings from the trie.
     ///
     /// Returns `(key_sequence, context_set, action)` tuples for building help views.
-    pub fn collect_bindings(
-        &self,
-    ) -> Vec<(Vec<KeyBinding>, BTreeSet<KeyContext>, Action)> {
+    pub fn collect_bindings(&self) -> Vec<(Vec<KeyBinding>, BTreeSet<KeyContext>, Action)> {
         self.trie.collect_bindings()
     }
 
@@ -414,7 +411,6 @@ impl KeyMap {
             Action::FileOp(FileOpAction::Copy(CopyAction::Menu)),
         );
     }
-
 }
 
 /// Resolve the action from a keybinding entry.
@@ -443,9 +439,9 @@ fn resolve_entry_action(
 
     if let Some(ref action_str) = entry.action {
         if let Some(name) = action_str.strip_prefix("custom.") {
-            let def = custom_actions
-                .get(name)
-                .ok_or_else(|| format!("keybinding '{}': unknown custom action '{name}'", entry.key))?;
+            let def = custom_actions.get(name).ok_or_else(|| {
+                format!("keybinding '{}': unknown custom action '{name}'", entry.key)
+            })?;
             return crate::config::resolve_custom_action_def(def)
                 .map_err(|e| format!("keybinding '{}': {e}", entry.key));
         }

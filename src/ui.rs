@@ -17,11 +17,11 @@ use ratatui::layout::{
     Layout,
 };
 
+use crate::app::keymap::ActionKeyLookup;
 use crate::app::{
     AppState,
     LayoutAreas,
 };
-use crate::app::keymap::ActionKeyLookup;
 use crate::input::AppMode;
 
 /// Render the entire UI.

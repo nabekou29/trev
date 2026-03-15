@@ -266,10 +266,7 @@ fn open_help(state: &mut AppState, ctx: &AppContext) {
 fn help_group_sort_key(action_name: &str) -> usize {
     use crate::ui::help_view::GROUPS;
 
-    GROUPS
-        .iter()
-        .position(|g| action_name.starts_with(g.prefix))
-        .unwrap_or(GROUPS.len())
+    GROUPS.iter().position(|g| action_name.starts_with(g.prefix)).unwrap_or(GROUPS.len())
 }
 
 /// Handle a key event in Help mode.
@@ -277,11 +274,7 @@ fn help_group_sort_key(action_name: &str) -> usize {
 /// When the filter input is active, keys go to the text buffer.
 /// Otherwise, vim-style navigation keys move the cursor, and Enter
 /// executes the selected action.
-fn handle_help_mode_key(
-    key: crossterm::event::KeyEvent,
-    state: &mut AppState,
-    ctx: &AppContext,
-) {
+fn handle_help_mode_key(key: crossterm::event::KeyEvent, state: &mut AppState, ctx: &AppContext) {
     use crossterm::event::{
         KeyCode,
         KeyModifiers,
@@ -290,9 +283,7 @@ fn handle_help_mode_key(
     // Execute selected action on Enter (non-filter mode).
     // Handled before borrowing state.mode to avoid borrow conflict
     // with execute_help_action which needs &mut AppState.
-    if matches!(&state.mode, AppMode::Help(h) if !h.filtering)
-        && key.code == KeyCode::Enter
-    {
+    if matches!(&state.mode, AppMode::Help(h) if !h.filtering) && key.code == KeyCode::Enter {
         execute_help_action(state, ctx);
         return;
     }
@@ -582,8 +573,7 @@ fn handle_shell_foreground(cmd: &str, state: &mut AppState, wait_for_enter: bool
         // Show result and wait for user to press Enter.
         match &result {
             Ok(status) if !status.success() => {
-                let code =
-                    status.code().map_or_else(|| "unknown".to_string(), |c| c.to_string());
+                let code = status.code().map_or_else(|| "unknown".to_string(), |c| c.to_string());
                 let _ = writeln!(std::io::stdout(), "\nProcess exited with code {code}");
             }
             Err(e) => {
@@ -656,7 +646,11 @@ fn handle_notify_action(method: &str, state: &AppState, ctx: &AppContext) {
     let dir_str = info
         .as_ref()
         .and_then(|i| {
-            if i.is_dir { Some(i.path.display().to_string()) } else { i.path.parent().map(|p| p.display().to_string()) }
+            if i.is_dir {
+                Some(i.path.display().to_string())
+            } else {
+                i.path.parent().map(|p| p.display().to_string())
+            }
         })
         .unwrap_or_default();
 
@@ -852,10 +846,7 @@ mod tests {
         let root = Path::new("/test/root");
         let state = state_with_file("test.txt", root);
         let result = super::expand_shell_template("cp {path} {dir}/{name}.bak", &state);
-        assert_that!(
-            result.as_str(),
-            eq("cp '/test/root/test.txt' '/test/root'/'test.txt'.bak")
-        );
+        assert_that!(result.as_str(), eq("cp '/test/root/test.txt' '/test/root'/'test.txt'.bak"));
     }
 
     #[rstest]
@@ -1031,7 +1022,9 @@ mod tests {
         let mut item_actions = Vec::new();
 
         for item_def in &menu_def.items {
-            let Some(action) = super::resolve_menu_item_action(item_def, &std::collections::HashMap::new()) else {
+            let Some(action) =
+                super::resolve_menu_item_action(item_def, &std::collections::HashMap::new())
+            else {
                 continue;
             };
             let key = item_def.key.chars().next().unwrap_or(' ');
@@ -1092,7 +1085,9 @@ mod tests {
 
         let mut items = Vec::new();
         for item_def in &menu_def.items {
-            let Some(_action) = super::resolve_menu_item_action(item_def, &std::collections::HashMap::new()) else {
+            let Some(_action) =
+                super::resolve_menu_item_action(item_def, &std::collections::HashMap::new())
+            else {
                 continue;
             };
             items.push(item_def.label.clone());

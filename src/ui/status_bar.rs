@@ -1,5 +1,9 @@
 //! Status bar widget — displays indicators, status messages, file path, and cursor position.
 
+use crossterm::event::{
+    KeyCode,
+    KeyModifiers,
+};
 use ratatui::Frame;
 use ratatui::layout::{
     Constraint,
@@ -16,11 +20,6 @@ use ratatui::text::{
     Span,
 };
 use ratatui::widgets::Paragraph;
-
-use crossterm::event::{
-    KeyCode,
-    KeyModifiers,
-};
 
 use crate::app::AppState;
 use crate::app::keymap::ActionKeyLookup;
@@ -136,22 +135,16 @@ fn build_indicator_spans(state: &AppState) -> Vec<Span<'static>> {
 
     // --- Mode badge ---
     let (mode_label, mode_style) = match &state.mode {
-        AppMode::Search(search) if search.phase == SearchPhase::Typing => (
-            " SEARCH ",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        ),
-        AppMode::Search(search) if search.phase == SearchPhase::Filtered => (
-            " FILTER ",
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-        ),
-        AppMode::Input(_) => (
-            " INPUT ",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-        ),
-        _ => (
-            " NORMAL ",
-            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
-        ),
+        AppMode::Search(search) if search.phase == SearchPhase::Typing => {
+            (" SEARCH ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        }
+        AppMode::Search(search) if search.phase == SearchPhase::Filtered => {
+            (" FILTER ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD))
+        }
+        AppMode::Input(_) => {
+            (" INPUT ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+        }
+        _ => (" NORMAL ", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
     };
     spans.push(Span::styled(mode_label, mode_style));
 
@@ -197,23 +190,12 @@ struct FilterSpans {
 fn build_filter_spans(state: &AppState) -> FilterSpans {
     let mut spans = Vec::new();
 
-    let hidden_width = push_filter_indicator(
-        &mut spans,
-        state.show_hidden,
-        ".*",
-        Color::Yellow,
-        state.show_icons,
-    );
+    let hidden_width =
+        push_filter_indicator(&mut spans, state.show_hidden, ".*", Color::Yellow, state.show_icons);
 
     // Hide the gitignore filter indicator when git is disabled.
     let ignored_width = if state.git_enabled {
-        push_filter_indicator(
-            &mut spans,
-            state.show_ignored,
-            ".git",
-            Color::Cyan,
-            state.show_icons,
-        )
+        push_filter_indicator(&mut spans, state.show_ignored, ".git", Color::Cyan, state.show_icons)
     } else {
         0
     };
@@ -235,11 +217,8 @@ fn push_filter_indicator(
     color: Color,
     show_icons: bool,
 ) -> u16 {
-    let style = if active {
-        Style::default().fg(color)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
+    let style =
+        if active { Style::default().fg(color) } else { Style::default().fg(Color::DarkGray) };
 
     if show_icons {
         let icon = if active { " \u{f06d0} " } else { " \u{f06d1} " };
@@ -314,8 +293,12 @@ fn selection_hints(state: &AppState, lookup: &ActionKeyLookup) -> Vec<Span<'stat
             let cut = lookup.key_for("file_op.cut").unwrap_or("x");
             let delete = lookup.key_for("file_op.delete").unwrap_or("d");
             let clear = lookup.key_for("file_op.clear_selections").unwrap_or("<Esc>");
-            let pairs =
-                [hint(yank, "yank"), hint(cut, "cut"), hint(delete, "delete"), hint(clear, "clear")];
+            let pairs = [
+                hint(yank, "yank"),
+                hint(cut, "cut"),
+                hint(delete, "delete"),
+                hint(clear, "clear"),
+            ];
             pairs.into_iter().flatten().collect()
         }
         None => normal_hints(lookup),
@@ -365,10 +348,7 @@ fn input_hints() -> Vec<Span<'static>> {
 fn confirm_hints() -> Vec<Span<'static>> {
     let enter = key_display(KeyCode::Enter, KeyModifiers::NONE);
     let esc = key_display(KeyCode::Esc, KeyModifiers::NONE);
-    let pairs = [
-        hint(&format!("y/{enter}"), "confirm"),
-        hint(&format!("n/{esc}"), "cancel"),
-    ];
+    let pairs = [hint(&format!("y/{enter}"), "confirm"), hint(&format!("n/{esc}"), "cancel")];
     pairs.into_iter().flatten().collect()
 }
 
@@ -376,11 +356,7 @@ fn confirm_hints() -> Vec<Span<'static>> {
 fn menu_hints() -> Vec<Span<'static>> {
     let enter = key_display(KeyCode::Enter, KeyModifiers::NONE);
     let esc = key_display(KeyCode::Esc, KeyModifiers::NONE);
-    let pairs = [
-        hint("j/k", "navigate"),
-        hint(&enter, "select"),
-        hint(&esc, "cancel"),
-    ];
+    let pairs = [hint("j/k", "navigate"), hint(&enter, "select"), hint(&esc, "cancel")];
     pairs.into_iter().flatten().collect()
 }
 
@@ -403,7 +379,8 @@ mod tests {
     /// Build an `ActionKeyLookup` with default keybindings for testing.
     fn default_lookup() -> ActionKeyLookup {
         use crate::app::keymap::KeyMap;
-        let keymap = KeyMap::from_config(&KeybindingConfig::default(), &std::collections::HashMap::new());
+        let keymap =
+            KeyMap::from_config(&KeybindingConfig::default(), &std::collections::HashMap::new());
         ActionKeyLookup::from_keymap(&keymap)
     }
 
@@ -438,7 +415,10 @@ mod tests {
         assert_that!(spans.len(), eq(2));
         // Icon span should contain the eye-closed icon (U+F06D1).
         let icon_content = spans[0].content.as_ref();
-        assert!(icon_content.contains('\u{f06d1}'), "expected eye-closed icon, got: {icon_content}");
+        assert!(
+            icon_content.contains('\u{f06d1}'),
+            "expected eye-closed icon, got: {icon_content}"
+        );
         // Inactive uses DarkGray.
         assert_that!(spans[0].style.fg, eq(Some(Color::DarkGray)));
         assert_that!(spans[1].style.fg, eq(Some(Color::DarkGray)));

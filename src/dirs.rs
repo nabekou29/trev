@@ -65,27 +65,17 @@ impl AppDirs {
         xdg_cache: &Path,
         xdg_runtime: Option<&Path>,
     ) -> Self {
-        let config = env_config.map_or_else(
-            || xdg_config.join(APP_NAME),
-            PathBuf::from,
-        );
+        let config = env_config.map_or_else(|| xdg_config.join(APP_NAME), PathBuf::from);
 
         let state = env_state.map_or_else(
-            || {
-                xdg_state.map_or_else(
-                    || xdg_cache.join(APP_NAME),
-                    |s| s.join(APP_NAME),
-                )
-            },
+            || xdg_state.map_or_else(|| xdg_cache.join(APP_NAME), |s| s.join(APP_NAME)),
             PathBuf::from,
         );
 
         let cache = xdg_cache.join(APP_NAME);
 
-        let runtime = xdg_runtime.map_or_else(
-            || std::env::temp_dir().join(APP_NAME),
-            |r| r.join(APP_NAME),
-        );
+        let runtime =
+            xdg_runtime.map_or_else(|| std::env::temp_dir().join(APP_NAME), |r| r.join(APP_NAME));
 
         Self { config, state, cache, runtime }
     }

@@ -334,7 +334,6 @@ impl CursorSnapshot {
     /// cursor is clamped to the current visible range so it stays at the same
     /// index position — effectively selecting the next item, or the last item
     /// if the deleted file was at the end.
-    ///
     pub fn restore(&self, tree: &mut TreeState, scroll: &mut ScrollState, viewport_height: usize) {
         let found = self.path.as_ref().is_some_and(|p| tree.move_cursor_to_path(p));
         if !found {

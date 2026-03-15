@@ -4,6 +4,10 @@
 //! headers, human-readable descriptions, cursor selection, inline filtering,
 //! and Enter-to-execute.
 
+use crossterm::event::{
+    KeyCode,
+    KeyModifiers,
+};
 use ratatui::Frame;
 use ratatui::layout::{
     Alignment,
@@ -26,11 +30,6 @@ use ratatui::widgets::{
     Borders,
     Clear,
     Paragraph,
-};
-
-use crossterm::event::{
-    KeyCode,
-    KeyModifiers,
 };
 
 use crate::app::pending_keys::key_display;
@@ -116,8 +115,8 @@ pub fn render_help(frame: &mut Frame<'_>, area: Rect, help: &mut HelpState) {
 
     // --- Auto-scroll to keep cursor visible ---
     let visible_height = content_area.height as usize;
-    let scroll_offset =
-        cursor_line.map_or(help.scroll_offset, |cl| auto_scroll(help.scroll_offset, cl, visible_height));
+    let scroll_offset = cursor_line
+        .map_or(help.scroll_offset, |cl| auto_scroll(help.scroll_offset, cl, visible_height));
     let max_offset = total_lines.saturating_sub(visible_height);
     let scroll_offset = scroll_offset.min(max_offset);
 
@@ -183,10 +182,8 @@ fn build_content_lines(
     let mut binding_index: usize = 0;
 
     for group in GROUPS {
-        let group_bindings: Vec<&&HelpBinding> = bindings
-            .iter()
-            .filter(|b| b.action_name.starts_with(group.prefix))
-            .collect();
+        let group_bindings: Vec<&&HelpBinding> =
+            bindings.iter().filter(|b| b.action_name.starts_with(group.prefix)).collect();
 
         if group_bindings.is_empty() {
             continue;
@@ -265,11 +262,7 @@ fn build_binding_line(binding: &HelpBinding, key_width: usize, is_selected: bool
             Style::default().bg(Color::DarkGray),
         )
     } else if binding.has_keybinding {
-        (
-            Style::default().fg(Color::Cyan),
-            Style::default(),
-            Style::default(),
-        )
+        (Style::default().fg(Color::Cyan), Style::default(), Style::default())
     } else {
         (
             Style::default().fg(Color::DarkGray),
@@ -310,10 +303,7 @@ fn render_filter_bar(frame: &mut Frame<'_>, area: Rect, help: &HelpState) {
     }
 
     let line = Line::from(spans);
-    frame.render_widget(
-        Paragraph::new(line).style(Style::default().bg(Color::Black)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(line).style(Style::default().bg(Color::Black)), area);
 }
 
 /// Render the footer with navigation hints.
@@ -677,17 +667,11 @@ mod tests {
 
         // Key style should be DarkGray for unbound
         let key_span = &line.spans[1];
-        assert_that!(
-            key_span.style.fg,
-            some(eq(Color::DarkGray))
-        );
+        assert_that!(key_span.style.fg, some(eq(Color::DarkGray)));
 
         // Description style should also be DarkGray
         let desc_span = &line.spans[3];
-        assert_that!(
-            desc_span.style.fg,
-            some(eq(Color::DarkGray))
-        );
+        assert_that!(desc_span.style.fg, some(eq(Color::DarkGray)));
     }
 
     #[rstest]

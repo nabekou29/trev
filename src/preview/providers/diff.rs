@@ -94,8 +94,7 @@ impl PreviewProvider for DiffPreviewProvider {
     }
 
     fn load(&self, path: &Path, ctx: &LoadContext) -> anyhow::Result<PreviewContent> {
-        let _span =
-            tracing::info_span!("diff_load", path = %path.display()).entered();
+        let _span = tracing::info_span!("diff_load", path = %path.display()).entered();
 
         if ctx.cancel_token.is_cancelled() {
             return Ok(PreviewContent::Empty);
@@ -165,12 +164,10 @@ fn wait_with_timeout(
     });
 
     match rx.recv_timeout(timeout) {
-        Ok(()) => {
-            handle
-                .join()
-                .map_err(|_| anyhow::anyhow!("git diff thread panicked"))?
-                .map_err(Into::into)
-        }
+        Ok(()) => handle
+            .join()
+            .map_err(|_| anyhow::anyhow!("git diff thread panicked"))?
+            .map_err(Into::into),
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
             Err(anyhow::anyhow!("git diff timed out"))
         }
@@ -205,10 +202,7 @@ mod tests {
 
     /// Git state with a staged (added) file.
     fn git_with_added() -> Arc<RwLock<Option<GitState>>> {
-        Arc::new(RwLock::new(Some(GitState::from_porcelain(
-            "A  src/new.rs\n",
-            Path::new("/repo"),
-        ))))
+        Arc::new(RwLock::new(Some(GitState::from_porcelain("A  src/new.rs\n", Path::new("/repo")))))
     }
 
     /// Git state with an untracked file.
@@ -242,54 +236,36 @@ mod tests {
     #[rstest]
     fn can_handle_modified_file() {
         let provider = make_provider(git_with_modified());
-        assert_that!(
-            provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false),
-            eq(true)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false), eq(true));
     }
 
     #[rstest]
     fn can_handle_added_file() {
         let provider = make_provider(git_with_added());
-        assert_that!(
-            provider.can_handle(&PathBuf::from("/repo/src/new.rs"), false),
-            eq(true)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/new.rs"), false), eq(true));
     }
 
     #[rstest]
     fn can_handle_untracked_returns_false() {
         let provider = make_provider(git_with_untracked());
-        assert_that!(
-            provider.can_handle(&PathBuf::from("/repo/src/scratch.rs"), false),
-            eq(false)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/scratch.rs"), false), eq(false));
     }
 
     #[rstest]
     fn can_handle_no_git_state_returns_false() {
         let provider = make_provider(no_git());
-        assert_that!(
-            provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false),
-            eq(false)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false), eq(false));
     }
 
     #[rstest]
     fn can_handle_directory_returns_false() {
         let provider = make_provider(git_with_modified());
-        assert_that!(
-            provider.can_handle(&PathBuf::from("/repo/src"), true),
-            eq(false)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("/repo/src"), true), eq(false));
     }
 
     #[rstest]
     fn can_handle_clean_file_returns_false() {
         let provider = make_provider(git_with_modified());
-        assert_that!(
-            provider.can_handle(&PathBuf::from("/repo/src/other.rs"), false),
-            eq(false)
-        );
+        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/other.rs"), false), eq(false));
     }
 }

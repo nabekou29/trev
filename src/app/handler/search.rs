@@ -6,12 +6,12 @@
 //! - **Filtered**: query is confirmed; the tree shows only matching entries
 //!   and the user can navigate with normal tree keys. Esc clears the filter.
 
+use std::path::Path;
+
 use crossterm::event::{
     KeyCode,
     KeyEvent,
 };
-
-use std::path::Path;
 
 use crate::app::handler::tree::spawn_load_children;
 use crate::app::state::{
@@ -134,11 +134,7 @@ fn handle_filtered_key(key: KeyEvent, state: &mut AppState, ctx: &AppContext) {
 ///
 /// Instead of re-running a search (the index may be mid-rebuild and empty),
 /// reconstructs the filter from the still-valid `search_match_indices`.
-pub fn reapply_search(
-    state: &mut AppState,
-    ctx: &AppContext,
-    original_cursor_path: Option<&Path>,
-) {
+pub fn reapply_search(state: &mut AppState, ctx: &AppContext, original_cursor_path: Option<&Path>) {
     let phase = match state.mode {
         AppMode::Search(ref search) => {
             if search.buffer.value.is_empty() {
@@ -179,12 +175,9 @@ pub fn reapply_search(
     // Restore cursor to previous position if still visible.
     // Prefer the original cursor path (from before tree rebuild) over the
     // current one, which may point to a fallback node.
-    let restore_path = original_cursor_path
-        .map(Path::to_path_buf)
-        .or_else(|| state.tree_state.cursor_path());
-    let restored = restore_path
-        .as_ref()
-        .is_some_and(|cp| state.tree_state.move_cursor_to_path(cp));
+    let restore_path =
+        original_cursor_path.map(Path::to_path_buf).or_else(|| state.tree_state.cursor_path());
+    let restored = restore_path.as_ref().is_some_and(|cp| state.tree_state.move_cursor_to_path(cp));
     if !restored {
         // Path not found — clamp cursor to valid range so it doesn't vanish.
         state.tree_state.move_cursor_to(state.tree_state.cursor());
@@ -361,11 +354,18 @@ pub fn schedule_search_loads(state: &mut AppState, ctx: &AppContext) {
     let scheduled_count = scheduled.len();
     let remaining = total_pending - scheduled_count;
     if !scheduled.is_empty() {
-        let _span = tracing::info_span!("retain_pending", scheduled = scheduled_count, remaining).entered();
-        let scheduled_set: std::collections::HashSet<std::path::PathBuf> = scheduled.into_iter().collect();
+        let _span =
+            tracing::info_span!("retain_pending", scheduled = scheduled_count, remaining).entered();
+        let scheduled_set: std::collections::HashSet<std::path::PathBuf> =
+            scheduled.into_iter().collect();
         pending.retain(|p| !scheduled_set.contains(p));
     }
-    tracing::info!(scheduled = scheduled_count, remaining, total_pending, "schedule_search_loads complete");
+    tracing::info!(
+        scheduled = scheduled_count,
+        remaining,
+        total_pending,
+        "schedule_search_loads complete"
+    );
     if pending.is_empty() {
         state.search_pending_loads = None;
         // All ancestor loads are done. If in Filtered phase with virtual

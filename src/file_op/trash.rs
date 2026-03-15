@@ -15,10 +15,8 @@ use anyhow::{
 ///
 /// Uses the XDG state directory: `{state_dir}/trev/trash/`.
 pub fn trash_dir() -> PathBuf {
-    crate::dirs::AppDirs::new().map_or_else(
-        |_| std::env::temp_dir().join("trev/trash"),
-        |d| d.trash_dir(),
-    )
+    crate::dirs::AppDirs::new()
+        .map_or_else(|_| std::env::temp_dir().join("trev/trash"), |d| d.trash_dir())
 }
 
 /// Generate a timestamped trash path for a file.

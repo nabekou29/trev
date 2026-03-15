@@ -39,10 +39,8 @@ pub fn workspace_key(path: &Path) -> String {
 ///
 /// Uses `$XDG_RUNTIME_DIR/trev`, falling back to `$TMPDIR/trev` or `/tmp/trev`.
 pub fn runtime_dir() -> PathBuf {
-    crate::dirs::AppDirs::new().map_or_else(
-        |_| std::env::temp_dir().join("trev"),
-        |d| d.runtime_dir().to_path_buf(),
-    )
+    crate::dirs::AppDirs::new()
+        .map_or_else(|_| std::env::temp_dir().join("trev"), |d| d.runtime_dir().to_path_buf())
 }
 
 /// Compute the socket path for the current process and workspace.

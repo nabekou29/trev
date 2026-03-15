@@ -49,8 +49,7 @@ pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewStat
         block = block.title_bottom(lang.right_aligned());
     }
 
-    let provider_areas =
-        calculate_provider_areas(area, provider_width, &provider_entry_widths);
+    let provider_areas = calculate_provider_areas(area, provider_width, &provider_entry_widths);
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
