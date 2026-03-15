@@ -60,7 +60,7 @@ Auto-generated from source. Do not edit manually.
 | `D` | `file_op.system_trash` | Move to trash |
 | `u` | `file_op.undo` | Undo |
 | `<C-r>` | `file_op.redo` | Redo |
-| ` ` | `file_op.toggle_mark` | Toggle mark |
+| `<Space>` | `file_op.toggle_mark` | Toggle mark |
 | `<Esc>` | `file_op.clear_selections` | Clear selections |
 
 ## Search

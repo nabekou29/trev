@@ -239,7 +239,11 @@ fn handle_docs() -> Result<()> {
         println!("| Key | Action | Description |");
         println!("|-----|--------|-------------|");
         for (key, name, desc) in &entries {
-            let key_display = if key.is_empty() { "-" } else { key };
+            let key_display = match key.as_str() {
+                "" => "-",
+                " " => "<Space>",
+                other => other,
+            };
             println!("| `{key_display}` | `{name}` | {desc} |");
         }
         println!();
