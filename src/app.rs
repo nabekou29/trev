@@ -569,7 +569,7 @@ fn process_children_results(
     ctx: &AppContext,
     channels: &mut EventReceivers,
 ) -> bool {
-    let _span = tracing::info_span!("process_children").entered();
+    let _span = tracing::debug_span!("process_children").entered();
 
     let mut had_events = false;
     let mut deferred_snapshot: Option<CursorSnapshot> = None;
@@ -743,7 +743,7 @@ fn compute_poll_duration(state: &AppState) -> Duration {
 ///
 /// Stops early if a key enters pending state (need to render indicator and wait).
 fn drain_terminal_events(state: &mut AppState, ctx: &AppContext) -> Result<()> {
-    let _span = tracing::info_span!("key_event_drain").entered();
+    let _span = tracing::debug_span!("key_event_drain").entered();
     loop {
         if !crossterm::event::poll(Duration::ZERO)? {
             break;
@@ -847,7 +847,7 @@ pub async fn run(args: &Args) -> Result<()> {
             () = &mut timeout => {}
         }
 
-        let _frame_span = tracing::info_span!("frame", dirty = state.dirty).entered();
+        let _frame_span = tracing::debug_span!("frame", dirty = state.dirty).entered();
 
         // ── Drain remaining terminal events ────────────────────
         if got_terminal_event && !state.pending_keys.is_pending() {
@@ -885,7 +885,7 @@ pub async fn run(args: &Args) -> Result<()> {
                 state.needs_redraw = false;
                 terminal.clear()?;
             }
-            let _span = tracing::info_span!("draw").entered();
+            let _span = tracing::debug_span!("draw").entered();
             terminal.draw(|frame| {
                 crate::ui::render(frame, &mut state, &ctx.action_key_lookup);
             })?;

@@ -74,22 +74,15 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState, key_lookup: &ActionKe
         state.viewport_height = tree_area.height as usize;
         state.layout_areas = LayoutAreas { tree_area, preview_area, ..LayoutAreas::default() };
 
-        {
-            let _span = tracing::info_span!("render_tree", visible_count).entered();
-            tree_view::render_tree(frame, tree_area, state, visible_count);
-        }
-        {
-            let _span = tracing::info_span!("render_preview").entered();
-            let provider_areas =
-                preview_view::render_preview(frame, preview_area, &mut state.preview_state);
-            state.layout_areas.provider_areas = provider_areas;
-        }
+        tree_view::render_tree(frame, tree_area, state, visible_count);
+        let provider_areas =
+            preview_view::render_preview(frame, preview_area, &mut state.preview_state);
+        state.layout_areas.provider_areas = provider_areas;
     } else {
         // Full width tree when preview is disabled.
         state.viewport_height = main_area.height as usize;
         state.layout_areas = LayoutAreas { tree_area: main_area, ..LayoutAreas::default() };
 
-        let _span = tracing::info_span!("render_tree", visible_count).entered();
         tree_view::render_tree(frame, main_area, state, visible_count);
     }
 

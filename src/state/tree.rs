@@ -381,7 +381,6 @@ impl TreeState {
     /// the full list is truly required (e.g. path-to-index lookup across all
     /// nodes).
     pub fn visible_nodes(&self) -> Vec<VisibleNode<'_>> {
-        let _span = tracing::info_span!("visible_nodes").entered();
         let mut result = Vec::new();
         if let Some(ref filter) = self.search_filter {
             collect_visible_filtered(
@@ -506,7 +505,7 @@ impl TreeState {
         let dirs_first = self.options.directories_first;
 
         {
-            let _span = tracing::info_span!("sort_children", count = children.len()).entered();
+            let _span = tracing::debug_span!("sort_children", count = children.len()).entered();
             crate::tree::sort::sort_children(&mut children, order, direction, dirs_first);
         }
 
@@ -564,7 +563,6 @@ impl TreeState {
     pub fn prepare_async_load(&mut self, path: &Path, auto_expand: bool) -> Option<PathBuf> {
         let result = {
             let node = {
-                let _span = tracing::info_span!("find_node_mut").entered();
                 self.find_node_mut(path)?
             };
             if !node.is_dir || !matches!(node.children, ChildrenState::NotLoaded) {
@@ -700,11 +698,7 @@ impl TreeState {
 
     /// Move cursor by a signed delta with bounds checking.
     pub fn move_cursor(&mut self, delta: i32) {
-        let _span = tracing::info_span!("move_cursor", delta).entered();
-        let count = {
-            let _span = tracing::info_span!("visible_node_count").entered();
-            self.visible_node_count()
-        };
+        let count = self.visible_node_count();
         if count == 0 {
             self.cursor = 0;
             return;
@@ -848,7 +842,6 @@ impl TreeState {
 
     /// Get serializable info for the node at the current cursor position.
     pub fn current_node_info(&self) -> Option<NodeInfo> {
-        let _span = tracing::info_span!("current_node_info").entered();
         let visible = self.visible_nodes_in_range(self.cursor, 1);
         visible.first().map(|vn| vn.node.to_node_info())
     }

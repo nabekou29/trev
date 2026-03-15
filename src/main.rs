@@ -17,10 +17,8 @@ async fn main() -> Result<()> {
 
     let is_tui_mode = args.command.is_none();
 
-    // In TUI mode, redirect logs to a file so they don't corrupt the display.
+    // In TUI mode, redirect logs to a file (opt-in via RUST_LOG).
     // In subcommand mode, log to stderr as usual.
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
 
     // Chrome trace guard must live until program exit to flush trace data.
     let mut chrome_guard: Option<tracing_chrome::FlushGuard> = None;
@@ -30,13 +28,25 @@ async fn main() -> Result<()> {
         let log_dir = trev::dirs::AppDirs::new()
             .map_or_else(|_| PathBuf::from("/tmp/trev"), |d| d.log_dir().to_path_buf());
 
-        let file_appender = tracing_appender::rolling::daily(&log_dir, "trev.log");
-        let fmt_layer = tracing_subscriber::fmt::layer()
-            .with_writer(file_appender)
-            .with_ansi(false)
-            .with_filter(env_filter);
+        // Only write log files when RUST_LOG is explicitly set.
+        #[allow(clippy::option_if_let_else)]
+        let fmt_layer = if let Ok(env_filter) = tracing_subscriber::EnvFilter::try_from_default_env()
+        {
+            let _ = std::fs::create_dir_all(&log_dir);
+            cleanup_old_logs(&log_dir, 7);
+            let file_appender = tracing_appender::rolling::daily(&log_dir, "trev.log");
+            Some(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(file_appender)
+                    .with_ansi(false)
+                    .with_filter(env_filter),
+            )
+        } else {
+            None
+        };
 
         let chrome_layer = if args.profile {
+            let _ = std::fs::create_dir_all(&log_dir);
             let output = log_dir.join("profile.json");
             let (layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
                 .trace_style(tracing_chrome::TraceStyle::Async)
@@ -52,6 +62,8 @@ async fn main() -> Result<()> {
 
         tracing_subscriber::registry().with(fmt_layer).with(chrome_layer).init();
     } else {
+        let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
         tracing_subscriber::fmt().with_env_filter(env_filter).init();
     }
 
@@ -87,6 +99,36 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Delete log files older than `max_days` from the log directory.
+///
+/// Matches files named `trev.log.YYYY-MM-DD`.
+fn cleanup_old_logs(log_dir: &std::path::Path, max_days: u64) {
+    use std::time::{
+        Duration,
+        SystemTime,
+    };
+
+    let Ok(entries) = std::fs::read_dir(log_dir) else {
+        return;
+    };
+    let cutoff = SystemTime::now().checked_sub(Duration::from_secs(max_days * 86400));
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name();
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
+        if !name_str.starts_with("trev.log.") {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata() {
+            let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            if cutoff.is_some_and(|c| modified < c) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
 }
 
 /// Print profile output path to stderr after terminal restore.
