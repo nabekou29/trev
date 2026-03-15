@@ -58,8 +58,26 @@ run = "cargo run -- schema > config.schema.json"
 sources = ["src/config.rs", "src/ui/column.rs"]
 outputs = ["config.schema.json"]
 
+[tasks.coverage-ci]
+description = "Run tests with coverage for CI (JSON output)"
+run = "cargo llvm-cov --all-features --codecov --output-path codecov.json"
+
 [tasks.build-install-release]
 description = "Build and install"
 run = "cargo install --path . --force"
 sources = ["Cargo.toml", "src/**/*.rs"]
 outputs = ["{{env.CARGO_HOME}}/bin/trev"]
+
+[tasks.release]
+description = "Preview release (dry-run)"
+usage = 'arg "[level]" default="patch"'
+run = "cargo release ${usage_level}"
+
+[tasks.release-execute]
+description = "Execute release"
+usage = 'arg "[level]" default="patch"'
+run = "cargo release --execute ${usage_level}"
+
+[tasks.changelog]
+description = "Preview CHANGELOG generation"
+run = "git-cliff --unreleased"

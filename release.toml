@@ -1,0 +1,11 @@
+# cargo-release configuration
+# https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md
+
+publish = false
+tag-name = "v{{version}}"
+tag-message = "Release {{version}}"
+# Prepend unreleased changes to CHANGELOG (preserves existing entries)
+pre-release-hook = ["git-cliff", "--unreleased", "--tag", "{{version}}", "--prepend", "CHANGELOG.md"]
+allow-branch = ["main"]
+push = true
+tag = true

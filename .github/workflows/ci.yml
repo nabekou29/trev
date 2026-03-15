@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    env:
+      MISE_ENV: ci
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v3
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: mise run test
+
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    env:
+      MISE_ENV: ci
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v3
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: mise run build
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    env:
+      MISE_ENV: ci
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v3
+
+      - name: Install clippy
+        run: rustup component add clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run Clippy
+        run: mise run lint
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    env:
+      MISE_ENV: ci
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v3
+
+      - name: Install rustfmt
+        run: rustup component add rustfmt
+
+      - name: Check formatting
+        run: mise run format-check
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    env:
+      MISE_ENV: ci
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v3
+
+      - name: Install llvm-tools-preview
+        run: rustup component add llvm-tools-preview
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate coverage report
+        run: mise run coverage-ci
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: codecov.json
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
