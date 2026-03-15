@@ -8,7 +8,14 @@ Fast TUI file viewer with tree view, syntax-highlighted preview, and Neovim inte
 
 Built in Rust for speed and safety.
 
-<!-- ![screenshot](demo/screenshot.png) -->
+![screenshot](demo/screenshot.png)
+
+<details>
+<summary>Demo</summary>
+
+![demo](demo/demo.gif)
+
+</details>
 
 ## Features
 
