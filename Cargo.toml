@@ -21,6 +21,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 
 # Syntax highlighting
 syntect = { version = "5", default-features = false, features = ["parsing", "regex-onig"] }
@@ -82,6 +83,9 @@ tracing-chrome = "0.7"
 # Utilities
 unicode-width = "0.2"
 pathdiff = "0.2"
+
+[features]
+dev = []
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

@@ -65,8 +65,17 @@ async fn main() -> Result<()> {
         Some(trev::cli::Command::SocketPath { workspace }) => {
             return handle_socket_path(workspace.as_deref());
         }
+        #[cfg(feature = "dev")]
         Some(trev::cli::Command::Schema) => {
             return handle_schema();
+        }
+        Some(trev::cli::Command::Completions { shell }) => {
+            trev::cli::Args::print_completions(*shell);
+            return Ok(());
+        }
+        #[cfg(feature = "dev")]
+        Some(trev::cli::Command::Docs) => {
+            return handle_docs();
         }
         None => {}
     }
@@ -158,11 +167,86 @@ fn handle_socket_path(workspace: Option<&str>) -> Result<()> {
 }
 
 /// Print JSON Schema for the configuration file to stdout.
+#[cfg(feature = "dev")]
 #[expect(clippy::print_stdout, reason = "CLI output to stdout is intentional")]
 fn handle_schema() -> Result<()> {
     let schema = trev::config::Config::generate_schema();
     let json = serde_json::to_string_pretty(&schema)?;
     println!("{json}");
+    Ok(())
+}
+
+/// Generate documentation: default keybindings table in Markdown.
+#[cfg(feature = "dev")]
+#[expect(clippy::print_stdout, reason = "CLI output to stdout is intentional")]
+#[expect(clippy::unnecessary_wraps, reason = "Consistent with other handle_* functions")]
+fn handle_docs() -> Result<()> {
+    use std::collections::HashMap;
+
+    use trev::action::Action;
+    use trev::app::keymap::ActionKeyLookup;
+    use trev::app::KeyMap;
+    use trev::config::KeybindingConfig;
+
+    // Build default keymap and lookup.
+    let config = KeybindingConfig::default();
+    let custom_actions: HashMap<String, trev::config::CustomActionDef> = HashMap::new();
+    let keymap = KeyMap::from_config(&config, &custom_actions);
+    let lookup = ActionKeyLookup::from_keymap(&keymap);
+
+    // Group actions by category prefix.
+    let groups: &[(&str, &str)] = &[
+        ("tree.sort.", "Sort"),
+        ("tree.", "Navigation"),
+        ("filter.", "Filter"),
+        ("preview.", "Preview"),
+        ("file_op.copy.", "Copy"),
+        ("file_op.", "File Operations"),
+        ("search.", "Search"),
+        ("", "General"),
+    ];
+
+    println!("# Default Keybindings");
+    println!();
+    println!("Auto-generated from source. Do not edit manually.");
+    println!();
+
+    for &(prefix, title) in groups {
+        let entries: Vec<_> = Action::all_action_names()
+            .into_iter()
+            .filter(|name| {
+                if prefix.is_empty() {
+                    // General: top-level actions only.
+                    !name.contains('.')
+                } else {
+                    name.starts_with(prefix)
+                        && !groups
+                            .iter()
+                            .any(|&(p, _)| !p.is_empty() && p != prefix && name.starts_with(p))
+                }
+            })
+            .filter_map(|name| {
+                let action = name.parse::<Action>().ok()?;
+                let key = lookup.key_for(name).unwrap_or("");
+                Some((key.to_string(), name, action.description()))
+            })
+            .collect();
+
+        if entries.is_empty() {
+            continue;
+        }
+
+        println!("## {title}");
+        println!();
+        println!("| Key | Action | Description |");
+        println!("|-----|--------|-------------|");
+        for (key, name, desc) in &entries {
+            let key_display = if key.is_empty() { "-" } else { key };
+            println!("| `{key_display}` | `{name}` | {desc} |");
+        }
+        println!();
+    }
+
     Ok(())
 }
 

@@ -418,14 +418,25 @@ fn setup_terminal(
 
 /// Load configuration, apply CLI overrides, and canonicalize the root path.
 ///
-/// When `--config-override <path>` is given, that file is loaded and merged
-/// on top of the base config before CLI overrides are applied. This lets
-/// editor plugins inject keybindings and custom actions at startup.
+/// Load configuration with the following precedence:
+///
+/// 1. `--config <path>` — replaces the base config entirely
+/// 2. Default config (`~/.config/trev/config.yml`) — if `--config` is not given
+/// 3. `--config-override <path>` — merged on top (additive, for editor plugins)
+/// 4. CLI flag overrides (`--show-hidden`, `--no-preview`, etc.)
 fn load_config(args: &Args) -> Result<(Config, PathBuf)> {
     let _span = tracing::info_span!("config_load").entered();
-    let load_result = Config::load()?;
-    load_result.log_warnings();
-    let mut config = load_result.config;
+
+    // Load base config: either from --config or from the default path.
+    let mut config = if let Some(config_path) = &args.config {
+        let result = Config::load_from(config_path)?;
+        result.log_warnings();
+        result.config
+    } else {
+        let result = Config::load()?;
+        result.log_warnings();
+        result.config
+    };
 
     // Apply override config (used by editor plugins to inject keybindings).
     if let Some(override_path) = &args.config_override {

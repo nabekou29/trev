@@ -54,9 +54,17 @@ run = "cargo llvm-cov --all-features --html --open"
 
 [tasks.schema]
 description = "Regenerate config JSON Schema"
-run = "cargo run -- schema > config.schema.json"
+run = "cargo run --features dev -- schema > config.schema.json"
 sources = ["src/config.rs", "src/ui/column.rs"]
 outputs = ["config.schema.json"]
+
+[tasks.docs]
+description = "Regenerate keybinding docs"
+run = "cargo run --features dev -- docs > docs/keybindings.md"
+
+[tasks.demo]
+description = "Generate demo GIF and video"
+run = ["./demo/setup.sh", "vhs demo/demo.tape"]
 
 [tasks.coverage-ci]
 description = "Run tests with coverage for CI (JSON output)"

@@ -3,9 +3,11 @@
 use std::path::PathBuf;
 
 use clap::{
+    CommandFactory,
     Parser,
     Subcommand,
 };
+use clap_complete::Shell;
 
 use crate::config::{
     SortDirection,
@@ -77,6 +79,12 @@ pub struct Args {
     #[arg(long)]
     pub reveal: Option<PathBuf>,
 
+    /// Use a specific config file instead of the default.
+    ///
+    /// Replaces the base config entirely. CLI overrides are still applied on top.
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+
     /// Additional config file to merge on top of the base config.
     ///
     /// Used by editor plugins to inject keybindings and custom actions at startup.
@@ -117,7 +125,16 @@ pub enum Command {
         workspace: Option<String>,
     },
     /// Print JSON Schema for the configuration file to stdout.
+    #[cfg(feature = "dev")]
     Schema,
+    /// Generate shell completion scripts.
+    Completions {
+        /// Target shell.
+        shell: Shell,
+    },
+    /// Generate documentation (default keybindings / action reference).
+    #[cfg(feature = "dev")]
+    Docs,
 }
 
 /// Control actions for a running daemon.
@@ -139,6 +156,11 @@ impl Args {
     pub fn parse_args() -> Self {
         Self::parse()
     }
+
+    /// Write shell completion script to stdout.
+    pub fn print_completions(shell: Shell) {
+        clap_complete::generate(shell, &mut Self::command(), "trev", &mut std::io::stdout());
+    }
 }
 
 impl Default for Args {
@@ -159,6 +181,7 @@ impl Default for Args {
             no_restore: false,
             daemon: false,
             reveal: None,
+            config: None,
             config_override: None,
             profile: false,
             command: None,
