@@ -1,5 +1,7 @@
 # trev
 
+🌐 English | [日本語](README.ja.md)
+
 [![CI](https://github.com/nabekou29/trev/actions/workflows/ci.yml/badge.svg)](https://github.com/nabekou29/trev/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/nabekou29/trev)](https://github.com/nabekou29/trev/releases)
@@ -74,21 +76,21 @@ trev --no-preview # Disable preview panel
 
 ### CLI Options
 
-| Option                     | Description                                  |
-| -------------------------- | -------------------------------------------- |
-| `-a, --show-hidden`        | Show hidden files                            |
-| `--show-ignored`           | Show gitignored files                        |
-| `--no-preview`             | Disable preview panel                        |
-| `--sort-order <ORDER>`     | smart, name, size, mtime, type, extension    |
-| `--sort-direction <DIR>`   | asc, desc                                    |
-| `--no-directories-first`   | Do not sort directories before files         |
-| `--icons / --no-icons`     | File icons control                           |
-| `--daemon`                 | Run as daemon (IPC server)                   |
-| `--restore / --no-restore` | Session state restore control                |
-| `--no-git`                 | Disable git integration                      |
-| `--reveal <PATH>`          | Reveal a specific path on startup            |
+| Option                     | Description                                   |
+| -------------------------- | --------------------------------------------- |
+| `-a, --show-hidden`        | Show hidden files                             |
+| `--show-ignored`           | Show gitignored files                         |
+| `--no-preview`             | Disable preview panel                         |
+| `--sort-order <ORDER>`     | smart, name, size, mtime, type, extension     |
+| `--sort-direction <DIR>`   | asc, desc                                     |
+| `--no-directories-first`   | Do not sort directories before files          |
+| `--icons / --no-icons`     | File icons control                            |
+| `--daemon`                 | Run as daemon (IPC server)                    |
+| `--restore / --no-restore` | Session state restore control                 |
+| `--no-git`                 | Disable git integration                       |
+| `--reveal <PATH>`          | Reveal a specific path on startup             |
 | `--config <PATH>`          | Use a specific config file instead of default |
-| `--config-override <PATH>` | Merge additional config (for editor plugins) |
+| `--config-override <PATH>` | Merge additional config (for editor plugins)  |
 
 ### Subcommands
 
