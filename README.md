@@ -53,6 +53,8 @@ cargo install --git https://github.com/nabekou29/trev
 ### mise
 
 ```sh
+mise use -g github:nabekou29/trev
+# or
 mise use -g cargo:trev@https://github.com/nabekou29/trev
 ```
 
