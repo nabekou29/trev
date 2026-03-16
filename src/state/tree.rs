@@ -562,9 +562,7 @@ impl TreeState {
     /// found, not a directory, or not in `NotLoaded` state.
     pub fn prepare_async_load(&mut self, path: &Path, auto_expand: bool) -> Option<PathBuf> {
         let result = {
-            let node = {
-                self.find_node_mut(path)?
-            };
+            let node = { self.find_node_mut(path)? };
             if !node.is_dir || !matches!(node.children, ChildrenState::NotLoaded) {
                 return None;
             }

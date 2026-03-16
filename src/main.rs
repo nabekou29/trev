@@ -30,20 +30,20 @@ async fn main() -> Result<()> {
 
         // Only write log files when RUST_LOG is explicitly set.
         #[allow(clippy::option_if_let_else)]
-        let fmt_layer = if let Ok(env_filter) = tracing_subscriber::EnvFilter::try_from_default_env()
-        {
-            let _ = std::fs::create_dir_all(&log_dir);
-            cleanup_old_logs(&log_dir, 7);
-            let file_appender = tracing_appender::rolling::daily(&log_dir, "trev.log");
-            Some(
-                tracing_subscriber::fmt::layer()
-                    .with_writer(file_appender)
-                    .with_ansi(false)
-                    .with_filter(env_filter),
-            )
-        } else {
-            None
-        };
+        let fmt_layer =
+            if let Ok(env_filter) = tracing_subscriber::EnvFilter::try_from_default_env() {
+                let _ = std::fs::create_dir_all(&log_dir);
+                cleanup_old_logs(&log_dir, 7);
+                let file_appender = tracing_appender::rolling::daily(&log_dir, "trev.log");
+                Some(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(file_appender)
+                        .with_ansi(false)
+                        .with_filter(env_filter),
+                )
+            } else {
+                None
+            };
 
         let chrome_layer = if args.profile {
             let _ = std::fs::create_dir_all(&log_dir);
