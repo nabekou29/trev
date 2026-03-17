@@ -9,6 +9,7 @@ use std::sync::{
 use std::time::Duration;
 
 use ansi_to_tui::IntoText;
+use globset::GlobSet;
 
 use crate::config::ExternalCommand;
 use crate::git::GitState;
@@ -23,7 +24,7 @@ const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 
 /// Provider that runs a single external command and renders its ANSI output.
 ///
-/// Each configured command specifies file extensions it applies to.
+/// Each configured command specifies file extensions or glob patterns it applies to.
 /// The command is run with the file path as an argument, and the
 /// ANSI-colored stdout is converted to ratatui `Text`.
 #[derive(Debug)]
@@ -38,6 +39,8 @@ pub struct ExternalCmdProvider {
     git_state: Arc<RwLock<Option<GitState>>>,
     /// Whether the command binary exists in PATH (checked once at construction).
     command_found: bool,
+    /// Compiled glob set from `pattern` (empty when using extension matching).
+    glob_set: Option<GlobSet>,
 }
 
 impl ExternalCmdProvider {
@@ -49,7 +52,34 @@ impl ExternalCmdProvider {
     ) -> Self {
         let name = command.display_name().to_string();
         let command_found = Self::command_exists(&command.command);
-        Self { name, command, timeout: Duration::from_secs(timeout_secs), git_state, command_found }
+        let glob_set = Self::compile_patterns(&command.pattern);
+        Self {
+            name,
+            command,
+            timeout: Duration::from_secs(timeout_secs),
+            git_state,
+            command_found,
+            glob_set,
+        }
+    }
+
+    /// Compile glob patterns into a `GlobSet`. Returns `None` if no patterns.
+    fn compile_patterns(patterns: &[String]) -> Option<GlobSet> {
+        if patterns.is_empty() {
+            return None;
+        }
+        let mut builder = globset::GlobSetBuilder::new();
+        for pattern in patterns {
+            match globset::Glob::new(pattern) {
+                Ok(glob) => {
+                    builder.add(glob);
+                }
+                Err(e) => {
+                    tracing::warn!(pattern, %e, "invalid preview command glob pattern, skipping");
+                }
+            }
+        }
+        builder.build().ok()
     }
 
     /// Check if a command exists in PATH.
@@ -77,16 +107,19 @@ impl PreviewProvider for ExternalCmdProvider {
             return false;
         }
 
-        // Check extension / directory match first.
-        let ext_match = if is_dir {
+        // Check file/directory match: glob patterns take precedence over extensions.
+        let file_match = if is_dir {
             self.command.directories
+        } else if let Some(ref glob_set) = self.glob_set {
+            // Glob patterns match against the file name (basename).
+            path.file_name().and_then(|n| n.to_str()).is_some_and(|name| glob_set.is_match(name))
         } else {
             path.extension().and_then(|e| e.to_str()).is_some_and(|ext| {
                 let ext_lower = ext.to_ascii_lowercase();
                 self.command.extensions.iter().any(|e| e.to_ascii_lowercase() == ext_lower)
             })
         };
-        if !ext_match {
+        if !file_match {
             return false;
         }
 
@@ -236,6 +269,7 @@ mod tests {
         ExternalCmdProvider::new(
             ExternalCommand {
                 name: None,
+                pattern: vec![],
                 extensions: vec!["csv".to_string(), "tsv".to_string()],
                 directories: false,
                 priority: Priority::default(),
@@ -252,6 +286,7 @@ mod tests {
         ExternalCmdProvider::new(
             ExternalCommand {
                 name: None,
+                pattern: vec![],
                 extensions: vec!["xyz".to_string()],
                 directories: false,
                 priority: Priority::default(),
@@ -271,6 +306,7 @@ mod tests {
         let provider = ExternalCmdProvider::new(
             ExternalCommand {
                 name: Some("Pretty JSON".to_string()),
+                pattern: vec![],
                 extensions: vec!["json".to_string()],
                 directories: false,
                 priority: Priority::default(),
@@ -333,6 +369,7 @@ mod tests {
         let provider = ExternalCmdProvider::new(
             ExternalCommand {
                 name: Some("dust".to_string()),
+                pattern: vec![],
                 extensions: vec![],
                 directories: true,
                 priority: Priority::default(),
@@ -346,6 +383,71 @@ mod tests {
         assert_that!(provider.can_handle(&PathBuf::from("/some/dir"), true), eq(true));
     }
 
+    // --- can_handle with glob pattern ---
+
+    #[rstest]
+    fn can_handle_pattern_wildcard_matches_all_files() {
+        let provider = ExternalCmdProvider::new(
+            ExternalCommand {
+                name: None,
+                pattern: vec!["*".to_string()],
+                extensions: vec![],
+                directories: false,
+                priority: Priority::default(),
+                command: "cat".to_string(),
+                args: vec![],
+                git_status: vec![],
+            },
+            3,
+            no_git(),
+        );
+        assert_that!(provider.can_handle(&PathBuf::from("file.rs"), false), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("Makefile"), false), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("/some/dir"), true), eq(false));
+    }
+
+    #[rstest]
+    fn can_handle_pattern_extension_glob() {
+        let provider = ExternalCmdProvider::new(
+            ExternalCommand {
+                name: None,
+                pattern: vec!["*.{rs,go}".to_string()],
+                extensions: vec![],
+                directories: false,
+                priority: Priority::default(),
+                command: "cat".to_string(),
+                args: vec![],
+                git_status: vec![],
+            },
+            3,
+            no_git(),
+        );
+        assert_that!(provider.can_handle(&PathBuf::from("main.rs"), false), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("main.go"), false), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("main.py"), false), eq(false));
+    }
+
+    #[rstest]
+    fn can_handle_pattern_takes_precedence_over_extensions() {
+        let provider = ExternalCmdProvider::new(
+            ExternalCommand {
+                name: None,
+                pattern: vec!["*.md".to_string()],
+                extensions: vec!["rs".to_string()],
+                directories: false,
+                priority: Priority::default(),
+                command: "cat".to_string(),
+                args: vec![],
+                git_status: vec![],
+            },
+            3,
+            no_git(),
+        );
+        // pattern matches *.md, extensions has "rs" — pattern wins.
+        assert_that!(provider.can_handle(&PathBuf::from("README.md"), false), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("main.rs"), false), eq(false));
+    }
+
     // --- can_handle with git_status condition ---
 
     #[rstest]
@@ -357,6 +459,7 @@ mod tests {
         let provider = ExternalCmdProvider::new(
             ExternalCommand {
                 name: None,
+                pattern: vec![],
                 extensions: vec!["rs".to_string()],
                 directories: false,
                 priority: Priority::default(),
@@ -379,6 +482,7 @@ mod tests {
         let provider = ExternalCmdProvider::new(
             ExternalCommand {
                 name: None,
+                pattern: vec![],
                 extensions: vec!["rs".to_string()],
                 directories: false,
                 priority: Priority::default(),
@@ -408,6 +512,7 @@ mod tests {
         let provider = ExternalCmdProvider::new(
             ExternalCommand {
                 name: None,
+                pattern: vec![],
                 extensions: vec!["rs".to_string()],
                 directories: false,
                 priority: Priority::default(),
@@ -430,6 +535,7 @@ mod tests {
         let provider = ExternalCmdProvider::new(
             ExternalCommand {
                 name: None,
+                pattern: vec![],
                 extensions: vec!["rs".to_string()],
                 directories: false,
                 priority: Priority::default(),

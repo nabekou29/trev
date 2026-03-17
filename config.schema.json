@@ -732,7 +732,7 @@
           "default": false
         },
         "extensions": {
-          "description": "File extensions this command applies to.",
+          "description": "File extensions this command applies to.\n\nIgnored when `pattern` is set. Simple case-insensitive extension matching.",
           "type": "array",
           "default": [],
           "items": {
@@ -754,6 +754,14 @@
             "null"
           ],
           "default": null
+        },
+        "pattern": {
+          "description": "Glob pattern(s) to match against the file name (e.g. `\"*\"`, `\"*.{rs,go}\"`).\n\nAccepts a single string or an array. When set, takes precedence over `extensions`.\nMatches against the file name (basename), not the full path.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
         },
         "priority": {
           "description": "Priority for ordering (lower = higher priority, default: 100).\n\nAccepts a number or a named constant: `high` (0), `mid` (100), `low` (1000).",

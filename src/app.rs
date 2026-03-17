@@ -439,11 +439,11 @@ fn load_config(args: &Args) -> Result<(Config, PathBuf)> {
         result.config
     };
 
-    // Apply override config (used by editor plugins to inject keybindings).
+    // Apply override config (used by editor plugins to inject keybindings, preview commands, etc.).
     if let Some(override_path) = &args.config_override {
-        let override_result = Config::load_from(override_path)?;
+        let override_result = crate::config::ConfigOverride::load_from(override_path)?;
         override_result.log_warnings();
-        config.merge(override_result.config);
+        config.apply_override(override_result.config);
     }
 
     config.apply_cli_overrides(args);

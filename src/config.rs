@@ -487,6 +487,48 @@ fn deserialize_one_or_many<'de, D: serde::Deserializer<'de>>(
     deserializer.deserialize_any(OneOrManyVisitor)
 }
 
+/// Deserialize an optional field that can be a single string or a list.
+///
+/// Returns an empty `Vec` when the field is absent (`#[serde(default)]`).
+fn deserialize_one_or_many_opt<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<String>, D::Error> {
+    use serde::de;
+
+    /// Visitor that also accepts `null` / absent as empty.
+    struct OneOrManyOptVisitor;
+
+    impl<'de> de::Visitor<'de> for OneOrManyOptVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a string, a list of strings, or null")
+        }
+
+        fn visit_none<E: de::Error>(self) -> Result<Vec<String>, E> {
+            Ok(Vec::new())
+        }
+
+        fn visit_unit<E: de::Error>(self) -> Result<Vec<String>, E> {
+            Ok(Vec::new())
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Vec<String>, E> {
+            Ok(vec![v.to_string()])
+        }
+
+        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<String>, A::Error> {
+            let mut vec = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+            while let Some(item) = seq.next_element()? {
+                vec.push(item);
+            }
+            Ok(vec)
+        }
+    }
+
+    deserializer.deserialize_any(OneOrManyOptVisitor)
+}
+
 /// Display style configuration for file names.
 ///
 /// All fields are optional/defaulted so partial overrides work naturally in YAML.
@@ -687,7 +729,15 @@ pub struct ExternalCommand {
     /// Defaults to the command binary name when omitted.
     #[serde(default)]
     pub name: Option<String>,
+    /// Glob pattern(s) to match against the file name (e.g. `"*"`, `"*.{rs,go}"`).
+    ///
+    /// Accepts a single string or an array. When set, takes precedence over `extensions`.
+    /// Matches against the file name (basename), not the full path.
+    #[serde(default, deserialize_with = "deserialize_one_or_many_opt")]
+    pub pattern: Vec<String>,
     /// File extensions this command applies to.
+    ///
+    /// Ignored when `pattern` is set. Simple case-insensitive extension matching.
     #[serde(default)]
     pub extensions: Vec<String>,
     /// Whether this command handles directories.
@@ -1015,15 +1065,56 @@ impl Config {
         Ok(ConfigLoadResult { config, warnings })
     }
 
-    /// Merge another config on top of this one.
+    /// Merge another config on top of this one (legacy: collections only).
     ///
     /// Additive for collections (keybindings, `custom_actions`, menus).
-    /// Scalar fields are not overridden — override configs typically only
-    /// contain keybindings and `custom_actions`.
+    /// Prefer [`apply_override`](Self::apply_override) for `--config-override`
+    /// which supports partial scalar overrides.
     pub fn merge(&mut self, other: Self) {
         self.keybindings.merge(other.keybindings);
         self.custom_actions.extend(other.custom_actions);
         self.menus.extend(other.menus);
+    }
+
+    /// Apply a partial override config on top of this one.
+    ///
+    /// Only fields explicitly present in the override file are applied:
+    /// scalar fields are replaced, `Vec` fields are extended (appended),
+    /// and `HashMap` fields are extended (override keys win on conflict).
+    pub fn apply_override(&mut self, ov: ConfigOverride) {
+        if let Some(sort) = ov.sort {
+            sort.apply_to(&mut self.sort);
+        }
+        if let Some(display) = ov.display {
+            display.apply_to(&mut self.display);
+        }
+        if let Some(preview) = ov.preview {
+            preview.apply_to(&mut self.preview);
+        }
+        if let Some(file_op) = ov.file_op {
+            file_op.apply_to(&mut self.file_op);
+        }
+        if let Some(session) = ov.session {
+            session.apply_to(&mut self.session);
+        }
+        if let Some(watcher) = ov.watcher {
+            watcher.apply_to(&mut self.watcher);
+        }
+        if let Some(mouse) = ov.mouse {
+            mouse.apply_to(&mut self.mouse);
+        }
+        if let Some(kb) = ov.keybindings {
+            self.keybindings.merge(kb);
+        }
+        if let Some(git) = ov.git {
+            git.apply_to(&mut self.git);
+        }
+        if let Some(menus) = ov.menus {
+            self.menus.extend(menus);
+        }
+        if let Some(custom_actions) = ov.custom_actions {
+            self.custom_actions.extend(custom_actions);
+        }
     }
 
     /// Apply CLI argument overrides to the configuration.
@@ -1071,6 +1162,283 @@ impl Config {
     /// Generate JSON Schema for the configuration file.
     pub fn generate_schema() -> schemars::Schema {
         schemars::schema_for!(Self)
+    }
+}
+
+// ── Override types for partial config merging ────────────────────────
+
+/// Helper macro: apply `Option` fields to a target struct.
+///
+/// For each field, if `Some`, the value is assigned to the target.
+macro_rules! apply_option_fields {
+    ($self:expr, $target:expr, $( $field:ident ),* $(,)?) => {
+        $( if let Some(v) = $self.$field { $target.$field = v; } )*
+    };
+}
+
+/// Partial configuration for `--config-override`.
+///
+/// All fields are `Option` so only explicitly specified values are applied.
+/// Deserialized from the same YAML format as [`Config`] but missing fields
+/// remain `None` instead of taking default values.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ConfigOverride {
+    /// Sort settings override.
+    pub sort: Option<SortConfigOverride>,
+    /// Display settings override.
+    pub display: Option<DisplayConfigOverride>,
+    /// Preview settings override.
+    pub preview: Option<PreviewConfigOverride>,
+    /// File operation settings override.
+    pub file_op: Option<FileOpConfigOverride>,
+    /// Session settings override.
+    pub session: Option<SessionConfigOverride>,
+    /// Watcher settings override.
+    pub watcher: Option<WatcherConfigOverride>,
+    /// Mouse settings override.
+    pub mouse: Option<MouseConfigOverride>,
+    /// Keybinding override (merged additively via existing merge logic).
+    pub keybindings: Option<KeybindingConfig>,
+    /// Git settings override.
+    pub git: Option<GitConfigOverride>,
+    /// User-defined menus (extended).
+    pub menus: Option<HashMap<String, MenuDefinition>>,
+    /// User-defined named actions (extended).
+    pub custom_actions: Option<HashMap<String, CustomActionDef>>,
+}
+
+impl ConfigOverride {
+    /// Load a partial override config from a YAML file.
+    ///
+    /// Uses `serde_ignored` to detect unknown keys and collect them as warnings.
+    pub(crate) fn load_from(path: &Path) -> anyhow::Result<ConfigOverrideLoadResult> {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config override file: {}", path.display()))?;
+
+        let mut unknown_keys = Vec::new();
+        let deserializer = serde_yaml_ng::Deserializer::from_str(&content);
+        let config: Self = serde_ignored::deserialize(deserializer, |key| {
+            unknown_keys.push(key.to_string());
+        })
+        .with_context(|| format!("Failed to parse config override file: {}", path.display()))?;
+
+        let warnings: Vec<String> = unknown_keys
+            .iter()
+            .map(|key| format!("Unknown config key '{}' in {}", key, path.display()))
+            .collect();
+
+        Ok(ConfigOverrideLoadResult { config, warnings })
+    }
+}
+
+/// Result of loading a config override file.
+#[derive(Debug)]
+pub struct ConfigOverrideLoadResult {
+    /// The loaded override configuration.
+    pub config: ConfigOverride,
+    /// Warnings encountered during loading (unknown keys, etc.).
+    pub warnings: Vec<String>,
+}
+
+impl ConfigOverrideLoadResult {
+    /// Log all warnings via [`tracing::warn`].
+    pub fn log_warnings(&self) {
+        for warning in &self.warnings {
+            tracing::warn!("{warning}");
+        }
+    }
+}
+
+/// Partial override for [`SortConfig`].
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(default)]
+pub struct SortConfigOverride {
+    /// Sort order field.
+    pub order: Option<SortOrder>,
+    /// Sort direction.
+    pub direction: Option<SortDirection>,
+    /// Whether directories come first.
+    pub directories_first: Option<bool>,
+}
+
+impl SortConfigOverride {
+    /// Apply present fields to the target config.
+    const fn apply_to(self, target: &mut SortConfig) {
+        apply_option_fields!(self, target, order, direction, directories_first);
+    }
+}
+
+/// Partial override for [`DisplayConfig`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct DisplayConfigOverride {
+    /// Show hidden files.
+    pub show_hidden: Option<bool>,
+    /// Show gitignored files.
+    pub show_ignored: Option<bool>,
+    /// Show preview panel.
+    pub show_preview: Option<bool>,
+    /// Show file icons (Nerd Fonts).
+    pub show_icons: Option<bool>,
+    /// Show root directory as a tree node.
+    pub show_root_entry: Option<bool>,
+    /// Columns to display (extended onto existing list).
+    pub columns: Option<Vec<crate::ui::column::ColumnKind>>,
+    /// Per-column options.
+    pub column_options: Option<crate::ui::column::ColumnOptionsConfig>,
+    /// Category-based default styles.
+    pub styles: Option<CategoryStyles>,
+    /// Per-file style rules (extended onto existing list).
+    pub file_styles: Option<Vec<FileStyleRule>>,
+}
+
+impl DisplayConfigOverride {
+    /// Apply present fields to the target config.
+    fn apply_to(self, target: &mut DisplayConfig) {
+        apply_option_fields!(
+            self,
+            target,
+            show_hidden,
+            show_ignored,
+            show_preview,
+            show_icons,
+            show_root_entry,
+            column_options,
+            styles,
+        );
+        if let Some(columns) = self.columns {
+            target.columns.extend(columns);
+        }
+        if let Some(file_styles) = self.file_styles {
+            target.file_styles.extend(file_styles);
+        }
+    }
+}
+
+/// Partial override for [`PreviewConfig`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct PreviewConfigOverride {
+    /// Maximum number of lines to preview.
+    pub max_lines: Option<usize>,
+    /// Maximum bytes to read per file.
+    pub max_bytes: Option<u64>,
+    /// LRU cache capacity.
+    pub cache_size: Option<usize>,
+    /// External preview commands (extended onto existing list).
+    pub commands: Option<Vec<ExternalCommand>>,
+    /// Timeout for external commands in seconds.
+    pub command_timeout: Option<u64>,
+    /// Tree/preview split percentage in wide layout.
+    pub split_ratio: Option<u16>,
+    /// Tree/preview split percentage in narrow layout.
+    pub narrow_split_ratio: Option<u16>,
+    /// Width threshold for narrow layout in columns.
+    pub narrow_width: Option<u16>,
+    /// Enable word wrap in preview.
+    pub word_wrap: Option<bool>,
+}
+
+impl PreviewConfigOverride {
+    /// Apply present fields to the target config.
+    fn apply_to(self, target: &mut PreviewConfig) {
+        apply_option_fields!(
+            self,
+            target,
+            max_lines,
+            max_bytes,
+            cache_size,
+            command_timeout,
+            split_ratio,
+            narrow_split_ratio,
+            narrow_width,
+            word_wrap,
+        );
+        if let Some(commands) = self.commands {
+            target.commands.extend(commands);
+        }
+    }
+}
+
+/// Partial override for [`FileOpConfig`].
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(default)]
+pub struct FileOpConfigOverride {
+    /// Delete mode for the `d` key.
+    pub delete_mode: Option<DeleteMode>,
+    /// Maximum undo stack size.
+    pub undo_stack_size: Option<usize>,
+}
+
+impl FileOpConfigOverride {
+    /// Apply present fields to the target config.
+    const fn apply_to(self, target: &mut FileOpConfig) {
+        apply_option_fields!(self, target, delete_mode, undo_stack_size);
+    }
+}
+
+/// Partial override for [`SessionConfig`].
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(default)]
+pub struct SessionConfigOverride {
+    /// Whether to restore session by default on startup.
+    pub restore_by_default: Option<bool>,
+    /// Days before a session file expires and is auto-deleted.
+    pub expiry_days: Option<u64>,
+}
+
+impl SessionConfigOverride {
+    /// Apply present fields to the target config.
+    const fn apply_to(self, target: &mut SessionConfig) {
+        apply_option_fields!(self, target, restore_by_default, expiry_days);
+    }
+}
+
+/// Partial override for [`WatcherConfig`].
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(default)]
+pub struct WatcherConfigOverride {
+    /// Whether FS watching is enabled.
+    pub enabled: Option<bool>,
+    /// Debounce interval in milliseconds.
+    pub debounce_ms: Option<u64>,
+}
+
+impl WatcherConfigOverride {
+    /// Apply present fields to the target config.
+    const fn apply_to(self, target: &mut WatcherConfig) {
+        apply_option_fields!(self, target, enabled, debounce_ms);
+    }
+}
+
+/// Partial override for [`MouseConfig`].
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(default)]
+pub struct MouseConfigOverride {
+    /// Whether mouse support is enabled.
+    pub enabled: Option<bool>,
+}
+
+impl MouseConfigOverride {
+    /// Apply present fields to the target config.
+    const fn apply_to(self, target: &mut MouseConfig) {
+        apply_option_fields!(self, target, enabled);
+    }
+}
+
+/// Partial override for [`GitConfig`].
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(default)]
+pub struct GitConfigOverride {
+    /// Whether Git integration is enabled.
+    pub enabled: Option<bool>,
+}
+
+impl GitConfigOverride {
+    /// Apply present fields to the target config.
+    const fn apply_to(self, target: &mut GitConfig) {
+        apply_option_fields!(self, target, enabled);
     }
 }
 
@@ -1320,6 +1688,7 @@ display:
     fn external_command_display_name_uses_explicit_name() {
         let cmd = ExternalCommand {
             name: Some("Pretty JSON".to_string()),
+            pattern: vec![],
             extensions: vec!["json".to_string()],
             directories: false,
             priority: Priority::default(),
@@ -1334,6 +1703,7 @@ display:
     fn external_command_display_name_defaults_to_command() {
         let cmd = ExternalCommand {
             name: None,
+            pattern: vec![],
             extensions: vec!["md".to_string()],
             directories: false,
             priority: Priority::default(),
@@ -2088,6 +2458,76 @@ keybindings:
         assert_that!(base.keybindings.universal.bindings.len(), eq(2));
         assert_that!(base.keybindings.universal.bindings[0].key.as_str(), eq("j"));
         assert_that!(base.keybindings.universal.bindings[1].key.as_str(), eq("s"));
+    }
+
+    // --- ConfigOverride apply tests ---
+
+    #[rstest]
+    fn apply_override_scalars_only_overrides_present_fields() {
+        let mut config = Config::default();
+        assert!(config.preview.word_wrap == false);
+        assert_eq!(config.preview.max_lines, 1000);
+
+        let yaml = "preview:\n  word_wrap: true\n";
+        let ov: ConfigOverride = serde_yaml_ng::from_str(yaml).unwrap();
+        config.apply_override(ov);
+
+        // word_wrap was specified → overridden.
+        assert!(config.preview.word_wrap);
+        // max_lines was not specified → preserved.
+        assert_eq!(config.preview.max_lines, 1000);
+    }
+
+    #[rstest]
+    fn apply_override_vec_extends() {
+        let mut config = Config::default();
+        assert!(config.preview.commands.is_empty());
+
+        let yaml =
+            "preview:\n  commands:\n    - name: Foo\n      command: echo\n      args: ['hello']\n";
+        let ov: ConfigOverride = serde_yaml_ng::from_str(yaml).unwrap();
+        config.apply_override(ov);
+
+        assert_that!(config.preview.commands.len(), eq(1));
+        assert_that!(config.preview.commands[0].command.as_str(), eq("echo"));
+    }
+
+    #[rstest]
+    fn apply_override_hashmap_extends() {
+        let mut config = Config::default();
+        config.custom_actions.insert(
+            "existing".to_string(),
+            CustomActionDef {
+                description: "old".to_string(),
+                action: None,
+                run: None,
+                notify: None,
+                run_mode: ShellMode::default(),
+            },
+        );
+
+        let yaml =
+            "custom_actions:\n  new_action:\n    description: 'from override'\n    notify: test\n";
+        let ov: ConfigOverride = serde_yaml_ng::from_str(yaml).unwrap();
+        config.apply_override(ov);
+
+        // Existing action preserved.
+        assert!(config.custom_actions.contains_key("existing"));
+        // New action added.
+        assert!(config.custom_actions.contains_key("new_action"));
+    }
+
+    #[rstest]
+    fn apply_override_absent_sections_are_not_touched() {
+        let mut config = Config::default();
+        config.git.enabled = false;
+
+        // Empty override → nothing changes.
+        let yaml = "keybindings:\n  daemon:\n    file:\n      bindings: []\n";
+        let ov: ConfigOverride = serde_yaml_ng::from_str(yaml).unwrap();
+        config.apply_override(ov);
+
+        assert!(!config.git.enabled);
     }
 
     #[rstest]
