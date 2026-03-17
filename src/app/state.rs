@@ -69,6 +69,8 @@ pub struct AppState {
     pub show_icons: bool,
     /// Whether the preview panel is visible.
     pub show_preview: bool,
+    /// Whether floating modals avoid the preview pane.
+    pub modal_avoid_preview: bool,
     /// Whether to show hidden (dot) files.
     pub show_hidden: bool,
     /// Whether to show gitignored files.
@@ -623,6 +625,7 @@ pub(super) mod tests {
             should_quit: false,
             show_icons: false,
             show_preview: false,
+            modal_avoid_preview: false,
             show_hidden: true,
             show_ignored: true,
             git_enabled: true,

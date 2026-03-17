@@ -316,6 +316,8 @@ pub struct DisplayConfig {
     /// Per-file style rules matched by glob pattern (applied in order; later rules win).
     #[serde(default)]
     pub file_styles: Vec<FileStyleRule>,
+    /// Constrain floating modals to the tree area so they do not overlap the preview pane.
+    pub modal_avoid_preview: bool,
 }
 
 /// Category-based default display styles.
@@ -973,6 +975,7 @@ impl Default for DisplayConfig {
             column_options: crate::ui::column::ColumnOptionsConfig::default(),
             styles: CategoryStyles::default(),
             file_styles: Vec::new(),
+            modal_avoid_preview: false,
         }
     }
 }
@@ -1291,6 +1294,8 @@ pub struct DisplayConfigOverride {
     pub styles: Option<CategoryStyles>,
     /// Per-file style rules (extended onto existing list).
     pub file_styles: Option<Vec<FileStyleRule>>,
+    /// Constrain floating modals to the tree area so they do not overlap the preview pane.
+    pub modal_avoid_preview: Option<bool>,
 }
 
 impl DisplayConfigOverride {
@@ -1306,6 +1311,7 @@ impl DisplayConfigOverride {
             show_root_entry,
             column_options,
             styles,
+            modal_avoid_preview,
         );
         if let Some(columns) = self.columns {
             target.columns.extend(columns);

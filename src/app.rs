@@ -268,6 +268,7 @@ fn init_app(
         should_quit: false,
         show_icons: config.display.show_icons,
         show_preview,
+        modal_avoid_preview: config.display.modal_avoid_preview,
         show_hidden,
         show_ignored,
         git_enabled,

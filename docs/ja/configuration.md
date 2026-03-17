@@ -30,6 +30,7 @@ display:
   show_preview: true
   show_icons: true
   show_root_entry: false
+  modal_avoid_preview: false # フローティングモーダルをツリー領域内に制限
   columns: # メタデータカラムの表示順
     - git_status
     - size

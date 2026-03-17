@@ -80,6 +80,7 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
         should_quit: false,
         show_icons: true,
         show_preview: false,
+        modal_avoid_preview: false,
         show_hidden: false,
         show_ignored: false,
         git_enabled: true,

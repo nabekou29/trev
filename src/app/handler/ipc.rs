@@ -126,6 +126,7 @@ mod tests {
             should_quit: false,
             show_icons: false,
             show_preview: false,
+            modal_avoid_preview: false,
             show_hidden: true,
             show_ignored: true,
             git_enabled: true,

@@ -28,6 +28,7 @@
           "modified_at"
         ],
         "file_styles": [],
+        "modal_avoid_preview": false,
         "show_hidden": false,
         "show_icons": true,
         "show_ignored": false,
@@ -575,6 +576,11 @@
           "items": {
             "$ref": "#/$defs/FileStyleRule"
           }
+        },
+        "modal_avoid_preview": {
+          "description": "Constrain floating modals to the tree area so they do not overlap the preview pane.",
+          "type": "boolean",
+          "default": false
         },
         "show_hidden": {
           "description": "Show hidden files.",

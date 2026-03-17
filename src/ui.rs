@@ -91,16 +91,23 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState, key_lookup: &ActionKe
     state.layout_areas.filter_hidden_area = filter_areas.hidden;
     state.layout_areas.filter_ignored_area = filter_areas.ignored;
 
+    // Compute the bounding area for modal overlays.
+    let modal_area = if state.modal_avoid_preview && state.show_preview {
+        state.layout_areas.tree_area
+    } else {
+        frame.area()
+    };
+
     // Render modal overlays on top of everything.
     match &mut state.mode {
         AppMode::Confirm(confirm) => {
-            modal::render_confirm_dialog(frame, frame.area(), confirm);
+            modal::render_confirm_dialog(frame, modal_area, confirm);
         }
         AppMode::Menu(menu) => {
-            modal::render_menu(frame, frame.area(), menu);
+            modal::render_menu(frame, modal_area, menu);
         }
         AppMode::Help(help) => {
-            help_view::render_help(frame, frame.area(), help);
+            help_view::render_help(frame, modal_area, help);
         }
         AppMode::Normal | AppMode::Input(_) | AppMode::Search(_) => {}
     }

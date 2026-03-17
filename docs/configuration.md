@@ -30,6 +30,7 @@ display:
   show_preview: true
   show_icons: true
   show_root_entry: false
+  modal_avoid_preview: false # Constrain floating modals to the tree area
   columns: # Display order of metadata columns
     - git_status
     - size
