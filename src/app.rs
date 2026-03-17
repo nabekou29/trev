@@ -45,6 +45,7 @@ pub use keymap::{
     KeyMap,
 };
 pub use pending_keys::PendingKeys;
+use ratatui::layout::Rect;
 use ratatui_image::picker::Picker;
 pub use state::*;
 
@@ -768,10 +769,12 @@ fn drain_terminal_events(state: &mut AppState, ctx: &AppContext) -> Result<()> {
 
 /// Run the application.
 #[expect(clippy::cognitive_complexity, reason = "main event loop with many channel branches")]
+#[expect(clippy::too_many_lines, reason = "main event loop with sequential setup and teardown")]
 pub async fn run(args: &Args) -> Result<()> {
     let (mut state, ctx, mut channels, mut terminal) = init_app(args)?;
     let root_path = ctx.root_path.clone();
     let mut last_cursor = state.tree_state.cursor();
+    let mut last_preview_notification: Option<PreviewNotificationSnapshot> = None;
 
     state.search_index_cancelled = spawn_search_index_build(
         &ctx.search_index,
@@ -789,6 +792,7 @@ pub async fn run(args: &Args) -> Result<()> {
         crate::ui::render(frame, &mut state, &ctx.action_key_lookup);
     })?;
     state.dirty = false;
+    send_preview_notification_if_changed(&state, &ctx, &mut last_preview_notification);
 
     // Main event loop.
     //
@@ -890,6 +894,7 @@ pub async fn run(args: &Args) -> Result<()> {
                 crate::ui::render(frame, &mut state, &ctx.action_key_lookup);
             })?;
             state.dirty = false;
+            send_preview_notification_if_changed(&state, &ctx, &mut last_preview_notification);
         } else {
             tracing::trace!("frame skipped (not dirty)");
         }
@@ -1475,6 +1480,74 @@ fn fetch_git_status(root: &Path) -> GitStatusResult {
             GitStatusResult { state: None }
         }
     }
+}
+
+/// Snapshot of preview notification state for change detection.
+///
+/// Compared between frames to avoid sending duplicate IPC notifications.
+#[derive(Debug, PartialEq, Eq)]
+struct PreviewNotificationSnapshot {
+    /// Previewed file path (`None` when preview is off or no file is selected).
+    path: Option<PathBuf>,
+    /// Preview panel screen area.
+    area: Rect,
+    /// Preview vertical scroll offset.
+    scroll: usize,
+    /// Active preview provider name (e.g. "Text", "Image").
+    provider: Option<String>,
+}
+
+/// Capture the current preview notification state from `AppState`.
+fn capture_preview_snapshot(state: &AppState) -> PreviewNotificationSnapshot {
+    if state.show_preview {
+        let area = state.layout_areas.preview_area;
+        PreviewNotificationSnapshot {
+            path: state.preview_state.current_path.clone(),
+            area,
+            scroll: state.preview_state.scroll_row,
+            provider: state.preview_state.active_provider_name().map(str::to_string),
+        }
+    } else {
+        PreviewNotificationSnapshot { path: None, area: Rect::default(), scroll: 0, provider: None }
+    }
+}
+
+/// Send a `preview` IPC notification if the preview state has changed.
+///
+/// Sends `{"path": "...", "x", "y", "width", "height", "scroll"}` when
+/// preview is visible, or `{"path": null}` when hidden.
+fn send_preview_notification_if_changed(
+    state: &AppState,
+    ctx: &AppContext,
+    last: &mut Option<PreviewNotificationSnapshot>,
+) {
+    let Some(ref server) = ctx.ipc_server else {
+        return;
+    };
+    let current = capture_preview_snapshot(state);
+    if last.as_ref() == Some(&current) {
+        return;
+    }
+
+    let params = match &current.path {
+        Some(path) => serde_json::json!({
+            "path": path.display().to_string(),
+            "provider": current.provider,
+            "x": current.area.x,
+            "y": current.area.y,
+            "width": current.area.width,
+            "height": current.area.height,
+            "scroll": current.scroll,
+        }),
+        None => serde_json::json!({ "path": null }),
+    };
+
+    let server = Arc::clone(server);
+    tokio::spawn(async move {
+        server.send_notification("preview", params).await;
+    });
+
+    *last = Some(current);
 }
 
 /// Process pending file system watcher events and refresh affected directories.

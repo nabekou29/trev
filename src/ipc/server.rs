@@ -279,6 +279,16 @@ async fn dispatch_request(
                 write_message(writer, &resp).await;
             }
         }
+        "get_state" => {
+            let (tx, rx) = oneshot::channel();
+            let cmd = IpcCommand::GetState { response_tx: tx };
+            if ipc_tx.send(cmd).is_ok()
+                && let Ok(result) = rx.await
+            {
+                let resp = JsonRpcMessage::success_response(id, result);
+                write_message(writer, &resp).await;
+            }
+        }
         _ => {
             let resp = JsonRpcMessage::error_response(id, METHOD_NOT_FOUND, "Method not found");
             write_message(writer, &resp).await;
@@ -457,6 +467,33 @@ mod tests {
         assert_eq!(msg["method"], "open_file");
         assert_eq!(msg["params"]["action"], "edit");
         assert_eq!(msg["params"]["path"], "/tmp/foo.rs");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn get_state_dispatches_command_and_responds() {
+        let (ipc_tx, mut ipc_rx) = mpsc::unbounded_channel::<IpcCommand>();
+        let server = IpcServer::start_on_path(temp_socket_path(), ipc_tx).unwrap();
+
+        let mut stream = tokio::net::UnixStream::connect(server.socket_path()).await.unwrap();
+        let request = r#"{"jsonrpc":"2.0","method":"get_state","id":5}"#;
+        stream.write_all(format!("{request}\n").as_bytes()).await.unwrap();
+
+        let cmd =
+            tokio::time::timeout(Duration::from_secs(1), ipc_rx.recv()).await.unwrap().unwrap();
+
+        let IpcCommand::GetState { response_tx } = cmd else {
+            unreachable!("Expected GetState command");
+        };
+        response_tx.send(json!({"show_preview": true})).unwrap();
+
+        let mut reader = BufReader::new(&mut stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let response: Value = serde_json::from_str(&line).unwrap();
+
+        assert_eq!(response["result"]["show_preview"], true);
+        assert_eq!(response["id"], 5);
     }
 
     /// Create a unique temporary socket path for testing.

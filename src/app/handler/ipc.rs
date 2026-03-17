@@ -6,8 +6,8 @@ use crate::tree::builder::TreeBuilder;
 
 /// Handle an IPC command received from the IPC server.
 ///
-/// Dispatches `Quit` and `Reveal` commands, sending a JSON-RPC response
-/// back through the oneshot channel.
+/// Dispatches `Quit`, `Reveal`, and `GetState` commands, sending a JSON-RPC
+/// response back through the oneshot channel.
 pub fn handle_ipc_command(cmd: IpcCommand, state: &mut AppState) {
     match cmd {
         IpcCommand::Quit { response_tx } => {
@@ -19,7 +19,63 @@ pub fn handle_ipc_command(cmd: IpcCommand, state: &mut AppState) {
             let found = state.tree_state.reveal_path(&path, builder);
             let _ = response_tx.send(serde_json::json!({"ok": found}));
         }
+        IpcCommand::GetState { response_tx } => {
+            let _ = response_tx.send(build_state_json(state));
+        }
     }
+}
+
+/// Build the JSON representation of the current application state.
+fn build_state_json(state: &AppState) -> serde_json::Value {
+    let preview = if state.show_preview {
+        let area = state.layout_areas.preview_area;
+        serde_json::json!({
+            "path": state.preview_state.current_path.as_ref().map(|p| p.display().to_string()),
+            "provider": state.preview_state.active_provider_name(),
+            "x": area.x,
+            "y": area.y,
+            "width": area.width,
+            "height": area.height,
+            "scroll": state.preview_state.scroll_row,
+        })
+    } else {
+        serde_json::json!({ "path": null })
+    };
+
+    let info = state.tree_state.current_node_info();
+    let dir_str = info.as_ref().and_then(|i| {
+        if i.is_dir {
+            Some(i.path.display().to_string())
+        } else {
+            i.path.parent().map(|p| p.display().to_string())
+        }
+    });
+
+    let cursor = serde_json::json!({
+        "path": info.as_ref().map(|i| i.path.display().to_string()),
+        "name": info.as_ref().map(|i| i.name.as_str()),
+        "dir": dir_str,
+        "is_dir": info.as_ref().is_some_and(|i| i.is_dir),
+    });
+
+    let mode = match state.mode {
+        crate::input::AppMode::Normal => "normal",
+        crate::input::AppMode::Input(_) => "input",
+        crate::input::AppMode::Confirm(_) => "confirm",
+        crate::input::AppMode::Menu(_) => "menu",
+        crate::input::AppMode::Search(_) => "search",
+        crate::input::AppMode::Help(_) => "help",
+    };
+
+    serde_json::json!({
+        "preview": preview,
+        "cursor": cursor,
+        "root": state.tree_state.root_path().display().to_string(),
+        "show_preview": state.show_preview,
+        "show_hidden": state.show_hidden,
+        "show_ignored": state.show_ignored,
+        "mode": mode,
+    })
 }
 
 #[cfg(test)]
@@ -133,6 +189,32 @@ mod tests {
         assert!(!state.should_quit);
         let response = rx.try_recv().unwrap();
         assert_eq!(response, json!({"ok": false}));
+    }
+
+    #[rstest]
+    fn get_state_returns_expected_fields() {
+        let tmp = TempDir::new().unwrap();
+        let (tx, mut rx) = oneshot::channel();
+        let cmd = IpcCommand::GetState { response_tx: tx };
+
+        let mut state = test_state(tmp.path());
+        state.show_preview = false;
+        state.show_hidden = true;
+        state.show_ignored = false;
+        super::handle_ipc_command(cmd, &mut state);
+
+        let response = rx.try_recv().unwrap();
+        // Preview off → path is null.
+        assert_eq!(response["preview"]["path"], json!(null));
+        // Top-level flags.
+        assert_eq!(response["show_preview"], false);
+        assert_eq!(response["show_hidden"], true);
+        assert_eq!(response["show_ignored"], false);
+        assert_eq!(response["mode"], "normal");
+        // Root matches the temp dir.
+        assert!(response["root"].as_str().is_some());
+        // Cursor object exists.
+        assert!(response["cursor"].is_object());
     }
 
     #[rstest]

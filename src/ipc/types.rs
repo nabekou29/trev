@@ -117,6 +117,11 @@ pub enum IpcCommand {
         /// Channel to send the JSON-RPC result value back.
         response_tx: oneshot::Sender<Value>,
     },
+    /// Get current application state.
+    GetState {
+        /// Channel to send the JSON-RPC result value back.
+        response_tx: oneshot::Sender<Value>,
+    },
 }
 
 #[cfg(test)]
