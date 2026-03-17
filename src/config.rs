@@ -2465,7 +2465,7 @@ keybindings:
     #[rstest]
     fn apply_override_scalars_only_overrides_present_fields() {
         let mut config = Config::default();
-        assert!(config.preview.word_wrap == false);
+        assert!(!config.preview.word_wrap);
         assert_eq!(config.preview.max_lines, 1000);
 
         let yaml = "preview:\n  word_wrap: true\n";
