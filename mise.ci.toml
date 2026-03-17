@@ -1,0 +1,5 @@
+# CI-only tasks (loaded when MISE_ENV=ci)
+
+[tasks.coverage-ci]
+description = "Run tests with coverage for CI (JSON output)"
+run = "cargo llvm-cov --all-features --codecov --output-path codecov.json"

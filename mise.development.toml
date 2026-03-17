@@ -1,0 +1,38 @@
+# Development-only tools and tasks (loaded when MISE_ENV=development)
+
+[tools]
+"cargo:cargo-release" = "latest"
+"cargo:git-cliff" = "latest"
+"cargo:cargo-llvm-cov" = "latest"
+
+[tasks.coverage]
+description = "Run tests with coverage"
+run = "cargo llvm-cov --all-features"
+
+[tasks.coverage-html]
+description = "Run tests with coverage and generate HTML report"
+run = "cargo llvm-cov --all-features --html --open"
+
+[tasks.build-install-release]
+description = "Build and install"
+run = "cargo install --path . --force"
+sources = ["Cargo.toml", "src/**/*.rs"]
+outputs = ["{{env.CARGO_HOME}}/bin/trev"]
+
+[tasks.release]
+description = "Preview release (dry-run)"
+usage = 'arg "[level]" default="patch"'
+run = "cargo release ${usage_level}"
+
+[tasks.release-execute]
+description = "Execute release"
+usage = 'arg "[level]" default="patch"'
+run = "cargo release --execute ${usage_level}"
+
+[tasks.changelog]
+description = "Preview CHANGELOG generation"
+run = "git-cliff --unreleased"
+
+[tasks.demo]
+description = "Generate demo GIF and video"
+run = ["./demo/setup.sh", "vhs demo/demo.tape"]
