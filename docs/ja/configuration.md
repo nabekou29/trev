@@ -92,6 +92,37 @@ preview:
       args: ["-r"]
 ```
 
+### Glob パターン
+
+`pattern` フィールドで glob 構文による柔軟なファイルマッチングが可能です。`pattern` を指定すると `extensions` より優先されます。
+
+```yaml
+preview:
+  commands:
+    # 全ファイルに適用
+    - name: "Universal Viewer"
+      pattern: "*"
+      command: bat
+      priority: low
+
+    # ブレース展開で複数拡張子にマッチ
+    - name: "Code Preview"
+      pattern: "*.{rs,go,ts}"
+      command: bat
+
+    # 複数パターン（配列）
+    - name: "Config Files"
+      pattern: ["*.toml", "*.yaml", "*.json", "Makefile"]
+      command: bat
+```
+
+| フィールド    | 説明                                                               |
+| ------------- | ------------------------------------------------------------------ |
+| `pattern`     | ファイル名に対する glob パターン（`extensions` より優先）          |
+| `extensions`  | 拡張子リスト（大文字小文字不問、`pattern` 未指定時に使用）         |
+| `directories` | ディレクトリを対象にするかどうか                                   |
+| `git_status`  | 特定の git ステータスのファイルのみ適用（`modified`、`staged` 等） |
+
 ## キーバインドのカスタマイズ
 
 キーバインドは Vim スタイルの記法を使用します: `j`、`G`、`<C-a>`、`<A-j>`、`<S-CR>`、`<Space>`、`<Tab>`、`<Esc>`
@@ -215,15 +246,21 @@ keybindings:
 
 ## エディタプラグイン向け設定オーバーライド
 
-`--config-override` CLI オプションにより、エディタプラグインがユーザーの設定ファイルを変更せずに設定を注入できます。デーモンモードのキーバインド設定や、ホストエディタと競合する機能の無効化に便利です。
+`--config-override` CLI オプションにより、エディタプラグインがユーザーの設定ファイルを変更せずに設定を注入できます。デーモンモードのキーバインド設定やプレビューコマンドの追加、ホストエディタと競合する機能の無効化に便利です。
 
 ```sh
 trev --daemon --config-override /path/to/override.yml
 ```
 
-オーバーライドファイルはメイン設定と同じスキーマを使用します。オーバーライドの値がユーザーの設定に上書きマージされます。
+オーバーライドファイルはメイン設定と同じ YAML 形式を使用します。明示的に指定したフィールドのみ適用され、省略したフィールドはユーザーの値が維持されます。
 
-典型的な使用例 — Neovim プラグインが IPC 通信用のキーバインドを提供する場合:
+マージルール:
+
+- **スカラー値**（bool、数値、文字列）: 指定されていれば置換
+- **リスト**（`keybindings`、`preview.commands`、`file_styles`）: 既存に追加
+- **マップ**（`custom_actions`、`menus`）: マージ（オーバーライド側のキーが優先）
+
+例 — Neovim プラグインがキーバインドとプレビューコマンドを提供する場合:
 
 ```yaml
 keybindings:
@@ -236,6 +273,87 @@ keybindings:
       bindings:
         - key: "<C-q>"
           notify: quit_request
+
+preview:
+  commands:
+    - name: Neovim
+      pattern: "*"
+      command: echo
+      args: ["Neovim preview"]
+      priority: high
+
+custom_actions:
+  nvim.open_split:
+    description: "Open in split"
+    notify: nvim.open_split
 ```
 
-これにより、プラグイン固有のバインドをユーザーの個人設定と分離できます。
+これにより、プラグイン固有の設定をユーザーの個人設定と分離できます。
+
+## IPC 通知（デーモンモード）
+
+デーモンモードでは、trev は接続中の IPC クライアントに JSON-RPC 2.0 通知を送信します。
+
+### `preview` 通知
+
+プレビューの状態が変化した際に自動送信されます（カーソル移動、プレビューの表示/非表示切替、スクロール、リサイズ）。
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "preview",
+  "params": {
+    "path": "/absolute/path/to/file.rs",
+    "provider": "Text",
+    "x": 30,
+    "y": 1,
+    "width": 80,
+    "height": 40,
+    "scroll": 0
+  }
+}
+```
+
+プレビュー非表示時:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "preview",
+  "params": { "path": null }
+}
+```
+
+### `get_state` リクエスト
+
+接続時に完全なアプリケーション状態を取得できます（初回の `preview` 通知に間に合わない場合に使用）:
+
+```json
+{ "jsonrpc": "2.0", "method": "get_state", "id": 1 }
+```
+
+レスポンス:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "preview": {
+      "path": "/path/to/file.rs",
+      "provider": "Text",
+      "x": 30,
+      "y": 1,
+      "width": 80,
+      "height": 40,
+      "scroll": 0
+    },
+    "cursor": { "path": "/path/to/file.rs", "name": "file.rs", "dir": "/path/to", "is_dir": false },
+    "root": "/project/root",
+    "show_preview": true,
+    "show_hidden": false,
+    "show_ignored": false,
+    "mode": "normal"
+  }
+}
+```

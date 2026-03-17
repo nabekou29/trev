@@ -92,6 +92,37 @@ preview:
       args: ["-r"]
 ```
 
+### Glob Patterns
+
+Use the `pattern` field for flexible file matching with glob syntax. When `pattern` is set, it takes precedence over `extensions`.
+
+```yaml
+preview:
+  commands:
+    # Match all files
+    - name: "Universal Viewer"
+      pattern: "*"
+      command: bat
+      priority: low
+
+    # Match multiple extensions with brace expansion
+    - name: "Code Preview"
+      pattern: "*.{rs,go,ts}"
+      command: bat
+
+    # Multiple patterns (array)
+    - name: "Config Files"
+      pattern: ["*.toml", "*.yaml", "*.json", "Makefile"]
+      command: bat
+```
+
+| Field         | Description                                                                        |
+| ------------- | ---------------------------------------------------------------------------------- |
+| `pattern`     | Glob pattern(s) matched against the file name (takes precedence over `extensions`) |
+| `extensions`  | Simple extension list (case-insensitive, used when `pattern` is not set)           |
+| `directories` | Whether this command handles directories                                           |
+| `git_status`  | Only apply when file has specific git status (`modified`, `staged`, etc.)          |
+
 ## Keybinding Customization
 
 Keybindings use Vim-style notation: `j`, `G`, `<C-a>`, `<A-j>`, `<S-CR>`, `<Space>`, `<Tab>`, `<Esc>`.
@@ -129,12 +160,12 @@ keybindings:
 
 Shell commands in keybindings and menus support these variables:
 
-| Variable | Description          |
-| -------- | -------------------- |
-| `{path}` | Absolute file path   |
-| `{dir}`  | Parent directory     |
-| `{name}` | File name            |
-| `{root}` | Tree root directory  |
+| Variable | Description         |
+| -------- | ------------------- |
+| `{path}` | Absolute file path  |
+| `{dir}`  | Parent directory    |
+| `{name}` | File name           |
+| `{root}` | Tree root directory |
 
 ## Available Actions
 
@@ -215,15 +246,21 @@ Each menu item supports one of:
 
 ## Config Override for Editor Plugins
 
-The `--config-override` CLI option lets editor plugins inject configuration without modifying the user's config file. This is useful for setting daemon-mode keybindings or disabling features that conflict with the host editor.
+The `--config-override` CLI option lets editor plugins inject configuration without modifying the user's config file. This is useful for setting daemon-mode keybindings, adding preview commands, or disabling features that conflict with the host editor.
 
 ```sh
 trev --daemon --config-override /path/to/override.yml
 ```
 
-The override file uses the same schema as the main config. Values in the override are merged on top of the user's config, with override values taking precedence.
+The override file uses the same YAML format as the main config. Only explicitly specified fields are applied -- omitted fields keep the user's values.
 
-Typical use case -- a Neovim plugin providing keybindings for IPC communication:
+Merge rules:
+
+- **Scalar values** (bool, number, string): replaced if present
+- **Lists** (`keybindings`, `preview.commands`, `file_styles`): appended to existing
+- **Maps** (`custom_actions`, `menus`): merged (override keys win on conflict)
+
+Example -- a Neovim plugin providing keybindings and a preview command:
 
 ```yaml
 keybindings:
@@ -236,6 +273,87 @@ keybindings:
       bindings:
         - key: "<C-q>"
           notify: quit_request
+
+preview:
+  commands:
+    - name: Neovim
+      pattern: "*"
+      command: echo
+      args: ["Neovim preview"]
+      priority: high
+
+custom_actions:
+  nvim.open_split:
+    description: "Open in split"
+    notify: nvim.open_split
 ```
 
-This keeps plugin-specific bindings separate from the user's personal configuration.
+This keeps plugin-specific settings separate from the user's personal configuration.
+
+## IPC Notifications (Daemon Mode)
+
+In daemon mode, trev sends JSON-RPC 2.0 notifications to connected IPC clients.
+
+### `preview` Notification
+
+Sent automatically when the preview state changes (cursor moves to a different file, preview is toggled, scrolled, or resized).
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "preview",
+  "params": {
+    "path": "/absolute/path/to/file.rs",
+    "provider": "Text",
+    "x": 30,
+    "y": 1,
+    "width": 80,
+    "height": 40,
+    "scroll": 0
+  }
+}
+```
+
+When preview is hidden:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "preview",
+  "params": { "path": null }
+}
+```
+
+### `get_state` Request
+
+Clients can request the full application state on connect (since the initial `preview` notification may be missed):
+
+```json
+{ "jsonrpc": "2.0", "method": "get_state", "id": 1 }
+```
+
+Response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "preview": {
+      "path": "/path/to/file.rs",
+      "provider": "Text",
+      "x": 30,
+      "y": 1,
+      "width": 80,
+      "height": 40,
+      "scroll": 0
+    },
+    "cursor": { "path": "/path/to/file.rs", "name": "file.rs", "dir": "/path/to", "is_dir": false },
+    "root": "/project/root",
+    "show_preview": true,
+    "show_hidden": false,
+    "show_ignored": false,
+    "mode": "normal"
+  }
+}
+```
