@@ -1,4 +1,11 @@
 
+## [0.1.2] - 2026-03-17
+
+### Features
+
+- Add modal_avoid_preview option to constrain modals to tree area
+
+
 ## [0.1.1] - 2026-03-17
 
 ### Documentation
