@@ -1,4 +1,15 @@
 
+## [0.1.3] - 2026-03-18
+
+### Bug Fixes
+
+- Use inner height for scroll clamp to allow scrolling to end
+
+### Documentation
+
+- Update Neovim integration example to match current trev.nvim API
+
+
 ## [0.1.2] - 2026-03-17
 
 ### Features
