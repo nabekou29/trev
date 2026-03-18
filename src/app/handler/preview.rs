@@ -29,7 +29,8 @@ pub fn handle_preview_action(
 ) {
     use crate::action::PreviewAction;
 
-    let viewport_height = state.viewport_height;
+    // Use the preview panel's inner height (excluding top/bottom borders).
+    let viewport_height = state.layout_areas.preview_area.height.saturating_sub(2) as usize;
 
     match action {
         PreviewAction::ScrollDown => {

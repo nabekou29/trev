@@ -78,7 +78,7 @@ fn handle_tree_scroll(state: &mut AppState, direction: ScrollDirection) {
 
 /// Scroll the preview panel by 1 line.
 fn handle_preview_scroll(state: &mut AppState, direction: ScrollDirection) {
-    let viewport_height = state.layout_areas.preview_area.height as usize;
+    let viewport_height = state.layout_areas.preview_area.height.saturating_sub(2) as usize;
     match direction {
         ScrollDirection::Down => {
             state.preview_state.scroll_down(1, viewport_height);
