@@ -175,19 +175,20 @@ Full reference: [docs/configuration.md](docs/configuration.md)
 
 ## Neovim Integration
 
-Use [trev.nvim](https://github.com/nabekou29/trev.nvim) for Neovim integration with side panel and floating picker modes.
+Use [trev.nvim](https://github.com/nabekou29/trev.nvim) for Neovim integration with side panel and floating window modes.
 
 ```lua
 -- lazy.nvim
 {
   "nabekou29/trev.nvim",
-  config = function()
-    require("trev").setup({
-      width = 30,
-      auto_reveal = true,
-      action = "edit",
-    })
-  end,
+  cmd = { "Trev" },
+  keys = {
+    { "<leader>e", function() require("trev").show() end, desc = "Show trev" },
+    { "<leader>E", function() require("trev").show({ position = "float" }) end, desc = "Show trev (float)" },
+  },
+  opts = {
+    width = 60,
+  },
 }
 ```
 

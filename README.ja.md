@@ -175,19 +175,20 @@ preview:
 
 ## Neovim 連携
 
-[trev.nvim](https://github.com/nabekou29/trev.nvim) でサイドパネルやフローティングピッカーモードでの Neovim 連携が可能です。
+[trev.nvim](https://github.com/nabekou29/trev.nvim) でサイドパネルやフローティングウィンドウモードでの Neovim 連携が可能です。
 
 ```lua
 -- lazy.nvim
 {
   "nabekou29/trev.nvim",
-  config = function()
-    require("trev").setup({
-      width = 30,
-      auto_reveal = true,
-      action = "edit",
-    })
-  end,
+  cmd = { "Trev" },
+  keys = {
+    { "<leader>e", function() require("trev").show() end, desc = "Show trev" },
+    { "<leader>E", function() require("trev").show({ position = "float" }) end, desc = "Show trev (float)" },
+  },
+  opts = {
+    width = 60,
+  },
 }
 ```
 
