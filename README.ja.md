@@ -29,7 +29,7 @@ Rust 製で高速かつ安全に動作します。
 - **ファイル操作** — コピー、切り取り、貼り付け、リネーム、削除、Undo/Redo
 - **ファイルシステム監視** — 外部からの変更を自動検知して反映
 - **セッション保存** — 再起動後もツリーの状態を復元
-- **Neovim 連携** — IPC によるデーモンモード（[trev.nvim](https://github.com/nabekou29/trev.nvim)）
+- **Neovim 連携** — IPC サーバーモード（[trev.nvim](https://github.com/nabekou29/trev.nvim)）
 - **柔軟な設定** — YAML 設定ファイル、キーバインドのカスタマイズ、JSON Schema 対応
 
 ## インストール

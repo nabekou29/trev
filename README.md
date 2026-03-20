@@ -29,7 +29,7 @@ Built in Rust for speed and safety.
 - **File operations** — Copy, cut, paste, rename, delete, undo/redo
 - **File system watcher** — Auto-refresh on external changes
 - **Session persistence** — Restore tree state across restarts
-- **Neovim integration** — Daemon mode with IPC via [trev.nvim](https://github.com/nabekou29/trev.nvim)
+- **Neovim integration** — IPC server mode via [trev.nvim](https://github.com/nabekou29/trev.nvim)
 - **Configurable** — YAML config with keybinding customization, JSON Schema support
 
 ## Installation
