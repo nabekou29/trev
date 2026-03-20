@@ -332,7 +332,7 @@ pub fn schedule_search_loads(state: &mut AppState, ctx: &AppContext) {
     // Phase 1: Batch transition NotLoaded → Loading (single find_node_mut per parent).
     let transitioned = {
         let _span = tracing::info_span!("prepare_transitions", total_pending).entered();
-        state.tree_state.prepare_async_loads_batch(pending, true)
+        state.tree_state.prepare_async_loads_batch(pending, false)
     };
 
     // Phase 2: Spawn async load tasks.

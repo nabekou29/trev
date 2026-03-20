@@ -523,7 +523,7 @@ fn apply_children_load(
             // Preserve cursor visual position during deferred restore, search filter
             // loading, and background refreshes so the selected file does not jump.
             let snapshot = CursorSnapshot::capture(&state.tree_state, &state.scroll);
-            let auto_expand = kind != LoadKind::Prefetch;
+            let auto_expand = kind != LoadKind::Prefetch && kind != LoadKind::SearchFilter;
             state.tree_state.set_children(path, children, auto_expand);
             snapshot.restore(&mut state.tree_state, &mut state.scroll, state.viewport_height);
         }
@@ -602,7 +602,7 @@ fn process_children_results(
                             Some(CursorSnapshot::capture(&state.tree_state, &state.scroll));
                     }
                     let _span = tracing::info_span!("set_children", ?kind, child_count).entered();
-                    state.tree_state.set_children(&result.path, children, true);
+                    state.tree_state.set_children(&result.path, children, false);
                 } else {
                     apply_children_load(state, &result.path, children, kind);
                 }
