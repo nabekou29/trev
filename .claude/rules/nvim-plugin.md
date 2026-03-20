@@ -22,7 +22,7 @@ Lua plugin for trev integration with Neovim.
 ## Dependencies
 
 - `toggleterm.nvim` - Required for side panel mode
-- trev daemon mode - `--daemon` flag starts IPC server
+- trev IPC mode - `--ipc` flag starts IPC server
 
 ## IPC Protocol
 

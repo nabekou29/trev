@@ -123,12 +123,6 @@ keybindings:
     bindings:
       - key: "<CR>"
         action: tree.change_root
-
-  daemon:
-    file:
-      bindings:
-        - key: "<CR>"
-          notify: open_file
 ```
 
 ## Per-Section Override

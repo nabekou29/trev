@@ -59,9 +59,9 @@ pub struct Args {
     #[arg(long, conflicts_with = "icons")]
     pub no_icons: bool,
 
-    /// Run as daemon (enable IPC server).
+    /// Enable IPC server.
     #[arg(long)]
-    pub daemon: bool,
+    pub ipc: bool,
 
     /// Restore previous session state on startup.
     #[arg(long, conflicts_with = "no_restore")]
@@ -100,25 +100,25 @@ pub struct Args {
     pub command: Option<Command>,
 }
 
-/// Subcommands for controlling a running daemon.
+/// Subcommands for controlling a running trev instance.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Control a running trev daemon.
+    /// Control a running trev instance.
     Ctl {
-        /// Direct path to the daemon socket.
+        /// Direct path to the IPC socket.
         #[arg(long)]
         socket: Option<PathBuf>,
-        /// PID of the daemon process.
+        /// PID of the trev process.
         #[arg(long)]
         pid: Option<u32>,
-        /// Workspace key for targeting a specific daemon.
+        /// Workspace key for targeting a specific instance.
         #[arg(long)]
         workspace: Option<String>,
         /// Control action to perform.
         #[command(subcommand)]
         action: CtlAction,
     },
-    /// List socket paths of running daemons.
+    /// List socket paths of running trev instances.
     SocketPath {
         /// Filter by workspace path substring.
         #[arg(long)]
@@ -137,7 +137,7 @@ pub enum Command {
     Docs,
 }
 
-/// Control actions for a running daemon.
+/// Control actions for a running trev instance.
 #[derive(Debug, Subcommand)]
 pub enum CtlAction {
     /// Reveal a file in the tree.
@@ -145,9 +145,9 @@ pub enum CtlAction {
         /// Path to reveal.
         path: PathBuf,
     },
-    /// Ping the daemon.
+    /// Ping the trev instance.
     Ping,
-    /// Quit the daemon.
+    /// Quit the trev instance.
     Quit,
 }
 
@@ -179,7 +179,7 @@ impl Default for Args {
             no_git: false,
             restore: false,
             no_restore: false,
-            daemon: false,
+            ipc: false,
             reveal: None,
             config: None,
             config_override: None,

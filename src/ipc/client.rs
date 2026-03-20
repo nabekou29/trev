@@ -1,6 +1,6 @@
 //! UDS client for `trev ctl` commands.
 //!
-//! Connects to a running trev daemon via Unix Domain Socket,
+//! Connects to a running trev instance via Unix Domain Socket,
 //! sends JSON-RPC 2.0 requests, and reads responses.
 
 use std::path::Path;
@@ -19,7 +19,7 @@ use tokio::io::{
 };
 use tokio::net::UnixStream;
 
-/// Send a JSON-RPC 2.0 request to a trev daemon and wait for the response.
+/// Send a JSON-RPC 2.0 request to a trev instance and wait for the response.
 ///
 /// # Errors
 ///

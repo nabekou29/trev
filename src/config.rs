@@ -54,8 +54,7 @@ pub struct Config {
 /// Keybinding configuration with context-based sections.
 ///
 /// Each section groups bindings by context: `universal` (always active),
-/// `file` (cursor on file), `directory` (cursor on directory), and
-/// `daemon.*` (daemon mode variants).
+/// `file` (cursor on file), `directory` (cursor on directory).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct KeybindingConfig {
@@ -69,8 +68,6 @@ pub struct KeybindingConfig {
     pub file: ContextBindings,
     /// Bindings active when cursor is on a directory.
     pub directory: ContextBindings,
-    /// Bindings active in daemon mode.
-    pub daemon: DaemonBindings,
 }
 
 /// Keybindings for a specific context.
@@ -94,22 +91,7 @@ impl KeybindingConfig {
         self.universal.bindings.extend(other.universal.bindings);
         self.file.bindings.extend(other.file.bindings);
         self.directory.bindings.extend(other.directory.bindings);
-        self.daemon.universal.bindings.extend(other.daemon.universal.bindings);
-        self.daemon.file.bindings.extend(other.daemon.file.bindings);
-        self.daemon.directory.bindings.extend(other.daemon.directory.bindings);
     }
-}
-
-/// Daemon-mode keybindings, subdivided by node context.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
-pub struct DaemonBindings {
-    /// Bindings active in daemon mode regardless of node type.
-    pub universal: ContextBindings,
-    /// Bindings active in daemon mode when cursor is on a file.
-    pub file: ContextBindings,
-    /// Bindings active in daemon mode when cursor is on a directory.
-    pub directory: ContextBindings,
 }
 
 /// A single keybinding entry.
@@ -914,7 +896,6 @@ impl Default for KeybindingConfig {
             universal: ContextBindings::default(),
             file: ContextBindings::default(),
             directory: ContextBindings::default(),
-            daemon: DaemonBindings::default(),
         }
     }
 }
@@ -1794,9 +1775,6 @@ preview:
         assert!(config.universal.bindings.is_empty());
         assert!(config.file.bindings.is_empty());
         assert!(config.directory.bindings.is_empty());
-        assert!(config.daemon.universal.bindings.is_empty());
-        assert!(config.daemon.file.bindings.is_empty());
-        assert!(config.daemon.directory.bindings.is_empty());
     }
 
     #[rstest]
@@ -1822,11 +1800,6 @@ keybindings:
     bindings:
       - key: "<CR>"
         action: tree.toggle_expand
-  daemon:
-    universal:
-      bindings:
-        - key: "<C-q>"
-          notify: quit_request
 "#,
         )
         .unwrap();
@@ -1856,11 +1829,6 @@ keybindings:
         assert_that!(kb.directory.bindings[0].key.as_str(), eq("<CR>"));
         assert_that!(kb.directory.bindings[0].action.as_deref(), some(eq("tree.toggle_expand")));
 
-        // Daemon universal binding.
-        assert_that!(kb.daemon.universal.bindings.len(), eq(1));
-        assert_that!(kb.daemon.universal.bindings[0].key.as_str(), eq("<C-q>"));
-        assert_that!(kb.daemon.universal.bindings[0].notify.as_deref(), some(eq("quit_request")));
-
         assert!(result.warnings.is_empty());
     }
 
@@ -1877,9 +1845,6 @@ keybindings:
     bindings:
       - key: "<CR>"
         notify: open_file
-  daemon:
-    file:
-      disable_default: true
 "#,
         )
         .unwrap();
@@ -1891,9 +1856,6 @@ keybindings:
         assert!(!kb.universal.disable_default);
         assert!(kb.file.disable_default);
         assert!(!kb.directory.disable_default);
-        assert!(!kb.daemon.universal.disable_default);
-        assert!(kb.daemon.file.disable_default);
-        assert!(!kb.daemon.directory.disable_default);
     }
 
     #[rstest]
@@ -1970,7 +1932,7 @@ keybindings:
         let json_str = json.to_string();
 
         // Top-level keybindings should have nested sections.
-        for section in ["disable_default", "universal", "file", "directory", "daemon"] {
+        for section in ["disable_default", "universal", "file", "directory"] {
             assert!(json_str.contains(section), "keybindings missing section: {section}");
         }
     }
@@ -2389,25 +2351,6 @@ keybindings:
     }
 
     #[rstest]
-    fn merge_keybindings_daemon_file() {
-        let mut base = Config::default();
-        let mut other = Config::default();
-        other.keybindings.daemon.file.bindings.push(KeyBindingEntry {
-            key: "s".to_string(),
-            action: None,
-            run: None,
-            notify: Some("nvim.split".to_string()),
-            menu: None,
-            run_mode: ShellMode::default(),
-        });
-
-        base.merge(other);
-
-        assert_that!(base.keybindings.daemon.file.bindings.len(), eq(1));
-        assert_that!(base.keybindings.daemon.file.bindings[0].key.as_str(), eq("s"));
-    }
-
-    #[rstest]
     fn merge_keybindings_all_sections() {
         let entry = || KeyBindingEntry {
             key: "x".to_string(),
@@ -2423,18 +2366,12 @@ keybindings:
         other.keybindings.universal.bindings.push(entry());
         other.keybindings.file.bindings.push(entry());
         other.keybindings.directory.bindings.push(entry());
-        other.keybindings.daemon.universal.bindings.push(entry());
-        other.keybindings.daemon.file.bindings.push(entry());
-        other.keybindings.daemon.directory.bindings.push(entry());
 
         base.merge(other);
 
         assert_that!(base.keybindings.universal.bindings.len(), eq(1));
         assert_that!(base.keybindings.file.bindings.len(), eq(1));
         assert_that!(base.keybindings.directory.bindings.len(), eq(1));
-        assert_that!(base.keybindings.daemon.universal.bindings.len(), eq(1));
-        assert_that!(base.keybindings.daemon.file.bindings.len(), eq(1));
-        assert_that!(base.keybindings.daemon.directory.bindings.len(), eq(1));
     }
 
     #[rstest]
@@ -2529,7 +2466,7 @@ keybindings:
         config.git.enabled = false;
 
         // Empty override → nothing changes.
-        let yaml = "keybindings:\n  daemon:\n    file:\n      bindings: []\n";
+        let yaml = "keybindings:\n  file:\n    bindings: []\n";
         let ov: ConfigOverride = serde_yaml_ng::from_str(yaml).unwrap();
         config.apply_override(ov);
 

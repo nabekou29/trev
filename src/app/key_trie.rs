@@ -258,9 +258,9 @@ mod tests {
     #[rstest]
     fn no_match_for_unregistered_context() {
         let mut trie = KeyTrie::new();
-        trie.insert(&[kb('x')], BTreeSet::from([KeyContext::Daemon]), Action::Quit);
+        trie.insert(&[kb('x')], BTreeSet::from([KeyContext::Directory]), Action::Quit);
 
-        // File context doesn't include Daemon.
+        // File context doesn't include Directory.
         let result = trie.lookup(&[kb('x')], &file_ctx());
         assert_eq!(result, TrieLookup::NoMatch);
     }

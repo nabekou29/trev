@@ -214,8 +214,8 @@ fn init_app(
         tokio::sync::mpsc::unbounded_channel::<Vec<notify_debouncer_mini::DebouncedEvent>>();
     let (fs_watcher, suppressed) = setup_watcher(&config, watcher_tx, &root_path);
 
-    // Start IPC server in daemon mode.
-    let (ipc_server, ipc_rx) = start_ipc_if_daemon(args.daemon, &root_path);
+    // Start IPC server if enabled.
+    let (ipc_server, ipc_rx) = start_ipc_if_enabled(args.ipc, &root_path);
 
     // --- Phase 2: restore remaining session state (expanded dirs, cursor, etc.) ---
     let search_history = session_state.as_ref().map_or_else(Vec::new, |s| s.search_history.clone());
@@ -1321,17 +1321,17 @@ fn shutdown(root_path: &Path, state: &AppState) {
     crate::terminal::restore();
 }
 
-/// Start IPC server when running in daemon mode.
+/// Start IPC server when the `--ipc` flag is set.
 ///
 /// Returns the server handle (kept alive for the process lifetime) and
 /// the receiver end of the command channel.
-fn start_ipc_if_daemon(
-    daemon: bool,
+fn start_ipc_if_enabled(
+    ipc: bool,
     root_path: &Path,
 ) -> (Option<Arc<crate::ipc::server::IpcServer>>, tokio::sync::mpsc::UnboundedReceiver<IpcCommand>)
 {
     let (ipc_tx, ipc_rx) = tokio::sync::mpsc::unbounded_channel::<IpcCommand>();
-    let server = if daemon {
+    let server = if ipc {
         // Clean up stale sockets from crashed processes in the background.
         tokio::spawn(async {
             let removed = crate::ipc::paths::cleanup_stale_sockets();

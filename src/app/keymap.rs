@@ -1,7 +1,7 @@
 //! Key-to-action mapping with context-aware resolution.
 //!
 //! Provides the [`KeyMap`] struct that resolves key events into application actions.
-//! Supports context-based binding sections: universal, file, directory, and daemon variants.
+//! Supports context-based binding sections: universal, file, and directory.
 //! More specific context sets take priority over less specific ones.
 
 use std::collections::BTreeSet;
@@ -45,8 +45,6 @@ type WhenSet = BTreeSet<KeyContext>;
 /// Context in which a key event occurs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum KeyContext {
-    /// Running in daemon mode (IPC server active).
-    Daemon,
     /// Cursor is on a directory.
     Directory,
     /// Cursor is on a file.
@@ -110,7 +108,7 @@ impl KeyMap {
     ) -> Self {
         let mut km = Self::empty();
 
-        // Load defaults (universal + context-specific defaults like daemon.file).
+        // Load defaults (universal + context-specific).
         if !config.disable_default && !config.universal.disable_default {
             km.load_universal_defaults();
         }
@@ -120,9 +118,6 @@ impl KeyMap {
             (&config.universal, BTreeSet::new()),
             (&config.file, BTreeSet::from([KeyContext::File])),
             (&config.directory, BTreeSet::from([KeyContext::Directory])),
-            (&config.daemon.universal, BTreeSet::from([KeyContext::Daemon])),
-            (&config.daemon.file, BTreeSet::from([KeyContext::Daemon, KeyContext::File])),
-            (&config.daemon.directory, BTreeSet::from([KeyContext::Daemon, KeyContext::Directory])),
         ];
 
         for (section, when_set) in sections {
@@ -523,8 +518,7 @@ impl ActionKeyLookup {
     ///
     /// Universal bindings (empty when-set) are preferred. Context-specific
     /// bindings are included as fallbacks with a score penalty so that
-    /// custom actions from editor plugins (typically registered in daemon
-    /// context sections) still appear in the help overlay.
+    /// custom actions from editor plugins still appear in the help overlay.
     ///
     /// For each action, the binding with the lowest [`binding_score`] wins.
     pub fn from_keymap(keymap: &KeyMap) -> Self {
@@ -579,8 +573,6 @@ mod tests {
 
     use super::*;
     use crate::action::ShellMode;
-    use crate::config::DaemonBindings;
-
     fn default_keymap() -> KeyMap {
         KeyMap::from_config(&KeybindingConfig::default(), &HashMap::new())
     }
@@ -596,14 +588,6 @@ mod tests {
 
     fn dir_ctx() -> BTreeSet<KeyContext> {
         ctx(&[KeyContext::Directory])
-    }
-
-    fn daemon_file_ctx() -> BTreeSet<KeyContext> {
-        ctx(&[KeyContext::Daemon, KeyContext::File])
-    }
-
-    fn daemon_dir_ctx() -> BTreeSet<KeyContext> {
-        ctx(&[KeyContext::Daemon, KeyContext::Directory])
     }
 
     fn entry(key: &str, action: &str) -> KeyBindingEntry {
@@ -666,13 +650,6 @@ mod tests {
         let km = default_keymap();
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         assert_eq!(km.resolve(key, &file_ctx()), None);
-    }
-
-    #[rstest]
-    fn resolve_enter_on_daemon_file_has_no_default() {
-        let km = default_keymap();
-        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-        assert_eq!(km.resolve(key, &daemon_file_ctx()), None);
     }
 
     #[rstest]
@@ -922,81 +899,6 @@ mod tests {
 
         let key_none = KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE);
         assert_eq!(km.resolve(key_none, &file_ctx()), Some(&Action::Tree(TreeAction::JumpLast)));
-    }
-
-    // --- Daemon context tests ---
-
-    #[rstest]
-    fn daemon_universal_binding_matches_in_daemon_mode() {
-        let config = KeybindingConfig {
-            disable_default: true,
-            daemon: DaemonBindings {
-                universal: ContextBindings {
-                    bindings: vec![entry("q", "quit")],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            ..KeybindingConfig::default()
-        };
-        let km = KeyMap::from_config(&config, &HashMap::new());
-        let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
-
-        // Matches in daemon+file context.
-        assert_eq!(km.resolve(key, &daemon_file_ctx()), Some(&Action::Quit));
-        // Does NOT match without daemon context.
-        assert_eq!(km.resolve(key, &file_ctx()), None);
-    }
-
-    #[rstest]
-    fn daemon_file_binding_more_specific_than_file() {
-        let config = KeybindingConfig {
-            disable_default: true,
-            file: ContextBindings {
-                bindings: vec![entry("<CR>", "tree.expand")],
-                ..Default::default()
-            },
-            daemon: DaemonBindings {
-                file: ContextBindings {
-                    bindings: vec![entry("<CR>", "quit")],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            ..KeybindingConfig::default()
-        };
-        let km = KeyMap::from_config(&config, &HashMap::new());
-        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-
-        // daemon+file → daemon.file (2 contexts) beats file (1 context).
-        assert_eq!(km.resolve(key, &daemon_file_ctx()), Some(&Action::Quit));
-        // file-only → file section.
-        assert_eq!(km.resolve(key, &file_ctx()), Some(&Action::Tree(TreeAction::Expand)));
-    }
-
-    #[rstest]
-    fn daemon_directory_binding_not_matched_for_file() {
-        let config = KeybindingConfig {
-            disable_default: true,
-            daemon: DaemonBindings {
-                directory: ContextBindings {
-                    bindings: vec![entry("<CR>", "tree.toggle_expand")],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            ..KeybindingConfig::default()
-        };
-        let km = KeyMap::from_config(&config, &HashMap::new());
-        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-
-        // daemon+directory → matches.
-        assert_eq!(
-            km.resolve(key, &daemon_dir_ctx()),
-            Some(&Action::Tree(TreeAction::ToggleExpand))
-        );
-        // daemon+file → does NOT match (Directory not in active set).
-        assert_eq!(km.resolve(key, &daemon_file_ctx()), None);
     }
 
     // --- Sequence bindings ---

@@ -481,7 +481,7 @@ fn handle_expand_result(
 
 /// Send an `open_file` notification to the connected Neovim client.
 ///
-/// Only sends if the IPC server is running (daemon mode). The notification
+/// Only sends if the IPC server is running (IPC mode). The notification
 /// includes the file path. The editor action is determined by the Neovim plugin.
 fn send_open_file_notification(ctx: &AppContext, path: &Path) {
     if let Some(server) = &ctx.ipc_server {

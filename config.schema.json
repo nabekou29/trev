@@ -158,20 +158,6 @@
       "description": "Keybinding customization.",
       "$ref": "#/$defs/KeybindingConfig",
       "default": {
-        "daemon": {
-          "directory": {
-            "bindings": [],
-            "disable_default": false
-          },
-          "file": {
-            "bindings": [],
-            "disable_default": false
-          },
-          "universal": {
-            "bindings": [],
-            "disable_default": false
-          }
-        },
         "directory": {
           "bindings": [],
           "disable_default": false
@@ -497,36 +483,6 @@
       "required": [
         "description"
       ]
-    },
-    "DaemonBindings": {
-      "description": "Daemon-mode keybindings, subdivided by node context.",
-      "type": "object",
-      "properties": {
-        "directory": {
-          "description": "Bindings active in daemon mode when cursor is on a directory.",
-          "$ref": "#/$defs/ContextBindings",
-          "default": {
-            "bindings": [],
-            "disable_default": false
-          }
-        },
-        "file": {
-          "description": "Bindings active in daemon mode when cursor is on a file.",
-          "$ref": "#/$defs/ContextBindings",
-          "default": {
-            "bindings": [],
-            "disable_default": false
-          }
-        },
-        "universal": {
-          "description": "Bindings active in daemon mode regardless of node type.",
-          "$ref": "#/$defs/ContextBindings",
-          "default": {
-            "bindings": [],
-            "disable_default": false
-          }
-        }
-      }
     },
     "DeleteMode": {
       "description": "Delete mode variants.",
@@ -1080,27 +1036,9 @@
       ]
     },
     "KeybindingConfig": {
-      "description": "Keybinding configuration with context-based sections.\n\nEach section groups bindings by context: `universal` (always active),\n`file` (cursor on file), `directory` (cursor on directory), and\n`daemon.*` (daemon mode variants).",
+      "description": "Keybinding configuration with context-based sections.\n\nEach section groups bindings by context: `universal` (always active),\n`file` (cursor on file), `directory` (cursor on directory).",
       "type": "object",
       "properties": {
-        "daemon": {
-          "description": "Bindings active in daemon mode.",
-          "$ref": "#/$defs/DaemonBindings",
-          "default": {
-            "directory": {
-              "bindings": [],
-              "disable_default": false
-            },
-            "file": {
-              "bindings": [],
-              "disable_default": false
-            },
-            "universal": {
-              "bindings": [],
-              "disable_default": false
-            }
-          }
-        },
         "directory": {
           "description": "Bindings active when cursor is on a directory.",
           "$ref": "#/$defs/ContextBindings",

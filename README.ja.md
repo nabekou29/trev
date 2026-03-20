@@ -85,7 +85,7 @@ trev --no-preview # プレビューパネルを無効化
 | `--sort-direction <DIR>`   | asc, desc                                  |
 | `--no-directories-first`   | ディレクトリを先頭にソートしない           |
 | `--icons / --no-icons`     | ファイルアイコンの表示制御                 |
-| `--daemon`                 | デーモンとして実行（IPC サーバー）         |
+| `--ipc`                    | IPC サーバーを有効化                       |
 | `--restore / --no-restore` | セッション状態の復元制御                   |
 | `--no-git`                 | Git 連携を無効化                           |
 | `--reveal <PATH>`          | 起動時に指定パスを表示                     |
@@ -95,10 +95,10 @@ trev --no-preview # プレビューパネルを無効化
 ### サブコマンド
 
 ```sh
-trev ctl reveal <PATH>    # 実行中のデーモンでファイルを表示
-trev ctl ping             # デーモンの生存確認
-trev ctl quit             # 実行中のデーモンを停止
-trev socket-path          # 実行中のデーモンソケットを一覧表示
+trev ctl reveal <PATH>    # 実行中の trev インスタンスでファイルを表示
+trev ctl ping             # インスタンスの生存確認
+trev ctl quit             # 実行中の trev インスタンスを停止
+trev socket-path          # 実行中の trev インスタンスのソケットを一覧表示
 trev schema               # 設定の JSON Schema を出力
 trev completions <SHELL>  # シェル補完を生成（bash, zsh, fish など）
 ```

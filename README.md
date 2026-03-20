@@ -85,7 +85,7 @@ trev --no-preview # Disable preview panel
 | `--sort-direction <DIR>`   | asc, desc                                     |
 | `--no-directories-first`   | Do not sort directories before files          |
 | `--icons / --no-icons`     | File icons control                            |
-| `--daemon`                 | Run as daemon (IPC server)                    |
+| `--ipc`                    | Enable IPC server                             |
 | `--restore / --no-restore` | Session state restore control                 |
 | `--no-git`                 | Disable git integration                       |
 | `--reveal <PATH>`          | Reveal a specific path on startup             |
@@ -95,10 +95,10 @@ trev --no-preview # Disable preview panel
 ### Subcommands
 
 ```sh
-trev ctl reveal <PATH>    # Reveal file in a running daemon
-trev ctl ping             # Check if daemon is alive
-trev ctl quit             # Stop a running daemon
-trev socket-path          # List running daemon sockets
+trev ctl reveal <PATH>    # Reveal file in a running trev instance
+trev ctl ping             # Check if instance is alive
+trev ctl quit             # Stop a running trev instance
+trev socket-path          # List running trev instance sockets
 trev schema               # Print config JSON Schema
 trev completions <SHELL>  # Generate shell completions (bash, zsh, fish, etc.)
 ```

@@ -137,7 +137,7 @@ fn notify_profile_path(path: &std::path::Path) {
     eprintln!("[trev] profile written to {}", path.display());
 }
 
-/// Handle `trev ctl` subcommands by connecting to a running daemon.
+/// Handle `trev ctl` subcommands by connecting to a running trev instance.
 async fn handle_ctl(
     action: &trev::cli::CtlAction,
     socket: Option<&std::path::Path>,
@@ -172,7 +172,7 @@ async fn handle_ctl(
     Ok(())
 }
 
-/// List socket paths of running daemons.
+/// List socket paths of running trev instances.
 #[expect(clippy::print_stdout, reason = "CLI output to stdout is intentional")]
 fn handle_socket_path(workspace: Option<&str>) -> Result<()> {
     let runtime_dir = trev::ipc::paths::runtime_dir();
@@ -294,7 +294,7 @@ fn handle_docs() -> Result<()> {
     Ok(())
 }
 
-/// Find a daemon socket file using the provided targeting options.
+/// Find a trev IPC socket file using the provided targeting options.
 ///
 /// Priority: `--socket` (direct path) > `--pid` + `--workspace` (filter).
 /// Socket filenames follow the pattern `<workspace>-<pid>.sock`.
@@ -313,7 +313,7 @@ fn find_socket(
 
     let runtime_dir = trev::ipc::paths::runtime_dir();
     if !runtime_dir.is_dir() {
-        bail!("no trev daemons running (runtime dir not found)");
+        bail!("no trev instances running (runtime dir not found)");
     }
 
     let pid_str = pid.map(|p| p.to_string());
@@ -343,8 +343,10 @@ fn find_socket(
         .collect();
 
     match entries.len() {
-        0 => bail!("no trev daemon found (try --socket, --pid, or --workspace to target)"),
+        0 => bail!("no trev instance found (try --socket, --pid, or --workspace to target)"),
         1 => Ok(entries.swap_remove(0)),
-        n => bail!("{n} trev daemons found; specify --socket, --pid, or --workspace to target one"),
+        n => {
+            bail!("{n} trev instances found; specify --socket, --pid, or --workspace to target one")
+        }
     }
 }

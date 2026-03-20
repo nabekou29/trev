@@ -132,7 +132,7 @@ Modifiers: `C-` (Ctrl), `A-`/`M-` (Alt), `S-` (Shift).
 
 Multi-key sequences are written without spaces: `"zz"`, `"zt"`, `"zb"`. Angle-bracket keys can be mixed in: `"g<CR>"`. When a prefix key is pressed, trev waits for the next key (timeout: `key_sequence_timeout_ms`, default 500ms). If only a single-key binding exists for the prefix, it fires on timeout.
 
-Bindings are organized by context: `universal`, `file` (cursor on file), `directory` (cursor on directory), and `daemon.*` variants.
+Bindings are organized by context: `universal`, `file` (cursor on file), and `directory` (cursor on directory).
 
 ```yaml
 keybindings:
@@ -145,16 +145,11 @@ keybindings:
   file:
     bindings:
       - key: "<CR>"
-        notify: open_file # IPC notification (daemon mode)
+        notify: open_file # IPC notification (IPC mode)
   directory:
     bindings:
       - key: "<CR>"
         action: tree.change_root
-  daemon:
-    universal:
-      bindings:
-        - key: "<C-q>"
-          notify: quit_request
 ```
 
 ## Shell Command Variables
@@ -243,14 +238,14 @@ Each menu item supports one of:
 
 - `action` -- a built-in action name (e.g. `tree.sort.by_name`, `quit`)
 - `run` -- a shell command (supports `{path}`, `{dir}`, `{name}`, `{root}` variables)
-- `notify` -- an IPC notification method name (daemon mode)
+- `notify` -- an IPC notification method name (IPC mode)
 
 ## Config Override for Editor Plugins
 
-The `--config-override` CLI option lets editor plugins inject configuration without modifying the user's config file. This is useful for setting daemon-mode keybindings, adding preview commands, or disabling features that conflict with the host editor.
+The `--config-override` CLI option lets editor plugins inject configuration without modifying the user's config file. This is useful for setting IPC-mode keybindings, adding preview commands, or disabling features that conflict with the host editor.
 
 ```sh
-trev --daemon --config-override /path/to/override.yml
+trev --ipc --config-override /path/to/override.yml
 ```
 
 The override file uses the same YAML format as the main config. Only explicitly specified fields are applied -- omitted fields keep the user's values.
@@ -265,15 +260,14 @@ Example -- a Neovim plugin providing keybindings and a preview command:
 
 ```yaml
 keybindings:
-  daemon:
-    file:
-      bindings:
-        - key: "<CR>"
-          notify: open_file
-    universal:
-      bindings:
-        - key: "<C-q>"
-          notify: quit_request
+  file:
+    bindings:
+      - key: "<CR>"
+        notify: open_file
+  universal:
+    bindings:
+      - key: "<C-q>"
+        notify: quit_request
 
 preview:
   commands:
@@ -291,9 +285,9 @@ custom_actions:
 
 This keeps plugin-specific settings separate from the user's personal configuration.
 
-## IPC Notifications (Daemon Mode)
+## IPC Notifications
 
-In daemon mode, trev sends JSON-RPC 2.0 notifications to connected IPC clients.
+In IPC mode, trev sends JSON-RPC 2.0 notifications to connected IPC clients.
 
 ### `preview` Notification
 

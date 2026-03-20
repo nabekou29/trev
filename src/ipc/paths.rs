@@ -62,7 +62,7 @@ pub fn meta_path(sock_path: &Path) -> PathBuf {
 /// Write workspace metadata alongside a socket file.
 ///
 /// Stores the canonical workspace path so that `trev ctl` can display
-/// and filter daemons by their workspace directory.
+/// and filter instances by their workspace directory.
 ///
 /// # Errors
 ///
@@ -94,7 +94,7 @@ pub fn remove_meta(sock_path: &Path) {
 /// Remove stale socket and metadata files left by crashed processes.
 ///
 /// Scans the runtime directory for `.sock` files and tries to connect
-/// to each one. If the connection fails, the daemon is no longer running
+/// to each one. If the connection fails, the instance is no longer running
 /// and the socket (and its metadata) is removed.
 ///
 /// Skips the current process's own socket (by PID in filename).
@@ -117,7 +117,7 @@ pub fn cleanup_stale_sockets() -> usize {
         if extract_pid_from_socket(&path).is_some_and(|pid| pid == own_pid) {
             continue;
         }
-        // Try connecting — if it fails, the daemon is gone.
+        // Try connecting — if it fails, the instance is gone.
         if std::os::unix::net::UnixStream::connect(&path).is_err() {
             let _ = std::fs::remove_file(&path);
             remove_meta(&path);

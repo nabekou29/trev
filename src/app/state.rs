@@ -369,7 +369,7 @@ pub struct AppContext {
     pub action_key_lookup: ActionKeyLookup,
     /// Shared suppression flag for file system watcher.
     pub suppressed: Arc<AtomicBool>,
-    /// IPC server handle (None if not in daemon mode).
+    /// IPC server handle (None if not in IPC mode).
     pub ipc_server: Option<Arc<crate::ipc::server::IpcServer>>,
     /// Sender for async git status results.
     pub git_tx: tokio::sync::mpsc::Sender<GitStatusResult>,

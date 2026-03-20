@@ -132,7 +132,7 @@ preview:
 
 マルチキーシーケンスはスペースなしで記述します: `"zz"`、`"zt"`、`"zb"`。角括弧キーも混在可能です: `"g<CR>"`。プレフィックスキーが押されると、trev は次のキーを待ちます（タイムアウト: `key_sequence_timeout_ms`、デフォルト 500ms）。プレフィックスに単一のバインドのみ存在する場合、タイムアウト時に発火します。
 
-バインドはコンテキストごとに整理されます: `universal`、`file`（カーソルがファイル上）、`directory`（カーソルがディレクトリ上）、および `daemon.*` バリアント。
+バインドはコンテキストごとに整理されます: `universal`、`file`（カーソルがファイル上）、`directory`（カーソルがディレクトリ上）。
 
 ```yaml
 keybindings:
@@ -145,16 +145,11 @@ keybindings:
   file:
     bindings:
       - key: "<CR>"
-        notify: open_file # IPC 通知（デーモンモード）
+        notify: open_file # IPC 通知（IPC モード）
   directory:
     bindings:
       - key: "<CR>"
         action: tree.change_root
-  daemon:
-    universal:
-      bindings:
-        - key: "<C-q>"
-          notify: quit_request
 ```
 
 ## シェルコマンド変数
@@ -250,7 +245,7 @@ keybindings:
 `--config-override` CLI オプションにより、エディタプラグインがユーザーの設定ファイルを変更せずに設定を注入できます。デーモンモードのキーバインド設定やプレビューコマンドの追加、ホストエディタと競合する機能の無効化に便利です。
 
 ```sh
-trev --daemon --config-override /path/to/override.yml
+trev --ipc --config-override /path/to/override.yml
 ```
 
 オーバーライドファイルはメイン設定と同じ YAML 形式を使用します。明示的に指定したフィールドのみ適用され、省略したフィールドはユーザーの値が維持されます。
@@ -265,15 +260,14 @@ trev --daemon --config-override /path/to/override.yml
 
 ```yaml
 keybindings:
-  daemon:
-    file:
-      bindings:
-        - key: "<CR>"
-          notify: open_file
-    universal:
-      bindings:
-        - key: "<C-q>"
-          notify: quit_request
+  file:
+    bindings:
+      - key: "<CR>"
+        notify: open_file
+  universal:
+    bindings:
+      - key: "<C-q>"
+        notify: quit_request
 
 preview:
   commands:

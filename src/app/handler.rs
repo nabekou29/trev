@@ -70,7 +70,7 @@ pub(super) fn handle_normal_mode_key(
     state: &mut AppState,
     ctx: &AppContext,
 ) {
-    let active_contexts = build_active_contexts(state, ctx);
+    let active_contexts = build_active_contexts(state);
     let kb: KeyBinding = (key.code, key.modifiers);
 
     state.pending_keys.push(kb);
@@ -109,7 +109,7 @@ pub(super) fn handle_normal_mode_key(
 /// If the pending sequence has a fallback action, execute it.
 /// Otherwise, clear the pending state.
 pub fn handle_pending_timeout(state: &mut AppState, ctx: &AppContext) {
-    let active_contexts = build_active_contexts(state, ctx);
+    let active_contexts = build_active_contexts(state);
     let lookup = ctx.keymap.lookup(state.pending_keys.keys(), &active_contexts);
 
     match lookup {
@@ -125,11 +125,8 @@ pub fn handle_pending_timeout(state: &mut AppState, ctx: &AppContext) {
 }
 
 /// Build the set of active key contexts from the current state.
-fn build_active_contexts(state: &AppState, ctx: &AppContext) -> BTreeSet<KeyContext> {
+fn build_active_contexts(state: &AppState) -> BTreeSet<KeyContext> {
     let mut active_contexts = BTreeSet::new();
-    if ctx.ipc_server.is_some() {
-        active_contexts.insert(KeyContext::Daemon);
-    }
     let node_ctx = state.tree_state.current_node_info().map_or(KeyContext::File, |info| {
         if info.is_dir { KeyContext::Directory } else { KeyContext::File }
     });
