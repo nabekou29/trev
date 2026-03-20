@@ -1559,6 +1559,17 @@ fn process_watcher_events(
 ) -> bool {
     let mut had_events = false;
     for events in batches {
+        // Filter out changes inside `.git/` to avoid a feedback loop:
+        // watcher event → git status → .git changes → watcher event → …
+        let events: Vec<_> = events
+            .into_iter()
+            .filter(|e| !e.path.components().any(|c| c.as_os_str() == ".git"))
+            .collect();
+
+        if events.is_empty() {
+            continue;
+        }
+
         had_events = true;
         // Invalidate preview cache for changed files.
         for event in &events {
