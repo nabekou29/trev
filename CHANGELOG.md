@@ -1,4 +1,21 @@
 
+## [0.1.4] - 2026-03-20
+
+### Bug Fixes
+
+- Prevent intermediate search matches from permanently expanding directories
+- Remove remaining "Daemon mode" references in README feature lists
+
+### Performance
+
+- Reduce unnecessary dependencies by trimming feature flags
+- Filter out .git changes to break feedback loop
+
+### Refactor
+
+- Rename --daemon to --ipc and remove IPC-specific keybinding sections
+
+
 ## [0.1.3] - 2026-03-18
 
 ### Bug Fixes
