@@ -145,6 +145,93 @@ cat > "$DIR/web/package.json" << 'JSON'
 }
 JSON
 
+cat > "$DIR/web/package-lock.json" << 'JSON'
+{
+  "name": "webapp-frontend",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "webapp-frontend",
+      "version": "1.0.0",
+      "dependencies": {
+        "next": "^15.0.0",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0"
+      },
+      "devDependencies": {
+        "typescript": "^5.6.0",
+        "vitest": "^3.0.0"
+      }
+    },
+    "node_modules/next": {
+      "version": "15.1.6",
+      "resolved": "https://registry.npmjs.org/next/-/next-15.1.6.tgz",
+      "license": "MIT",
+      "dependencies": {
+        "@next/env": "15.1.6",
+        "@swc/counter": "0.1.3"
+      },
+      "bin": {
+        "next": "dist/bin/next"
+      },
+      "engines": {
+        "node": ">=18.18.0"
+      },
+      "peerDependencies": {
+        "react": "^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^19.0.0",
+        "react-dom": "^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^19.0.0"
+      }
+    },
+    "node_modules/react": {
+      "version": "19.0.0",
+      "resolved": "https://registry.npmjs.org/react/-/react-19.0.0.tgz",
+      "license": "MIT",
+      "engines": {
+        "node": ">=0.10.0"
+      }
+    },
+    "node_modules/react-dom": {
+      "version": "19.0.0",
+      "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-19.0.0.tgz",
+      "license": "MIT",
+      "dependencies": {
+        "scheduler": "^0.25.0"
+      },
+      "peerDependencies": {
+        "react": "^19.0.0"
+      }
+    },
+    "node_modules/typescript": {
+      "version": "5.7.3",
+      "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.7.3.tgz",
+      "dev": true,
+      "license": "Apache-2.0",
+      "bin": {
+        "tsc": "bin/tsc",
+        "tsserver": "bin/tsserver"
+      },
+      "engines": {
+        "node": ">=14.17"
+      }
+    },
+    "node_modules/vitest": {
+      "version": "3.0.4",
+      "resolved": "https://registry.npmjs.org/vitest/-/vitest-3.0.4.tgz",
+      "dev": true,
+      "license": "MIT",
+      "bin": {
+        "vitest": "vitest.mjs"
+      },
+      "engines": {
+        "node": "^18.0.0 || ^20.0.0 || >=22.0.0"
+      }
+    }
+  }
+}
+JSON
+
 cat > "$DIR/web/tsconfig.json" << 'JSON'
 {
   "compilerOptions": {
@@ -344,6 +431,7 @@ ago -7d   "$DIR/cmd/server/main.go"
 
 # Config / meta files
 ago -10d  "$DIR/web/package.json"
+ago -10d  "$DIR/web/package-lock.json"
 ago -10d  "$DIR/web/tsconfig.json"
 ago -14d  "$DIR/go.mod"
 ago -21d  "$DIR/.gitignore"
