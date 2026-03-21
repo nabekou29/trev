@@ -746,6 +746,9 @@ pub struct PreviewProviderEntry {
     /// Command arguments.
     #[serde(default)]
     pub args: Vec<String>,
+    /// Environment variables to set when running the command.
+    #[serde(default)]
+    pub env: HashMap<String, String>,
     /// Git status condition: only apply when file has one of these statuses.
     ///
     /// Values: `modified`, `staged`, `added`, `deleted`, `renamed`, `untracked`, `conflicted`.
@@ -1739,6 +1742,7 @@ display:
             priority: Priority::default(),
             command: Some("jq".to_string()),
             args: vec![".".to_string()],
+            env: HashMap::new(),
             git_status: vec![],
         };
         assert_that!(cmd.display_name(), eq("Pretty JSON"));
@@ -1755,6 +1759,7 @@ display:
             priority: Priority::default(),
             command: Some("glow".to_string()),
             args: vec![],
+            env: HashMap::new(),
             git_status: vec![],
         };
         assert_that!(cmd.display_name(), eq("glow"));

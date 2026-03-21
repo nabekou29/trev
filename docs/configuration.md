@@ -87,6 +87,9 @@ preview:
     - name: "Markdown"
       extensions: [md]
       command: glow
+      env:
+        CLICOLOR_FORCE: "1"
+        COLORTERM: truecolor
     - name: "Disk Usage"
       target: directory # file | directory | all (default: file)
       priority: low

@@ -178,6 +178,7 @@ impl PreviewProvider for ExternalCmdProvider {
         }
         cmd.arg(path);
         cmd.env("TERM", "xterm-256color");
+        cmd.envs(&self.entry.env);
         cmd.stdin(std::process::Stdio::null());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -268,6 +269,7 @@ fn wait_with_timeout(
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
+    use std::collections::HashMap;
     use std::path::PathBuf;
 
     use googletest::prelude::*;
@@ -307,6 +309,7 @@ mod tests {
                 command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec![],
+                env: HashMap::new(),
             },
             3,
             no_git(),
@@ -325,6 +328,7 @@ mod tests {
                 command: Some("nonexistent_command_12345".to_string()),
                 args: vec![],
                 git_status: vec![],
+                env: HashMap::new(),
             },
             3,
             no_git(),
@@ -346,6 +350,7 @@ mod tests {
                 command: Some("jq".to_string()),
                 args: vec![".".to_string()],
                 git_status: vec![],
+                env: HashMap::new(),
             },
             3,
             no_git(),
@@ -410,6 +415,7 @@ mod tests {
                 command: Some("ls".to_string()),
                 args: vec![],
                 git_status: vec![],
+                env: HashMap::new(),
             },
             3,
             no_git(),
@@ -432,6 +438,7 @@ mod tests {
                 command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec![],
+                env: HashMap::new(),
             },
             3,
             no_git(),
@@ -454,6 +461,7 @@ mod tests {
                 command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec![],
+                env: HashMap::new(),
             },
             3,
             no_git(),
@@ -476,6 +484,7 @@ mod tests {
                 command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec![],
+                env: HashMap::new(),
             },
             3,
             no_git(),
@@ -504,6 +513,7 @@ mod tests {
                 command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec!["modified".to_string()],
+                env: HashMap::new(),
             },
             3,
             git_state,
@@ -531,6 +541,7 @@ mod tests {
                 command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec!["modified".to_string()],
+                env: HashMap::new(),
             },
             3,
             git_state,
@@ -565,6 +576,7 @@ mod tests {
                 command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec!["modified".to_string()],
+                env: HashMap::new(),
             },
             3,
             git_state,
@@ -592,6 +604,7 @@ mod tests {
                 command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec!["modified".to_string(), "added".to_string()],
+                env: HashMap::new(),
             },
             3,
             git_state,

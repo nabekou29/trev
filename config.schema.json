@@ -1243,6 +1243,14 @@
           "type": "boolean",
           "default": true
         },
+        "env": {
+          "description": "Environment variables to set when running the command.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
         "extensions": {
           "description": "File extensions this command applies to.\n\nIgnored when `pattern` is set. Simple case-insensitive extension matching.",
           "type": "array",
