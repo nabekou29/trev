@@ -95,6 +95,14 @@ pub fn handle_file_op_action(
         FileOpAction::PasteFromClipboard => {
             execute_clipboard_paste(state, ctx);
         }
+        FileOpAction::CopyToClipboard => {
+            if let Some(info) = state.tree_state.current_node_info() {
+                let targets = state.selection.mark_targets_or_cursor(&info.path);
+                let count = targets.len();
+                sync_file_list_to_clipboard(&targets);
+                state.set_status(format!("Copied {count} file(s) to clipboard"));
+            }
+        }
         FileOpAction::Delete => {
             if let Some(info) = state.tree_state.current_node_info() {
                 let targets = state.selection.mark_targets_or_cursor(&info.path);
@@ -168,40 +176,44 @@ fn cursor_parent_dir(state: &AppState) -> Option<PathBuf> {
 
 /// Build and open the copy-to-clipboard menu for the current cursor node.
 fn open_copy_menu(state: &mut AppState) {
+    use crate::action::{
+        Action,
+        CopyAction,
+        FileOpAction,
+    };
     use crate::input::{
         MenuAction,
         MenuItem,
         MenuState,
     };
 
-    let Some(info) = state.tree_state.current_node_info() else {
+    if state.tree_state.current_node_info().is_none() {
         return;
-    };
+    }
 
-    let abs_path = info.path.to_string_lossy().to_string();
-    let rel_path = info
-        .path
-        .strip_prefix(state.tree_state.root_path())
-        .unwrap_or(&info.path)
-        .to_string_lossy()
-        .to_string();
-    let file_name = info.name.clone();
-    let stem = info.path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-    let parent_dir =
-        info.path.parent().unwrap_or_else(|| Path::new("")).to_string_lossy().to_string();
+    let items = vec![
+        MenuItem { key: 'p', label: "Absolute path".to_string(), value: String::new() },
+        MenuItem { key: 'r', label: "Relative path".to_string(), value: String::new() },
+        MenuItem { key: 'n', label: "File name".to_string(), value: String::new() },
+        MenuItem { key: 's', label: "Stem".to_string(), value: String::new() },
+        MenuItem { key: 'd', label: "Parent directory".to_string(), value: String::new() },
+        MenuItem { key: 'f', label: "Files".to_string(), value: String::new() },
+    ];
+    let item_actions = vec![
+        Action::FileOp(FileOpAction::Copy(CopyAction::AbsolutePath)),
+        Action::FileOp(FileOpAction::Copy(CopyAction::RelativePath)),
+        Action::FileOp(FileOpAction::Copy(CopyAction::FileName)),
+        Action::FileOp(FileOpAction::Copy(CopyAction::Stem)),
+        Action::FileOp(FileOpAction::Copy(CopyAction::ParentDir)),
+        Action::FileOp(FileOpAction::CopyToClipboard),
+    ];
 
     state.mode = AppMode::Menu(MenuState {
         title: "Copy to clipboard".to_string(),
-        items: vec![
-            MenuItem { key: 'p', label: "Absolute path".to_string(), value: abs_path },
-            MenuItem { key: 'r', label: "Relative path".to_string(), value: rel_path },
-            MenuItem { key: 'n', label: "File name".to_string(), value: file_name },
-            MenuItem { key: 's', label: "Stem".to_string(), value: stem },
-            MenuItem { key: 'd', label: "Parent directory".to_string(), value: parent_dir },
-        ],
+        items,
         cursor: 0,
-        on_select: MenuAction::CopyToClipboard,
-        item_actions: Vec::new(),
+        on_select: MenuAction::Custom,
+        item_actions,
     });
 }
 

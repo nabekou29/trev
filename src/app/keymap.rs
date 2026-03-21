@@ -411,6 +411,12 @@ impl KeyMap {
             &[],
             Action::FileOp(FileOpAction::Copy(CopyAction::RelativePath)),
         );
+        self.bind(
+            KeyCode::Char('c'),
+            KeyModifiers::SUPER,
+            &[],
+            Action::FileOp(FileOpAction::CopyToClipboard),
+        );
     }
 }
 

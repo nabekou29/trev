@@ -71,6 +71,8 @@ pub enum FileOpAction {
     Paste,
     /// Paste from OS clipboard (always clipboard, ignores yank buffer).
     PasteFromClipboard,
+    /// Copy selected files to OS clipboard as a file list (without yanking).
+    CopyToClipboard,
     /// Create a new file (opens inline input).
     CreateFile,
     /// Create a new directory (opens inline input).
@@ -319,6 +321,7 @@ impl fmt::Display for FileOpAction {
             Self::Cut => f.write_str("file_op.cut"),
             Self::Paste => f.write_str("file_op.paste"),
             Self::PasteFromClipboard => f.write_str("file_op.paste_from_clipboard"),
+            Self::CopyToClipboard => f.write_str("file_op.copy_to_clipboard"),
             Self::CreateFile => f.write_str("file_op.create_file"),
             Self::CreateDirectory => f.write_str("file_op.create_directory"),
             Self::Rename => f.write_str("file_op.rename"),
@@ -476,6 +479,7 @@ impl FromStr for FileOpAction {
             "file_op.cut" => Ok(Self::Cut),
             "file_op.paste" => Ok(Self::Paste),
             "file_op.paste_from_clipboard" => Ok(Self::PasteFromClipboard),
+            "file_op.copy_to_clipboard" => Ok(Self::CopyToClipboard),
             "file_op.create_file" => Ok(Self::CreateFile),
             "file_op.create_directory" => Ok(Self::CreateDirectory),
             "file_op.rename" => Ok(Self::Rename),
@@ -619,6 +623,7 @@ impl FileOpAction {
             "file_op.cut",
             "file_op.paste",
             "file_op.paste_from_clipboard",
+            "file_op.copy_to_clipboard",
             "file_op.create_file",
             "file_op.create_directory",
             "file_op.rename",
@@ -753,6 +758,7 @@ impl FileOpAction {
             Self::Cut => "Cut files",
             Self::Paste => "Paste files",
             Self::PasteFromClipboard => "Paste from clipboard",
+            Self::CopyToClipboard => "Copy to clipboard",
             Self::CreateFile => "Create file",
             Self::CreateDirectory => "Create directory",
             Self::Rename => "Rename",
@@ -864,6 +870,7 @@ mod tests {
             FileOpAction::Cut,
             FileOpAction::Paste,
             FileOpAction::PasteFromClipboard,
+            FileOpAction::CopyToClipboard,
             FileOpAction::CreateFile,
             FileOpAction::Rename,
             FileOpAction::Delete,

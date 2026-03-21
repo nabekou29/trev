@@ -212,7 +212,7 @@ Shell commands in keybindings and menus support these variables:
 `preview.toggle_preview`, `preview.toggle_wrap`
 
 **File operations:**
-`file_op.yank`, `file_op.cut`, `file_op.paste`, `file_op.paste_from_clipboard`,
+`file_op.yank`, `file_op.cut`, `file_op.paste`, `file_op.paste_from_clipboard`, `file_op.copy_to_clipboard`,
 `file_op.create_file`, `file_op.create_directory`, `file_op.rename`,
 `file_op.delete`, `file_op.system_trash`,
 `file_op.undo`, `file_op.redo`,
