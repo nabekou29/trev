@@ -691,8 +691,8 @@ pub struct PreviewConfig {
     pub max_bytes: u64,
     /// LRU cache capacity (default: 10).
     pub cache_size: usize,
-    /// External preview commands.
-    pub commands: Vec<ExternalCommand>,
+    /// User-defined preview providers (can override built-ins by name).
+    pub providers: Vec<PreviewProviderEntry>,
     /// Timeout for external commands in seconds (default: 3).
     pub command_timeout: u64,
     /// Tree/preview split percentage in wide layout (default: 50).
@@ -705,14 +705,22 @@ pub struct PreviewConfig {
     pub word_wrap: bool,
 }
 
-/// External command configuration for preview.
+/// Preview provider entry configuration.
+///
+/// Used to define external command providers or to override/disable built-in providers by name.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ExternalCommand {
-    /// Display name for this command provider.
+pub struct PreviewProviderEntry {
+    /// Display name for this provider.
     ///
+    /// When matching a built-in provider name, overrides or disables it.
     /// Defaults to the command binary name when omitted.
     #[serde(default)]
     pub name: Option<String>,
+    /// Whether this provider is enabled (default: true).
+    ///
+    /// Set to `false` to disable a built-in or previously defined provider by name.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     /// Glob pattern(s) to match against the file name (e.g. `"*"`, `"*.{rs,go}"`).
     ///
     /// Accepts a single string or an array. When set, takes precedence over `extensions`.
@@ -724,16 +732,17 @@ pub struct ExternalCommand {
     /// Ignored when `pattern` is set. Simple case-insensitive extension matching.
     #[serde(default)]
     pub extensions: Vec<String>,
-    /// Whether this command handles directories.
+    /// Target node type: `file`, `directory`, or `all` (default: `file`).
     #[serde(default)]
-    pub directories: bool,
+    pub target: ProviderTarget,
     /// Priority for ordering (lower = higher priority, default: 100).
     ///
     /// Accepts a number or a named constant: `high` (0), `mid` (100), `low` (1000).
     #[serde(default)]
     pub priority: Priority,
-    /// Command name (must be in `$PATH`).
-    pub command: String,
+    /// Command name (must be in `$PATH`). Optional for disable-only entries.
+    #[serde(default)]
+    pub command: Option<String>,
     /// Command arguments.
     #[serde(default)]
     pub args: Vec<String>,
@@ -743,6 +752,35 @@ pub struct ExternalCommand {
     /// Empty means no git status filtering.
     #[serde(default)]
     pub git_status: Vec<String>,
+}
+
+/// Target node type for a preview provider.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderTarget {
+    /// Only files (default).
+    #[default]
+    File,
+    /// Only directories.
+    Directory,
+    /// Both files and directories.
+    All,
+}
+
+impl ProviderTarget {
+    /// Whether this target matches the given node info.
+    pub const fn matches(self, node: &crate::preview::provider::NodeInfo) -> bool {
+        match self {
+            Self::File => node.is_file(),
+            Self::Directory => node.is_dir(),
+            Self::All => true,
+        }
+    }
+}
+
+/// Returns `true` (used as serde default).
+const fn default_true() -> bool {
+    true
 }
 
 /// Preview provider priority.
@@ -838,12 +876,13 @@ impl JsonSchema for Priority {
     }
 }
 
-impl ExternalCommand {
-    /// Get the display name for this command.
+impl PreviewProviderEntry {
+    /// Get the display name for this provider.
     ///
-    /// Returns the explicit `name` if set, otherwise the command binary name.
+    /// Returns the explicit `name` if set, otherwise the command binary name,
+    /// or `"unknown"` if neither is set.
     pub fn display_name(&self) -> &str {
-        self.name.as_deref().unwrap_or(&self.command)
+        self.name.as_deref().or(self.command.as_deref()).unwrap_or("unknown")
     }
 }
 
@@ -924,7 +963,7 @@ impl Default for PreviewConfig {
             max_lines: 1000,
             max_bytes: 10 * 1024 * 1024, // 10 MB
             cache_size: 50,
-            commands: Vec::new(),
+            providers: Vec::new(),
             command_timeout: 3,
             split_ratio: 50,
             narrow_split_ratio: 60,
@@ -1313,8 +1352,8 @@ pub struct PreviewConfigOverride {
     pub max_bytes: Option<u64>,
     /// LRU cache capacity.
     pub cache_size: Option<usize>,
-    /// External preview commands (extended onto existing list).
-    pub commands: Option<Vec<ExternalCommand>>,
+    /// Preview providers (same-name entries override existing ones).
+    pub providers: Option<Vec<PreviewProviderEntry>>,
     /// Timeout for external commands in seconds.
     pub command_timeout: Option<u64>,
     /// Tree/preview split percentage in wide layout.
@@ -1342,8 +1381,19 @@ impl PreviewConfigOverride {
             narrow_width,
             word_wrap,
         );
-        if let Some(commands) = self.commands {
-            target.commands.extend(commands);
+        if let Some(providers) = self.providers {
+            for entry in providers {
+                if let Some(ref name) = entry.name {
+                    // Same-name override: replace existing entry with matching name.
+                    if let Some(existing) =
+                        target.providers.iter_mut().find(|p| p.name.as_deref() == Some(name))
+                    {
+                        *existing = entry;
+                        continue;
+                    }
+                }
+                target.providers.push(entry);
+            }
         }
     }
 }
@@ -1506,7 +1556,7 @@ preview:
   max_bytes: 5242880
   cache_size: 20
   command_timeout: 5
-  commands:
+  providers:
     - extensions: [json]
       command: jq
       args: ["."]
@@ -1528,8 +1578,8 @@ preview:
         assert_that!(c.preview.max_bytes, eq(5_242_880));
         assert_that!(c.preview.cache_size, eq(20));
         assert_that!(c.preview.command_timeout, eq(5));
-        assert_that!(c.preview.commands.len(), eq(1));
-        assert_that!(c.preview.commands[0].command.as_str(), eq("jq"));
+        assert_that!(c.preview.providers.len(), eq(1));
+        assert_that!(c.preview.providers[0].command.as_deref(), eq(Some("jq")));
         assert!(result.warnings.is_empty());
     }
 
@@ -1669,17 +1719,18 @@ display:
         assert_that!(config.git.enabled, eq(true));
     }
 
-    // --- ExternalCommand display_name ---
+    // --- PreviewProviderEntry display_name ---
 
     #[rstest]
-    fn external_command_display_name_uses_explicit_name() {
-        let cmd = ExternalCommand {
+    fn provider_entry_display_name_uses_explicit_name() {
+        let cmd = PreviewProviderEntry {
             name: Some("Pretty JSON".to_string()),
+            enabled: true,
             pattern: vec![],
             extensions: vec!["json".to_string()],
-            directories: false,
+            target: ProviderTarget::File,
             priority: Priority::default(),
-            command: "jq".to_string(),
+            command: Some("jq".to_string()),
             args: vec![".".to_string()],
             git_status: vec![],
         };
@@ -1687,14 +1738,15 @@ display:
     }
 
     #[rstest]
-    fn external_command_display_name_defaults_to_command() {
-        let cmd = ExternalCommand {
+    fn provider_entry_display_name_defaults_to_command() {
+        let cmd = PreviewProviderEntry {
             name: None,
+            enabled: true,
             pattern: vec![],
             extensions: vec!["md".to_string()],
-            directories: false,
+            target: ProviderTarget::File,
             priority: Priority::default(),
-            command: "glow".to_string(),
+            command: Some("glow".to_string()),
             args: vec![],
             git_status: vec![],
         };
@@ -1702,14 +1754,14 @@ display:
     }
 
     #[rstest]
-    fn external_command_name_field_is_optional_in_yaml() {
+    fn provider_entry_name_field_is_optional_in_yaml() {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("config.yml");
         std::fs::write(
             &path,
             r#"
 preview:
-  commands:
+  providers:
     - name: Pretty JSON
       extensions: [json]
       command: jq
@@ -1721,11 +1773,11 @@ preview:
         .unwrap();
 
         let result = Config::load_from(&path).unwrap();
-        let commands = &result.config.preview.commands;
+        let providers = &result.config.preview.providers;
 
-        assert_that!(commands.len(), eq(2));
-        assert_that!(commands[0].display_name(), eq("Pretty JSON"));
-        assert_that!(commands[1].display_name(), eq("glow"));
+        assert_that!(providers.len(), eq(2));
+        assert_that!(providers[0].display_name(), eq("Pretty JSON"));
+        assert_that!(providers[1].display_name(), eq("glow"));
         assert!(result.warnings.is_empty());
     }
 
@@ -1965,17 +2017,17 @@ keybindings:
         assert_that!(result.config.git.enabled, eq(false));
     }
 
-    // --- ExternalCommand deserialization with git_status ---
+    // --- PreviewProviderEntry deserialization with git_status ---
 
     #[rstest]
-    fn external_command_git_status_from_yaml() {
+    fn provider_entry_git_status_from_yaml() {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("config.yml");
         std::fs::write(
             &path,
             r"
 preview:
-  commands:
+  providers:
     - command: diff-so-fancy
       extensions: [rs, py]
       git_status: [modified, staged_modified]
@@ -1984,21 +2036,21 @@ preview:
         .unwrap();
 
         let result = Config::load_from(&path).unwrap();
-        let cmd = &result.config.preview.commands[0];
+        let cmd = &result.config.preview.providers[0];
         assert_that!(cmd.git_status.len(), eq(2));
         assert_that!(cmd.git_status[0].as_str(), eq("modified"));
         assert_that!(cmd.git_status[1].as_str(), eq("staged_modified"));
     }
 
     #[rstest]
-    fn external_command_git_status_defaults_to_empty() {
+    fn provider_entry_git_status_defaults_to_empty() {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("config.yml");
         std::fs::write(
             &path,
             r"
 preview:
-  commands:
+  providers:
     - command: cat
       extensions: [txt]
 ",
@@ -2006,7 +2058,7 @@ preview:
         .unwrap();
 
         let result = Config::load_from(&path).unwrap();
-        let cmd = &result.config.preview.commands[0];
+        let cmd = &result.config.preview.providers[0];
         assert!(cmd.git_status.is_empty());
     }
 
@@ -2424,15 +2476,61 @@ keybindings:
     #[rstest]
     fn apply_override_vec_extends() {
         let mut config = Config::default();
-        assert!(config.preview.commands.is_empty());
+        assert!(config.preview.providers.is_empty());
 
         let yaml =
-            "preview:\n  commands:\n    - name: Foo\n      command: echo\n      args: ['hello']\n";
+            "preview:\n  providers:\n    - name: Foo\n      command: echo\n      args: ['hello']\n";
         let ov: ConfigOverride = serde_yaml_ng::from_str(yaml).unwrap();
         config.apply_override(ov);
 
-        assert_that!(config.preview.commands.len(), eq(1));
-        assert_that!(config.preview.commands[0].command.as_str(), eq("echo"));
+        assert_that!(config.preview.providers.len(), eq(1));
+        assert_that!(config.preview.providers[0].command.as_deref(), eq(Some("echo")));
+    }
+
+    #[rstest]
+    fn apply_override_providers_same_name_replaces() {
+        let mut config = Config::default();
+        // Add initial provider.
+        let yaml_base = "preview:\n  providers:\n    - name: MyViewer\n      command: cat\n      priority: mid\n";
+        let ov: ConfigOverride = serde_yaml_ng::from_str(yaml_base).unwrap();
+        config.apply_override(ov);
+        assert_that!(config.preview.providers.len(), eq(1));
+        assert_that!(config.preview.providers[0].command.as_deref(), eq(Some("cat")));
+
+        // Override with same name → replaces, not appends.
+        let yaml_override = "preview:\n  providers:\n    - name: MyViewer\n      command: bat\n      priority: high\n";
+        let ov2: ConfigOverride = serde_yaml_ng::from_str(yaml_override).unwrap();
+        config.apply_override(ov2);
+        assert_that!(config.preview.providers.len(), eq(1));
+        assert_that!(config.preview.providers[0].command.as_deref(), eq(Some("bat")));
+    }
+
+    #[rstest]
+    fn apply_override_providers_no_name_appends() {
+        let mut config = Config::default();
+        let yaml = "preview:\n  providers:\n    - command: cat\n";
+        let ov: ConfigOverride = serde_yaml_ng::from_str(yaml).unwrap();
+        config.apply_override(ov);
+
+        // Append again with no name → should add second entry.
+        let ov2: ConfigOverride = serde_yaml_ng::from_str(yaml).unwrap();
+        config.apply_override(ov2);
+        assert_that!(config.preview.providers.len(), eq(2));
+    }
+
+    #[rstest]
+    fn apply_override_providers_disable_by_name() {
+        let mut config = Config::default();
+        let yaml_base = "preview:\n  providers:\n    - name: MyViewer\n      command: cat\n";
+        let ov: ConfigOverride = serde_yaml_ng::from_str(yaml_base).unwrap();
+        config.apply_override(ov);
+
+        // Disable by name.
+        let yaml_disable = "preview:\n  providers:\n    - name: MyViewer\n      enabled: false\n";
+        let ov2: ConfigOverride = serde_yaml_ng::from_str(yaml_disable).unwrap();
+        config.apply_override(ov2);
+        assert_that!(config.preview.providers.len(), eq(1));
+        assert!(!config.preview.providers[0].enabled);
     }
 
     #[rstest]

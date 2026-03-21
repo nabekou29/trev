@@ -195,11 +195,11 @@
       "default": {
         "cache_size": 50,
         "command_timeout": 3,
-        "commands": [],
         "max_bytes": 10485760,
         "max_lines": 1000,
         "narrow_split_ratio": 60,
         "narrow_width": 80,
+        "providers": [],
         "split_ratio": 50,
         "word_wrap": false
       }
@@ -671,69 +671,6 @@
           }
         }
       }
-    },
-    "ExternalCommand": {
-      "description": "External command configuration for preview.",
-      "type": "object",
-      "properties": {
-        "args": {
-          "description": "Command arguments.",
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          }
-        },
-        "command": {
-          "description": "Command name (must be in `$PATH`).",
-          "type": "string"
-        },
-        "directories": {
-          "description": "Whether this command handles directories.",
-          "type": "boolean",
-          "default": false
-        },
-        "extensions": {
-          "description": "File extensions this command applies to.\n\nIgnored when `pattern` is set. Simple case-insensitive extension matching.",
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          }
-        },
-        "git_status": {
-          "description": "Git status condition: only apply when file has one of these statuses.\n\nValues: `modified`, `staged`, `added`, `deleted`, `renamed`, `untracked`, `conflicted`.\nEmpty means no git status filtering.",
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          }
-        },
-        "name": {
-          "description": "Display name for this command provider.\n\nDefaults to the command binary name when omitted.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "pattern": {
-          "description": "Glob pattern(s) to match against the file name (e.g. `\"*\"`, `\"*.{rs,go}\"`).\n\nAccepts a single string or an array. When set, takes precedence over `extensions`.\nMatches against the file name (basename), not the full path.",
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          }
-        },
-        "priority": {
-          "description": "Priority for ordering (lower = higher priority, default: 100).\n\nAccepts a number or a named constant: `high` (0), `mid` (100), `low` (1000).",
-          "$ref": "#/$defs/Priority",
-          "default": "mid"
-        }
-      },
-      "required": [
-        "command"
-      ]
     },
     "FileOpConfig": {
       "description": "File operation configuration.",
@@ -1220,14 +1157,6 @@
           "default": 3,
           "minimum": 0
         },
-        "commands": {
-          "description": "External preview commands.",
-          "type": "array",
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/ExternalCommand"
-          }
-        },
         "max_bytes": {
           "description": "Maximum bytes to read per file (default: 10 MB).",
           "type": "integer",
@@ -1258,6 +1187,14 @@
           "maximum": 65535,
           "minimum": 0
         },
+        "providers": {
+          "description": "User-defined preview providers (can override built-ins by name).",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreviewProviderEntry"
+          }
+        },
         "split_ratio": {
           "description": "Tree/preview split percentage in wide layout (default: 50).",
           "type": "integer",
@@ -1270,6 +1207,75 @@
           "description": "Enable word wrap in preview (default: false).",
           "type": "boolean",
           "default": false
+        }
+      }
+    },
+    "PreviewProviderEntry": {
+      "description": "Preview provider entry configuration.\n\nUsed to define external command providers or to override/disable built-in providers by name.",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Command arguments.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "command": {
+          "description": "Command name (must be in `$PATH`). Optional for disable-only entries.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "enabled": {
+          "description": "Whether this provider is enabled (default: true).\n\nSet to `false` to disable a built-in or previously defined provider by name.",
+          "type": "boolean",
+          "default": true
+        },
+        "extensions": {
+          "description": "File extensions this command applies to.\n\nIgnored when `pattern` is set. Simple case-insensitive extension matching.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "git_status": {
+          "description": "Git status condition: only apply when file has one of these statuses.\n\nValues: `modified`, `staged`, `added`, `deleted`, `renamed`, `untracked`, `conflicted`.\nEmpty means no git status filtering.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "description": "Display name for this provider.\n\nWhen matching a built-in provider name, overrides or disables it.\nDefaults to the command binary name when omitted.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "pattern": {
+          "description": "Glob pattern(s) to match against the file name (e.g. `\"*\"`, `\"*.{rs,go}\"`).\n\nAccepts a single string or an array. When set, takes precedence over `extensions`.\nMatches against the file name (basename), not the full path.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "priority": {
+          "description": "Priority for ordering (lower = higher priority, default: 100).\n\nAccepts a number or a named constant: `high` (0), `mid` (100), `low` (1000).",
+          "$ref": "#/$defs/Priority",
+          "default": "mid"
+        },
+        "target": {
+          "description": "Target node type: `file`, `directory`, or `all` (default: `file`).",
+          "$ref": "#/$defs/ProviderTarget",
+          "default": "file"
         }
       }
     },
@@ -1290,6 +1296,26 @@
         }
       ],
       "default": "mid"
+    },
+    "ProviderTarget": {
+      "description": "Target node type for a preview provider.",
+      "oneOf": [
+        {
+          "description": "Only files (default).",
+          "type": "string",
+          "const": "file"
+        },
+        {
+          "description": "Only directories.",
+          "type": "string",
+          "const": "directory"
+        },
+        {
+          "description": "Both files and directories.",
+          "type": "string",
+          "const": "all"
+        }
+      ]
     },
     "SearchConfig": {
       "description": "Search configuration.",

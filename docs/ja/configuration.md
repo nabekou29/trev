@@ -49,7 +49,7 @@ preview:
   narrow_split_ratio: 60 # ツリー/プレビューの分割比率 (%) （ナローレイアウト）
   narrow_width: 80 # ナローレイアウトの幅閾値（カラム数）
   word_wrap: false # プレビューの折り返しを有効にする
-  commands: []
+  providers: []
 
 file_op:
   delete_mode: permanent # permanent | custom_trash
@@ -73,11 +73,11 @@ keybindings:
   key_sequence_timeout_ms: 500 # マルチキーシーケンスのタイムアウト (ms)
 ```
 
-## プレビューコマンドの例
+## プレビュープロバイダの例
 
 ```yaml
 preview:
-  commands:
+  providers:
     - name: "Pretty JSON"
       extensions: [json]
       priority: high # high (0) | mid (100) | low (1000) | <number>
@@ -87,7 +87,7 @@ preview:
       extensions: [md]
       command: glow
     - name: "Disk Usage"
-      directories: true
+      target: directory # file | directory | all (デフォルト: file)
       priority: low
       command: dust
       args: ["-r"]
@@ -99,7 +99,7 @@ preview:
 
 ```yaml
 preview:
-  commands:
+  providers:
     # 全ファイルに適用
     - name: "Universal Viewer"
       pattern: "*"
@@ -117,12 +117,32 @@ preview:
       command: bat
 ```
 
-| フィールド    | 説明                                                               |
-| ------------- | ------------------------------------------------------------------ |
-| `pattern`     | ファイル名に対する glob パターン（`extensions` より優先）          |
-| `extensions`  | 拡張子リスト（大文字小文字不問、`pattern` 未指定時に使用）         |
-| `directories` | ディレクトリを対象にするかどうか                                   |
-| `git_status`  | 特定の git ステータスのファイルのみ適用（`modified`、`staged` 等） |
+| フィールド   | 説明                                                               |
+| ------------ | ------------------------------------------------------------------ |
+| `pattern`    | ファイル名に対する glob パターン（`extensions` より優先）          |
+| `extensions` | 拡張子リスト（大文字小文字不問、`pattern` 未指定時に使用）         |
+| `target`     | プロバイダの対象: `file`（デフォルト）、`directory`、`all`         |
+| `enabled`    | プロバイダの有効/無効（デフォルト: `true`）。`false` で無効化      |
+| `git_status` | 特定の git ステータスのファイルのみ適用（`modified`、`staged` 等） |
+
+### 組み込みプロバイダのオーバーライド
+
+trev には組み込みプロバイダ **Image**、**Text**、**Diff**、**Fallback** があります。同じ `name` でプロバイダを定義することで、オーバーライドや無効化が可能です。
+
+```yaml
+preview:
+  providers:
+    # 組み込みの Image プロバイダを無効化
+    - name: "Image"
+      enabled: false
+
+    # 組み込みの Text プロバイダをカスタムコマンドでオーバーライド
+    - name: "Text"
+      command: bat
+      args: ["--style=plain"]
+```
+
+同じ `name` のプロバイダエントリは組み込みプロバイダを置き換えます。名前のないエントリはプロバイダリストに追加されます。
 
 ## キーバインドのカスタマイズ
 
@@ -242,7 +262,7 @@ keybindings:
 
 ## エディタプラグイン向け設定オーバーライド
 
-`--config-override` CLI オプションにより、エディタプラグインがユーザーの設定ファイルを変更せずに設定を注入できます。デーモンモードのキーバインド設定やプレビューコマンドの追加、ホストエディタと競合する機能の無効化に便利です。
+`--config-override` CLI オプションにより、エディタプラグインがユーザーの設定ファイルを変更せずに設定を注入できます。デーモンモードのキーバインド設定やプレビュープロバイダの追加、ホストエディタと競合する機能の無効化に便利です。
 
 ```sh
 trev --ipc --config-override /path/to/override.yml
@@ -253,10 +273,11 @@ trev --ipc --config-override /path/to/override.yml
 マージルール:
 
 - **スカラー値**（bool、数値、文字列）: 指定されていれば置換
-- **リスト**（`keybindings`、`preview.commands`、`file_styles`）: 既存に追加
+- **リスト**（`keybindings`、`file_styles`）: 既存に追加
+- **`preview.providers`**: 同名エントリは既存を上書き、名前なしエントリは追加
 - **マップ**（`custom_actions`、`menus`）: マージ（オーバーライド側のキーが優先）
 
-例 — Neovim プラグインがキーバインドとプレビューコマンドを提供する場合:
+例 — Neovim プラグインがキーバインドとプレビュープロバイダを提供する場合:
 
 ```yaml
 keybindings:
@@ -270,7 +291,7 @@ keybindings:
         notify: quit_request
 
 preview:
-  commands:
+  providers:
     - name: Neovim
       pattern: "*"
       command: echo

@@ -49,7 +49,7 @@ preview:
   narrow_split_ratio: 60 # Tree/preview split % (narrow layout)
   narrow_width: 80 # Width threshold for narrow layout (columns)
   word_wrap: false # Enable word wrap in preview
-  commands: []
+  providers: []
 
 file_op:
   delete_mode: permanent # permanent | custom_trash
@@ -73,11 +73,11 @@ keybindings:
   key_sequence_timeout_ms: 500 # Timeout for multi-key sequences (ms)
 ```
 
-## Preview Commands Example
+## Preview Providers Example
 
 ```yaml
 preview:
-  commands:
+  providers:
     - name: "Pretty JSON"
       extensions: [json]
       priority: high # high (0) | mid (100) | low (1000) | <number>
@@ -87,7 +87,7 @@ preview:
       extensions: [md]
       command: glow
     - name: "Disk Usage"
-      directories: true
+      target: directory # file | directory | all (default: file)
       priority: low
       command: dust
       args: ["-r"]
@@ -99,7 +99,7 @@ Use the `pattern` field for flexible file matching with glob syntax. When `patte
 
 ```yaml
 preview:
-  commands:
+  providers:
     # Match all files
     - name: "Universal Viewer"
       pattern: "*"
@@ -117,12 +117,32 @@ preview:
       command: bat
 ```
 
-| Field         | Description                                                                        |
-| ------------- | ---------------------------------------------------------------------------------- |
-| `pattern`     | Glob pattern(s) matched against the file name (takes precedence over `extensions`) |
-| `extensions`  | Simple extension list (case-insensitive, used when `pattern` is not set)           |
-| `directories` | Whether this command handles directories                                           |
-| `git_status`  | Only apply when file has specific git status (`modified`, `staged`, etc.)          |
+| Field        | Description                                                                        |
+| ------------ | ---------------------------------------------------------------------------------- |
+| `pattern`    | Glob pattern(s) matched against the file name (takes precedence over `extensions`) |
+| `extensions` | Simple extension list (case-insensitive, used when `pattern` is not set)           |
+| `target`     | What the provider handles: `file` (default), `directory`, or `all`                 |
+| `enabled`    | Whether the provider is active (default: `true`); set to `false` to disable        |
+| `git_status` | Only apply when file has specific git status (`modified`, `staged`, etc.)          |
+
+### Overriding Built-in Providers
+
+trev includes built-in providers: **Image**, **Text**, **Diff**, and **Fallback**. You can override or disable them by defining a provider with the same `name`.
+
+```yaml
+preview:
+  providers:
+    # Disable the built-in Image provider
+    - name: "Image"
+      enabled: false
+
+    # Override the built-in Text provider with a custom command
+    - name: "Text"
+      command: bat
+      args: ["--style=plain"]
+```
+
+When a provider entry has the same `name` as a built-in, it replaces that built-in. Unnamed entries are appended to the provider list.
 
 ## Keybinding Customization
 
@@ -242,7 +262,7 @@ Each menu item supports one of:
 
 ## Config Override for Editor Plugins
 
-The `--config-override` CLI option lets editor plugins inject configuration without modifying the user's config file. This is useful for setting IPC-mode keybindings, adding preview commands, or disabling features that conflict with the host editor.
+The `--config-override` CLI option lets editor plugins inject configuration without modifying the user's config file. This is useful for setting IPC-mode keybindings, adding preview providers, or disabling features that conflict with the host editor.
 
 ```sh
 trev --ipc --config-override /path/to/override.yml
@@ -253,10 +273,11 @@ The override file uses the same YAML format as the main config. Only explicitly 
 Merge rules:
 
 - **Scalar values** (bool, number, string): replaced if present
-- **Lists** (`keybindings`, `preview.commands`, `file_styles`): appended to existing
+- **Lists** (`keybindings`, `file_styles`): appended to existing
+- **`preview.providers`**: same-name entries override existing, unnamed entries are appended
 - **Maps** (`custom_actions`, `menus`): merged (override keys win on conflict)
 
-Example -- a Neovim plugin providing keybindings and a preview command:
+Example -- a Neovim plugin providing keybindings and a preview provider:
 
 ```yaml
 keybindings:
@@ -270,7 +291,7 @@ keybindings:
         notify: quit_request
 
 preview:
-  commands:
+  providers:
     - name: Neovim
       pattern: "*"
       command: echo

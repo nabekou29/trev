@@ -17,7 +17,9 @@ use crate::app::state::{
 use crate::preview::cache::CacheKey;
 use crate::preview::content::PreviewContent;
 use crate::preview::provider::{
+    FileType,
     LoadContext,
+    NodeInfo,
     PreviewProvider,
 };
 
@@ -206,9 +208,10 @@ fn resolve_preview_providers(
 ) -> Option<(PathBuf, Vec<Arc<dyn PreviewProvider>>)> {
     let node_info = state.tree_state.current_node_info()?;
     let path = node_info.path.clone();
-    let is_dir = node_info.is_dir;
+    let preview_node =
+        NodeInfo { file_type: if node_info.is_dir { FileType::Directory } else { FileType::File } };
 
-    let providers = state.preview_registry.resolve(&path, is_dir);
+    let providers = state.preview_registry.resolve(&path, &preview_node);
     if providers.is_empty() {
         state.preview_state.set_content(PreviewContent::Empty);
         return None;
@@ -261,7 +264,10 @@ fn prefetch_adjacent(state: &mut AppState, ctx: &AppContext) {
     for &idx in &indices {
         let Some(vn) = visible.get(idx.saturating_sub(start)) else { continue };
         let path = &vn.node.path;
-        let providers = state.preview_registry.resolve(path, vn.node.is_dir);
+        let prefetch_node = NodeInfo {
+            file_type: if vn.node.is_dir { FileType::Directory } else { FileType::File },
+        };
+        let providers = state.preview_registry.resolve(path, &prefetch_node);
         let Some(provider) = providers.first() else { continue };
         if !provider.is_cacheable() {
             tracing::debug!(path = %path.display(), "prefetch skipped (non-cacheable provider)");

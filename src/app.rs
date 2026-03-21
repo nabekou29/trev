@@ -986,12 +986,23 @@ fn build_preview_registry(
         )),
         Arc::new(FallbackProvider::new()),
     ];
-    for cmd in &config.preview.commands {
-        providers.push(Arc::new(ExternalCmdProvider::new(
-            cmd.clone(),
-            config.preview.command_timeout,
-            Arc::clone(git_state),
-        )));
+    for entry in &config.preview.providers {
+        // Remove built-in with matching name (if any).
+        if let Some(ref name) = entry.name {
+            providers.retain(|p| p.name() != name.as_str());
+        }
+        // Skip disabled entries.
+        if !entry.enabled {
+            continue;
+        }
+        // Only create provider if command is present.
+        if entry.command.is_some() {
+            providers.push(Arc::new(ExternalCmdProvider::new(
+                entry.clone(),
+                config.preview.command_timeout,
+                Arc::clone(git_state),
+            )));
+        }
     }
     PreviewRegistry::new(providers)
 }

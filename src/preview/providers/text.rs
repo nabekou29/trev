@@ -11,6 +11,7 @@ use crate::preview::content::PreviewContent;
 use crate::preview::highlight;
 use crate::preview::provider::{
     LoadContext,
+    NodeInfo,
     PreviewProvider,
 };
 
@@ -38,8 +39,8 @@ impl PreviewProvider for TextPreviewProvider {
         crate::config::Priority::MID.value()
     }
 
-    fn can_handle(&self, path: &Path, is_dir: bool) -> bool {
-        if is_dir {
+    fn can_handle(&self, path: &Path, node: &NodeInfo) -> bool {
+        if node.is_dir() {
             return false;
         }
 
@@ -133,6 +134,17 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
+    use crate::preview::provider::FileType;
+
+    /// Helper to create a `NodeInfo` for a file.
+    const fn file_node() -> NodeInfo {
+        NodeInfo { file_type: FileType::File }
+    }
+
+    /// Helper to create a `NodeInfo` for a directory.
+    const fn dir_node() -> NodeInfo {
+        NodeInfo { file_type: FileType::Directory }
+    }
 
     fn make_ctx() -> LoadContext {
         LoadContext {
@@ -156,7 +168,7 @@ mod tests {
         fs::write(&path, "fn main() {}").unwrap();
 
         let provider = TextPreviewProvider::new();
-        assert_that!(provider.can_handle(&path, false), eq(true));
+        assert_that!(provider.can_handle(&path, &file_node()), eq(true));
     }
 
     #[rstest]
@@ -166,13 +178,13 @@ mod tests {
         fs::write(&path, b"\x00\x01\x02\x03\xff\xfe\xfd").unwrap();
 
         let provider = TextPreviewProvider::new();
-        assert_that!(provider.can_handle(&path, false), eq(false));
+        assert_that!(provider.can_handle(&path, &file_node()), eq(false));
     }
 
     #[rstest]
     fn can_handle_directory_returns_false() {
         let provider = TextPreviewProvider::new();
-        assert_that!(provider.can_handle(Path::new("/tmp"), true), eq(false));
+        assert_that!(provider.can_handle(Path::new("/tmp"), &dir_node()), eq(false));
     }
 
     #[rstest]
@@ -181,13 +193,16 @@ mod tests {
         fs::write(&path, "").unwrap();
 
         let provider = TextPreviewProvider::new();
-        assert_that!(provider.can_handle(&path, false), eq(true));
+        assert_that!(provider.can_handle(&path, &file_node()), eq(true));
     }
 
     #[rstest]
     fn can_handle_nonexistent_file() {
         let provider = TextPreviewProvider::new();
-        assert_that!(provider.can_handle(Path::new("/nonexistent/file.txt"), false), eq(false));
+        assert_that!(
+            provider.can_handle(Path::new("/nonexistent/file.txt"), &file_node()),
+            eq(false)
+        );
     }
 
     #[cfg(unix)]
@@ -197,7 +212,7 @@ mod tests {
         std::process::Command::new("mkfifo").arg(&fifo_path).status().unwrap();
 
         let provider = TextPreviewProvider::new();
-        assert_that!(provider.can_handle(&fifo_path, false), eq(false));
+        assert_that!(provider.can_handle(&fifo_path, &file_node()), eq(false));
     }
 
     // --- load tests ---

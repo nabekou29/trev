@@ -8,6 +8,7 @@ use ratatui_image::picker::Picker;
 use crate::preview::content::PreviewContent;
 use crate::preview::provider::{
     LoadContext,
+    NodeInfo,
     PreviewProvider,
 };
 
@@ -59,8 +60,8 @@ impl PreviewProvider for ImagePreviewProvider {
         false
     }
 
-    fn can_handle(&self, path: &Path, is_dir: bool) -> bool {
-        if is_dir {
+    fn can_handle(&self, path: &Path, node: &NodeInfo) -> bool {
+        if node.is_dir() {
             return false;
         }
         path.extension().and_then(|e| e.to_str()).is_some_and(|ext| {
@@ -157,6 +158,7 @@ mod tests {
     use rstest::*;
 
     use super::*;
+    use crate::preview::provider::FileType;
 
     fn make_provider() -> ImagePreviewProvider {
         // Use fallback picker (halfblocks) for testing.
@@ -184,8 +186,10 @@ mod tests {
         #[case] is_dir: bool,
         #[case] expected: bool,
     ) {
+        let node =
+            NodeInfo { file_type: if is_dir { FileType::Directory } else { FileType::File } };
         let provider = make_provider();
-        assert_that!(provider.can_handle(&PathBuf::from(filename), is_dir), eq(expected));
+        assert_that!(provider.can_handle(&PathBuf::from(filename), &node), eq(expected));
     }
 
     #[rstest]

@@ -11,11 +11,12 @@ use std::time::Duration;
 use ansi_to_tui::IntoText;
 use globset::GlobSet;
 
-use crate::config::ExternalCommand;
+use crate::config::PreviewProviderEntry;
 use crate::git::GitState;
 use crate::preview::content::PreviewContent;
 use crate::preview::provider::{
     LoadContext,
+    NodeInfo,
     PreviewProvider,
 };
 
@@ -31,8 +32,10 @@ const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 pub struct ExternalCmdProvider {
     /// Display name of this provider.
     name: String,
-    /// External command configuration.
-    command: ExternalCommand,
+    /// Provider entry configuration.
+    entry: PreviewProviderEntry,
+    /// Resolved command string (guaranteed present).
+    command_str: String,
     /// Timeout for the command.
     timeout: Duration,
     /// Shared git repository state for `git_status` condition filtering.
@@ -44,18 +47,22 @@ pub struct ExternalCmdProvider {
 }
 
 impl ExternalCmdProvider {
-    /// Create a new external command provider for a single command.
+    /// Create a new external command provider for a single entry.
+    ///
+    /// The `entry` must have a `command` set (caller should verify).
     pub fn new(
-        command: ExternalCommand,
+        entry: PreviewProviderEntry,
         timeout_secs: u64,
         git_state: Arc<RwLock<Option<GitState>>>,
     ) -> Self {
-        let name = command.display_name().to_string();
-        let command_found = Self::command_exists(&command.command);
-        let glob_set = Self::compile_patterns(&command.pattern);
+        let name = entry.display_name().to_string();
+        let command_str = entry.command.clone().unwrap_or_default();
+        let command_found = Self::command_exists(&command_str);
+        let glob_set = Self::compile_patterns(&entry.pattern);
         Self {
             name,
-            command,
+            entry,
+            command_str,
             timeout: Duration::from_secs(timeout_secs),
             git_state,
             command_found,
@@ -99,24 +106,32 @@ impl PreviewProvider for ExternalCmdProvider {
     }
 
     fn priority(&self) -> u32 {
-        self.command.priority.value()
+        self.entry.priority.value()
     }
 
-    fn can_handle(&self, path: &Path, is_dir: bool) -> bool {
+    fn can_handle(&self, path: &Path, node: &NodeInfo) -> bool {
         if !self.command_found {
             return false;
         }
 
-        // Check file/directory match: glob patterns take precedence over extensions.
+        // Check target (file/directory/all).
+        if !self.entry.target.matches(node) {
+            return false;
+        }
+
+        let is_dir = node.is_dir();
+
+        // Check file match: glob patterns take precedence over extensions.
+        // Directories skip pattern/extension matching (target already checked).
         let file_match = if is_dir {
-            self.command.directories
+            true
         } else if let Some(ref glob_set) = self.glob_set {
             // Glob patterns match against the file name (basename).
             path.file_name().and_then(|n| n.to_str()).is_some_and(|name| glob_set.is_match(name))
         } else {
             path.extension().and_then(|e| e.to_str()).is_some_and(|ext| {
                 let ext_lower = ext.to_ascii_lowercase();
-                self.command.extensions.iter().any(|e| e.to_ascii_lowercase() == ext_lower)
+                self.entry.extensions.iter().any(|e| e.to_ascii_lowercase() == ext_lower)
             })
         };
         if !file_match {
@@ -124,7 +139,7 @@ impl PreviewProvider for ExternalCmdProvider {
         }
 
         // Check git_status condition (empty = no filter, always matches).
-        if !self.command.git_status.is_empty() {
+        if !self.entry.git_status.is_empty() {
             let matches =
                 self.git_state
                     .read()
@@ -135,7 +150,7 @@ impl PreviewProvider for ExternalCmdProvider {
                         if is_dir { gs.dir_status(path) } else { gs.file_status(path).copied() }
                     })
                     .is_some_and(|status| {
-                        self.command.git_status.iter().any(|s| s == status.config_name())
+                        self.entry.git_status.iter().any(|s| s == status.config_name())
                     });
             if !matches {
                 return false;
@@ -148,7 +163,7 @@ impl PreviewProvider for ExternalCmdProvider {
     fn load(&self, path: &Path, ctx: &LoadContext) -> anyhow::Result<PreviewContent> {
         let _span = tracing::info_span!(
             "external_cmd_load",
-            command = %self.command.command,
+            command = %self.command_str,
             path = %path.display(),
         )
         .entered();
@@ -157,8 +172,8 @@ impl PreviewProvider for ExternalCmdProvider {
         }
 
         // Build the command with file path as final argument.
-        let mut cmd = Command::new(&self.command.command);
-        for arg in &self.command.args {
+        let mut cmd = Command::new(&self.command_str);
+        for arg in &self.entry.args {
             cmd.arg(arg);
         }
         cmd.arg(path);
@@ -180,7 +195,7 @@ impl PreviewProvider for ExternalCmdProvider {
             return Ok(PreviewContent::Error {
                 message: format!(
                     "{} exited with {}: {}",
-                    self.command.command,
+                    self.command_str,
                     output.status,
                     stderr.trim()
                 ),
@@ -259,7 +274,22 @@ mod tests {
     use rstest::*;
 
     use super::*;
-    use crate::config::Priority;
+    use crate::config::{
+        Priority,
+        ProviderTarget,
+    };
+    use crate::preview::provider::FileType;
+
+    /// Helper to create a `NodeInfo` for a file.
+    const fn file_node() -> NodeInfo {
+        NodeInfo { file_type: FileType::File }
+    }
+
+    /// Helper to create a `NodeInfo` for a directory.
+    const fn dir_node() -> NodeInfo {
+        NodeInfo { file_type: FileType::Directory }
+    }
+
     /// Shared empty git state for providers that don't need git filtering.
     fn no_git() -> Arc<RwLock<Option<GitState>>> {
         Arc::new(RwLock::new(None))
@@ -267,13 +297,14 @@ mod tests {
 
     fn make_echo_provider() -> ExternalCmdProvider {
         ExternalCmdProvider::new(
-            ExternalCommand {
+            PreviewProviderEntry {
                 name: None,
+                enabled: true,
                 pattern: vec![],
                 extensions: vec!["csv".to_string(), "tsv".to_string()],
-                directories: false,
+                target: ProviderTarget::File,
                 priority: Priority::default(),
-                command: "cat".to_string(),
+                command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec![],
             },
@@ -284,13 +315,14 @@ mod tests {
 
     fn make_nonexistent_provider() -> ExternalCmdProvider {
         ExternalCmdProvider::new(
-            ExternalCommand {
+            PreviewProviderEntry {
                 name: None,
+                enabled: true,
                 pattern: vec![],
                 extensions: vec!["xyz".to_string()],
-                directories: false,
+                target: ProviderTarget::File,
                 priority: Priority::default(),
-                command: "nonexistent_command_12345".to_string(),
+                command: Some("nonexistent_command_12345".to_string()),
                 args: vec![],
                 git_status: vec![],
             },
@@ -304,13 +336,14 @@ mod tests {
     #[rstest]
     fn name_uses_explicit_name() {
         let provider = ExternalCmdProvider::new(
-            ExternalCommand {
+            PreviewProviderEntry {
                 name: Some("Pretty JSON".to_string()),
+                enabled: true,
                 pattern: vec![],
                 extensions: vec!["json".to_string()],
-                directories: false,
+                target: ProviderTarget::File,
                 priority: Priority::default(),
-                command: "jq".to_string(),
+                command: Some("jq".to_string()),
                 args: vec![".".to_string()],
                 git_status: vec![],
             },
@@ -331,56 +364,57 @@ mod tests {
     #[rstest]
     fn can_handle_matching_extension_and_command_exists() {
         let provider = make_echo_provider();
-        assert_that!(provider.can_handle(&PathBuf::from("data.csv"), false), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("data.csv"), &file_node()), eq(true));
     }
 
     #[rstest]
     fn can_handle_matching_extension_case_insensitive() {
         let provider = make_echo_provider();
-        assert_that!(provider.can_handle(&PathBuf::from("data.CSV"), false), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("data.CSV"), &file_node()), eq(true));
     }
 
     #[rstest]
     fn can_handle_non_matching_extension() {
         let provider = make_echo_provider();
-        assert_that!(provider.can_handle(&PathBuf::from("data.txt"), false), eq(false));
+        assert_that!(provider.can_handle(&PathBuf::from("data.txt"), &file_node()), eq(false));
     }
 
     #[rstest]
     fn can_handle_directory_returns_false() {
         let provider = make_echo_provider();
-        assert_that!(provider.can_handle(&PathBuf::from("data.csv"), true), eq(false));
+        assert_that!(provider.can_handle(&PathBuf::from("data.csv"), &dir_node()), eq(false));
     }
 
     #[rstest]
     fn can_handle_command_not_found_returns_false() {
         let provider = make_nonexistent_provider();
-        assert_that!(provider.can_handle(&PathBuf::from("file.xyz"), false), eq(false));
+        assert_that!(provider.can_handle(&PathBuf::from("file.xyz"), &file_node()), eq(false));
     }
 
     #[rstest]
     fn can_handle_no_extension_returns_false() {
         let provider = make_echo_provider();
-        assert_that!(provider.can_handle(&PathBuf::from("Makefile"), false), eq(false));
+        assert_that!(provider.can_handle(&PathBuf::from("Makefile"), &file_node()), eq(false));
     }
 
     #[rstest]
     fn can_handle_directory_when_directories_enabled() {
         let provider = ExternalCmdProvider::new(
-            ExternalCommand {
+            PreviewProviderEntry {
                 name: Some("dust".to_string()),
+                enabled: true,
                 pattern: vec![],
                 extensions: vec![],
-                directories: true,
+                target: ProviderTarget::Directory,
                 priority: Priority::default(),
-                command: "ls".to_string(),
+                command: Some("ls".to_string()),
                 args: vec![],
                 git_status: vec![],
             },
             3,
             no_git(),
         );
-        assert_that!(provider.can_handle(&PathBuf::from("/some/dir"), true), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("/some/dir"), &dir_node()), eq(true));
     }
 
     // --- can_handle with glob pattern ---
@@ -388,55 +422,58 @@ mod tests {
     #[rstest]
     fn can_handle_pattern_wildcard_matches_all_files() {
         let provider = ExternalCmdProvider::new(
-            ExternalCommand {
+            PreviewProviderEntry {
                 name: None,
+                enabled: true,
                 pattern: vec!["*".to_string()],
                 extensions: vec![],
-                directories: false,
+                target: ProviderTarget::File,
                 priority: Priority::default(),
-                command: "cat".to_string(),
+                command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec![],
             },
             3,
             no_git(),
         );
-        assert_that!(provider.can_handle(&PathBuf::from("file.rs"), false), eq(true));
-        assert_that!(provider.can_handle(&PathBuf::from("Makefile"), false), eq(true));
-        assert_that!(provider.can_handle(&PathBuf::from("/some/dir"), true), eq(false));
+        assert_that!(provider.can_handle(&PathBuf::from("file.rs"), &file_node()), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("Makefile"), &file_node()), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("/some/dir"), &dir_node()), eq(false));
     }
 
     #[rstest]
     fn can_handle_pattern_extension_glob() {
         let provider = ExternalCmdProvider::new(
-            ExternalCommand {
+            PreviewProviderEntry {
                 name: None,
+                enabled: true,
                 pattern: vec!["*.{rs,go}".to_string()],
                 extensions: vec![],
-                directories: false,
+                target: ProviderTarget::File,
                 priority: Priority::default(),
-                command: "cat".to_string(),
+                command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec![],
             },
             3,
             no_git(),
         );
-        assert_that!(provider.can_handle(&PathBuf::from("main.rs"), false), eq(true));
-        assert_that!(provider.can_handle(&PathBuf::from("main.go"), false), eq(true));
-        assert_that!(provider.can_handle(&PathBuf::from("main.py"), false), eq(false));
+        assert_that!(provider.can_handle(&PathBuf::from("main.rs"), &file_node()), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("main.go"), &file_node()), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("main.py"), &file_node()), eq(false));
     }
 
     #[rstest]
     fn can_handle_pattern_takes_precedence_over_extensions() {
         let provider = ExternalCmdProvider::new(
-            ExternalCommand {
+            PreviewProviderEntry {
                 name: None,
+                enabled: true,
                 pattern: vec!["*.md".to_string()],
                 extensions: vec!["rs".to_string()],
-                directories: false,
+                target: ProviderTarget::File,
                 priority: Priority::default(),
-                command: "cat".to_string(),
+                command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec![],
             },
@@ -444,8 +481,8 @@ mod tests {
             no_git(),
         );
         // pattern matches *.md, extensions has "rs" — pattern wins.
-        assert_that!(provider.can_handle(&PathBuf::from("README.md"), false), eq(true));
-        assert_that!(provider.can_handle(&PathBuf::from("main.rs"), false), eq(false));
+        assert_that!(provider.can_handle(&PathBuf::from("README.md"), &file_node()), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("main.rs"), &file_node()), eq(false));
     }
 
     // --- can_handle with git_status condition ---
@@ -457,20 +494,24 @@ mod tests {
             Path::new("/repo"),
         ))));
         let provider = ExternalCmdProvider::new(
-            ExternalCommand {
+            PreviewProviderEntry {
                 name: None,
+                enabled: true,
                 pattern: vec![],
                 extensions: vec!["rs".to_string()],
-                directories: false,
+                target: ProviderTarget::File,
                 priority: Priority::default(),
-                command: "cat".to_string(),
+                command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec!["modified".to_string()],
             },
             3,
             git_state,
         );
-        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false), eq(true));
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/main.rs"), &file_node()),
+            eq(true)
+        );
     }
 
     #[rstest]
@@ -480,13 +521,14 @@ mod tests {
             Path::new("/repo"),
         ))));
         let provider = ExternalCmdProvider::new(
-            ExternalCommand {
+            PreviewProviderEntry {
                 name: None,
+                enabled: true,
                 pattern: vec![],
                 extensions: vec!["rs".to_string()],
-                directories: false,
+                target: ProviderTarget::File,
                 priority: Priority::default(),
-                command: "cat".to_string(),
+                command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec!["modified".to_string()],
             },
@@ -494,14 +536,17 @@ mod tests {
             git_state,
         );
         // File is untracked, not modified — should not match.
-        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false), eq(false));
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/main.rs"), &file_node()),
+            eq(false)
+        );
     }
 
     #[rstest]
     fn can_handle_git_status_no_condition_always_matches() {
         // Empty git_status = no filter, always matches if extension matches.
         let provider = make_echo_provider();
-        assert_that!(provider.can_handle(&PathBuf::from("data.csv"), false), eq(true));
+        assert_that!(provider.can_handle(&PathBuf::from("data.csv"), &file_node()), eq(true));
     }
 
     #[rstest]
@@ -510,20 +555,24 @@ mod tests {
         let git_state =
             Arc::new(RwLock::new(Some(GitState::from_porcelain("", Path::new("/repo")))));
         let provider = ExternalCmdProvider::new(
-            ExternalCommand {
+            PreviewProviderEntry {
                 name: None,
+                enabled: true,
                 pattern: vec![],
                 extensions: vec!["rs".to_string()],
-                directories: false,
+                target: ProviderTarget::File,
                 priority: Priority::default(),
-                command: "cat".to_string(),
+                command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec!["modified".to_string()],
             },
             3,
             git_state,
         );
-        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/clean.rs"), false), eq(false));
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/clean.rs"), &file_node()),
+            eq(false)
+        );
     }
 
     #[rstest]
@@ -533,13 +582,14 @@ mod tests {
             Path::new("/repo"),
         ))));
         let provider = ExternalCmdProvider::new(
-            ExternalCommand {
+            PreviewProviderEntry {
                 name: None,
+                enabled: true,
                 pattern: vec![],
                 extensions: vec!["rs".to_string()],
-                directories: false,
+                target: ProviderTarget::File,
                 priority: Priority::default(),
-                command: "cat".to_string(),
+                command: Some("cat".to_string()),
                 args: vec![],
                 git_status: vec!["modified".to_string(), "added".to_string()],
             },
@@ -547,7 +597,10 @@ mod tests {
             git_state,
         );
         // File is "added" which is in the filter list.
-        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/new.rs"), false), eq(true));
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/new.rs"), &file_node()),
+            eq(true)
+        );
     }
 
     // --- load tests ---

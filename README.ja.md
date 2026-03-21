@@ -163,7 +163,7 @@ display:
 
 preview:
   max_lines: 1000
-  commands:
+  providers:
     - name: "Pretty JSON"
       extensions: [json]
       priority: high

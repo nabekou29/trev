@@ -23,6 +23,7 @@ use crate::git::{
 use crate::preview::content::PreviewContent;
 use crate::preview::provider::{
     LoadContext,
+    NodeInfo,
     PreviewProvider,
 };
 
@@ -74,8 +75,8 @@ impl PreviewProvider for DiffPreviewProvider {
         crate::config::Priority::MID.value()
     }
 
-    fn can_handle(&self, path: &Path, is_dir: bool) -> bool {
-        if is_dir {
+    fn can_handle(&self, path: &Path, node: &NodeInfo) -> bool {
+        if node.is_dir() {
             return false;
         }
 
@@ -217,6 +218,16 @@ mod tests {
         DiffPreviewProvider::new(git_state, PathBuf::from("/repo"), 3)
     }
 
+    /// Helper to create a `NodeInfo` for a file.
+    const fn file_node() -> NodeInfo {
+        NodeInfo { file_type: crate::preview::provider::FileType::File }
+    }
+
+    /// Helper to create a `NodeInfo` for a directory.
+    const fn dir_node() -> NodeInfo {
+        NodeInfo { file_type: crate::preview::provider::FileType::Directory }
+    }
+
     // --- name / priority ---
 
     #[rstest]
@@ -236,36 +247,51 @@ mod tests {
     #[rstest]
     fn can_handle_modified_file() {
         let provider = make_provider(git_with_modified());
-        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false), eq(true));
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/main.rs"), &file_node()),
+            eq(true)
+        );
     }
 
     #[rstest]
     fn can_handle_added_file() {
         let provider = make_provider(git_with_added());
-        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/new.rs"), false), eq(true));
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/new.rs"), &file_node()),
+            eq(true)
+        );
     }
 
     #[rstest]
     fn can_handle_untracked_returns_false() {
         let provider = make_provider(git_with_untracked());
-        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/scratch.rs"), false), eq(false));
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/scratch.rs"), &file_node()),
+            eq(false)
+        );
     }
 
     #[rstest]
     fn can_handle_no_git_state_returns_false() {
         let provider = make_provider(no_git());
-        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/main.rs"), false), eq(false));
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/main.rs"), &file_node()),
+            eq(false)
+        );
     }
 
     #[rstest]
     fn can_handle_directory_returns_false() {
         let provider = make_provider(git_with_modified());
-        assert_that!(provider.can_handle(&PathBuf::from("/repo/src"), true), eq(false));
+        assert_that!(provider.can_handle(&PathBuf::from("/repo/src"), &dir_node()), eq(false));
     }
 
     #[rstest]
     fn can_handle_clean_file_returns_false() {
         let provider = make_provider(git_with_modified());
-        assert_that!(provider.can_handle(&PathBuf::from("/repo/src/other.rs"), false), eq(false));
+        assert_that!(
+            provider.can_handle(&PathBuf::from("/repo/src/other.rs"), &file_node()),
+            eq(false)
+        );
     }
 }

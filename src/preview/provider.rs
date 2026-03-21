@@ -8,6 +8,34 @@ use tokio_util::sync::CancellationToken;
 
 use super::content::PreviewContent;
 
+/// The type of file system node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileType {
+    /// A regular file.
+    File,
+    /// A directory.
+    Directory,
+}
+
+/// Information about a file system node passed to preview providers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeInfo {
+    /// The type of file system node.
+    pub file_type: FileType,
+}
+
+impl NodeInfo {
+    /// Whether this node is a directory.
+    pub const fn is_dir(&self) -> bool {
+        matches!(self.file_type, FileType::Directory)
+    }
+
+    /// Whether this node is a regular file.
+    pub const fn is_file(&self) -> bool {
+        matches!(self.file_type, FileType::File)
+    }
+}
+
 /// Context passed to a provider's `load()` method.
 #[derive(Debug, Clone)]
 pub struct LoadContext {
@@ -33,7 +61,7 @@ pub trait PreviewProvider: Send + Sync {
     fn priority(&self) -> u32;
 
     /// Whether this provider can handle the given path.
-    fn can_handle(&self, path: &Path, is_dir: bool) -> bool;
+    fn can_handle(&self, path: &Path, node: &NodeInfo) -> bool;
 
     /// Whether this provider should be included in the switchable list,
     /// given the names of all providers that `can_handle()` returned true.
@@ -93,10 +121,10 @@ impl PreviewRegistry {
     /// 1. Collect all providers where `can_handle()` returns true (priority order).
     /// 2. Build the names list of candidates.
     /// 3. Filter by `is_enabled(&names)` to produce the final switchable list.
-    pub fn resolve(&self, path: &Path, is_dir: bool) -> Vec<Arc<dyn PreviewProvider>> {
+    pub fn resolve(&self, path: &Path, node: &NodeInfo) -> Vec<Arc<dyn PreviewProvider>> {
         // Step 1: collect candidates.
         let candidates: Vec<&Arc<dyn PreviewProvider>> =
-            self.providers.iter().filter(|p| p.can_handle(path, is_dir)).collect();
+            self.providers.iter().filter(|p| p.can_handle(path, node)).collect();
 
         // Step 2: build names list.
         let names: Vec<&str> = candidates.iter().map(|p| p.name()).collect();
@@ -143,7 +171,7 @@ mod tests {
             self.priority
         }
 
-        fn can_handle(&self, _path: &Path, _is_dir: bool) -> bool {
+        fn can_handle(&self, _path: &Path, _node: &NodeInfo) -> bool {
             self.handles
         }
 
@@ -160,6 +188,11 @@ mod tests {
         Arc::new(TestProvider { name, priority, handles, enabled_fn: None })
     }
 
+    /// Helper to create a `NodeInfo` for a file.
+    const fn file_node() -> NodeInfo {
+        NodeInfo { file_type: FileType::File }
+    }
+
     fn make_fallback_provider() -> Arc<dyn PreviewProvider> {
         Arc::new(TestProvider {
             name: "Fallback",
@@ -169,6 +202,24 @@ mod tests {
         })
     }
 
+    // --- NodeInfo tests ---
+
+    #[rstest]
+    fn node_info_file_is_not_dir() {
+        let node = NodeInfo { file_type: FileType::File };
+        assert_that!(node.is_dir(), eq(false));
+        assert_that!(node.is_file(), eq(true));
+    }
+
+    #[rstest]
+    fn node_info_directory_is_dir() {
+        let node = NodeInfo { file_type: FileType::Directory };
+        assert_that!(node.is_dir(), eq(true));
+        assert_that!(node.is_file(), eq(false));
+    }
+
+    // --- PreviewRegistry tests ---
+
     #[rstest]
     fn resolve_returns_matching_providers_in_priority_order() {
         let registry = PreviewRegistry::new(vec![
@@ -177,7 +228,7 @@ mod tests {
         ])
         .unwrap();
 
-        let result = registry.resolve(&PathBuf::from("/test.svg"), false);
+        let result = registry.resolve(&PathBuf::from("/test.svg"), &file_node());
         assert_that!(result.len(), eq(2));
         assert_that!(result[0].name(), eq("Image"));
         assert_that!(result[1].name(), eq("Text"));
@@ -191,7 +242,7 @@ mod tests {
         ])
         .unwrap();
 
-        let result = registry.resolve(&PathBuf::from("/test.rs"), false);
+        let result = registry.resolve(&PathBuf::from("/test.rs"), &file_node());
         assert_that!(result.len(), eq(1));
         assert_that!(result[0].name(), eq("Text"));
     }
@@ -202,7 +253,7 @@ mod tests {
             PreviewRegistry::new(vec![make_provider("Text", 30, true), make_fallback_provider()])
                 .unwrap();
 
-        let result = registry.resolve(&PathBuf::from("/test.rs"), false);
+        let result = registry.resolve(&PathBuf::from("/test.rs"), &file_node());
         assert_that!(result.len(), eq(1));
         assert_that!(result[0].name(), eq("Text"));
     }
@@ -213,7 +264,7 @@ mod tests {
             PreviewRegistry::new(vec![make_provider("Text", 30, false), make_fallback_provider()])
                 .unwrap();
 
-        let result = registry.resolve(&PathBuf::from("/test.bin"), false);
+        let result = registry.resolve(&PathBuf::from("/test.bin"), &file_node());
         assert_that!(result.len(), eq(1));
         assert_that!(result[0].name(), eq("Fallback"));
     }
@@ -222,7 +273,7 @@ mod tests {
     fn resolve_empty_when_nothing_matches() {
         let registry = PreviewRegistry::new(vec![make_provider("Text", 30, false)]).unwrap();
 
-        let result = registry.resolve(&PathBuf::from("/test.bin"), false);
+        let result = registry.resolve(&PathBuf::from("/test.bin"), &file_node());
         assert_that!(result.is_empty(), eq(true));
     }
 

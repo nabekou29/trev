@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::preview::content::PreviewContent;
 use crate::preview::provider::{
     LoadContext,
+    NodeInfo,
     PreviewProvider,
 };
 
@@ -34,7 +35,7 @@ impl PreviewProvider for FallbackProvider {
         crate::config::Priority::LOW.value()
     }
 
-    fn can_handle(&self, _path: &Path, _is_dir: bool) -> bool {
+    fn can_handle(&self, _path: &Path, _node: &NodeInfo) -> bool {
         true
     }
 
@@ -112,6 +113,17 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
+    use crate::preview::provider::FileType;
+
+    /// Helper to create a `NodeInfo` for a file.
+    const fn file_node() -> NodeInfo {
+        NodeInfo { file_type: FileType::File }
+    }
+
+    /// Helper to create a `NodeInfo` for a directory.
+    const fn dir_node() -> NodeInfo {
+        NodeInfo { file_type: FileType::Directory }
+    }
 
     fn make_ctx() -> LoadContext {
         LoadContext {
@@ -132,8 +144,8 @@ mod tests {
     #[rstest]
     fn can_handle_always_true() {
         let provider = FallbackProvider::new();
-        assert_that!(provider.can_handle(Path::new("/any/file"), false), eq(true));
-        assert_that!(provider.can_handle(Path::new("/any/dir"), true), eq(true));
+        assert_that!(provider.can_handle(Path::new("/any/file"), &file_node()), eq(true));
+        assert_that!(provider.can_handle(Path::new("/any/dir"), &dir_node()), eq(true));
     }
 
     // --- is_enabled tests ---
