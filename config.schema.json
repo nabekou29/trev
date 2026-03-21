@@ -143,6 +143,7 @@
       "description": "File operation settings.",
       "$ref": "#/$defs/FileOpConfig",
       "default": {
+        "clipboard_sync": false,
         "delete_mode": "permanent",
         "undo_stack_size": 100
       }
@@ -676,6 +677,11 @@
       "description": "File operation configuration.",
       "type": "object",
       "properties": {
+        "clipboard_sync": {
+          "description": "Sync yank/cut operations with the OS clipboard as a file list.\n\nWhen enabled, yanking or cutting files also writes the file list to\nthe OS clipboard, allowing paste in external applications (e.g. Finder).",
+          "type": "boolean",
+          "default": false
+        },
         "delete_mode": {
           "description": "Delete mode for the `d` key.",
           "$ref": "#/$defs/DeleteMode",

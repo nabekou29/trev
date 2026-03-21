@@ -28,6 +28,7 @@ use crate::input::AppMode;
 use crate::watcher::SuppressGuard;
 
 /// Handle a file operation action.
+#[expect(clippy::too_many_lines, reason = "match dispatch for all file op variants")]
 pub fn handle_file_op_action(
     action: crate::action::FileOpAction,
     state: &mut AppState,
@@ -70,6 +71,9 @@ pub fn handle_file_op_action(
             if let Some(info) = state.tree_state.current_node_info() {
                 let targets = state.selection.mark_targets_or_cursor(&info.path);
                 let count = targets.len();
+                if ctx.file_op_config.clipboard_sync {
+                    sync_file_list_to_clipboard(&targets);
+                }
                 state.selection.set(targets, SelectionMode::Copy);
                 state.set_status(format!("Yanked {count} file(s)"));
             }
@@ -78,6 +82,9 @@ pub fn handle_file_op_action(
             if let Some(info) = state.tree_state.current_node_info() {
                 let targets = state.selection.mark_targets_or_cursor(&info.path);
                 let count = targets.len();
+                if ctx.file_op_config.clipboard_sync {
+                    sync_file_list_to_clipboard(&targets);
+                }
                 state.selection.set(targets, SelectionMode::Cut);
                 state.set_status(format!("Cut {count} file(s)"));
             }
@@ -133,6 +140,16 @@ pub fn handle_file_op_action(
                 }
             }
         }
+    }
+}
+
+/// Write a list of file paths to the OS clipboard as a file list.
+///
+/// This allows pasting the files in external applications (e.g. Finder).
+/// Failures are logged but do not interrupt the operation.
+fn sync_file_list_to_clipboard(paths: &[PathBuf]) {
+    if let Err(e) = arboard::Clipboard::new().and_then(|mut cb| cb.set().file_list(paths)) {
+        tracing::warn!(%e, "failed to write file list to clipboard");
     }
 }
 

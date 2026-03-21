@@ -54,6 +54,7 @@ preview:
 file_op:
   delete_mode: permanent # permanent | custom_trash
   undo_stack_size: 100
+  clipboard_sync: false # sync yank/cut with OS clipboard
 
 session:
   restore_by_default: true

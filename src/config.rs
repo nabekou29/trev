@@ -894,6 +894,11 @@ pub struct FileOpConfig {
     pub delete_mode: DeleteMode,
     /// Maximum undo stack size.
     pub undo_stack_size: usize,
+    /// Sync yank/cut operations with the OS clipboard as a file list.
+    ///
+    /// When enabled, yanking or cutting files also writes the file list to
+    /// the OS clipboard, allowing paste in external applications (e.g. Finder).
+    pub clipboard_sync: bool,
 }
 
 /// Delete mode variants.
@@ -941,7 +946,7 @@ impl Default for KeybindingConfig {
 
 impl Default for FileOpConfig {
     fn default() -> Self {
-        Self { delete_mode: DeleteMode::default(), undo_stack_size: 100 }
+        Self { delete_mode: DeleteMode::default(), undo_stack_size: 100, clipboard_sync: false }
     }
 }
 
@@ -1406,12 +1411,14 @@ pub struct FileOpConfigOverride {
     pub delete_mode: Option<DeleteMode>,
     /// Maximum undo stack size.
     pub undo_stack_size: Option<usize>,
+    /// Sync yank/cut with OS clipboard.
+    pub clipboard_sync: Option<bool>,
 }
 
 impl FileOpConfigOverride {
     /// Apply present fields to the target config.
     const fn apply_to(self, target: &mut FileOpConfig) {
-        apply_option_fields!(self, target, delete_mode, undo_stack_size);
+        apply_option_fields!(self, target, delete_mode, undo_stack_size, clipboard_sync);
     }
 }
 
