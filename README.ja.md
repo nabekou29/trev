@@ -98,6 +98,7 @@ trev --no-preview # プレビューパネルを無効化
 trev ctl reveal <PATH>    # 実行中の trev インスタンスでファイルを表示
 trev ctl ping             # インスタンスの生存確認
 trev ctl quit             # 実行中の trev インスタンスを停止
+trev ctl action <NAME>    # アクションを実行（例: tree.move_down）
 trev socket-path          # 実行中の trev インスタンスのソケットを一覧表示
 trev schema               # 設定の JSON Schema を出力
 trev completions <SHELL>  # シェル補完を生成（bash, zsh, fish など）

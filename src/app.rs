@@ -664,7 +664,7 @@ fn process_async_events(
     // IPC commands.
     for cmd in channels.drain_ipc() {
         had_events = true;
-        handle_ipc_command(cmd, state);
+        handle_ipc_command(cmd, state, ctx);
     }
 
     // Git status results.

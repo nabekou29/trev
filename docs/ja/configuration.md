@@ -377,3 +377,31 @@ IPC モードでは、trev は接続中の IPC クライアントに JSON-RPC 2.
   }
 }
 ```
+
+### `action` リクエスト
+
+任意のアクションをリモートから実行します。`name` パラメータにはキーバインドで使用するアクション名を指定できます（例: `tree.move_down`、`filter.hidden`、`menu:sort`）。
+
+```json
+{ "jsonrpc": "2.0", "method": "action", "params": { "name": "tree.move_down" }, "id": 2 }
+```
+
+レスポンス:
+
+```json
+{ "jsonrpc": "2.0", "id": 2, "result": { "ok": true } }
+```
+
+パラメトリックアクションでは追加フィールドを指定できます:
+
+```json
+{ "jsonrpc": "2.0", "method": "action", "params": { "name": "shell", "cmd": "echo hello", "run_mode": "background" }, "id": 3 }
+{ "jsonrpc": "2.0", "method": "action", "params": { "name": "notify", "method": "my_event" }, "id": 4 }
+```
+
+コマンドラインからも `trev ctl action <NAME>` で実行できます:
+
+```sh
+trev ctl action tree.move_down
+trev ctl action filter.hidden
+```

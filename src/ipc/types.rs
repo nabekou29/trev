@@ -122,6 +122,13 @@ pub enum IpcCommand {
         /// Channel to send the JSON-RPC result value back.
         response_tx: oneshot::Sender<Value>,
     },
+    /// Execute an arbitrary action.
+    Action {
+        /// The action to execute.
+        action: crate::action::Action,
+        /// Channel to send the JSON-RPC result value back.
+        response_tx: oneshot::Sender<Value>,
+    },
 }
 
 #[cfg(test)]

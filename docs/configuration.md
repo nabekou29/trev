@@ -377,3 +377,31 @@ Response:
   }
 }
 ```
+
+### `action` Request
+
+Execute any action remotely. The `name` parameter accepts all action names used in keybindings (e.g., `tree.move_down`, `filter.hidden`, `menu:sort`).
+
+```json
+{ "jsonrpc": "2.0", "method": "action", "params": { "name": "tree.move_down" }, "id": 2 }
+```
+
+Response:
+
+```json
+{ "jsonrpc": "2.0", "id": 2, "result": { "ok": true } }
+```
+
+Parametric actions accept additional fields:
+
+```json
+{ "jsonrpc": "2.0", "method": "action", "params": { "name": "shell", "cmd": "echo hello", "run_mode": "background" }, "id": 3 }
+{ "jsonrpc": "2.0", "method": "action", "params": { "name": "notify", "method": "my_event" }, "id": 4 }
+```
+
+You can also use `trev ctl action <NAME>` from the command line:
+
+```sh
+trev ctl action tree.move_down
+trev ctl action filter.hidden
+```

@@ -149,6 +149,11 @@ pub enum CtlAction {
     Ping,
     /// Quit the trev instance.
     Quit,
+    /// Execute an action in the trev instance.
+    Action {
+        /// Action name (e.g., `tree.move_down`, `filter.hidden`).
+        name: String,
+    },
 }
 
 impl Args {

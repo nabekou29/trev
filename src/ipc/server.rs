@@ -30,6 +30,7 @@ use tracing::{
 };
 
 use super::types::{
+    INVALID_PARAMS,
     IpcCommand,
     JsonRpcMessage,
     METHOD_NOT_FOUND,
@@ -42,7 +43,7 @@ type SharedWriter = Arc<Mutex<OwnedWriteHalf>>;
 /// IPC server that listens on a Unix Domain Socket.
 ///
 /// Handles JSON-RPC 2.0 messages: dispatches `ping` directly,
-/// sends `reveal`/`quit` to the main loop via `mpsc` channel,
+/// sends `reveal`/`quit`/`action` to the main loop via `mpsc` channel,
 /// and manages a persistent client writer for outgoing notifications.
 #[derive(Debug)]
 pub struct IpcServer {
@@ -261,11 +262,8 @@ async fn dispatch_request(
                     write_message(writer, &resp).await;
                 }
             } else {
-                let resp = JsonRpcMessage::error_response(
-                    id,
-                    super::types::INVALID_PARAMS,
-                    "Missing 'path' parameter",
-                );
+                let resp =
+                    JsonRpcMessage::error_response(id, INVALID_PARAMS, "Missing 'path' parameter");
                 write_message(writer, &resp).await;
             }
         }
@@ -282,6 +280,34 @@ async fn dispatch_request(
         "get_state" => {
             let (tx, rx) = oneshot::channel();
             let cmd = IpcCommand::GetState { response_tx: tx };
+            if ipc_tx.send(cmd).is_ok()
+                && let Ok(result) = rx.await
+            {
+                let resp = JsonRpcMessage::success_response(id, result);
+                write_message(writer, &resp).await;
+            }
+        }
+        "action" => {
+            let action_name = params.as_ref().and_then(|p| p.get("name")).and_then(Value::as_str);
+
+            let Some(action_name) = action_name else {
+                let resp =
+                    JsonRpcMessage::error_response(id, INVALID_PARAMS, "Missing 'name' parameter");
+                write_message(writer, &resp).await;
+                return;
+            };
+
+            let action = match parse_ipc_action(action_name, params.as_ref()) {
+                Ok(a) => a,
+                Err(msg) => {
+                    let resp = JsonRpcMessage::error_response(id, INVALID_PARAMS, &msg);
+                    write_message(writer, &resp).await;
+                    return;
+                }
+            };
+
+            let (tx, rx) = oneshot::channel();
+            let cmd = IpcCommand::Action { action, response_tx: tx };
             if ipc_tx.send(cmd).is_ok()
                 && let Ok(result) = rx.await
             {
@@ -314,10 +340,65 @@ fn dispatch_notification(
                 let _ = ipc_tx.send(cmd);
             }
         }
+        "action" => {
+            let action_name = params.and_then(|p| p.get("name")).and_then(Value::as_str);
+
+            if let Some(action_name) = action_name
+                && let Ok(action) = parse_ipc_action(action_name, params)
+            {
+                let (tx, _rx) = oneshot::channel();
+                let cmd = IpcCommand::Action { action, response_tx: tx };
+                let _ = ipc_tx.send(cmd);
+            }
+        }
         _ => {
             debug!(method, "Ignoring unknown notification");
         }
     }
+}
+
+/// Parse an action name (and optional parameters) into an [`Action`].
+///
+/// Handles both simple `FromStr`-parseable actions and parametric variants
+/// (`shell`, `notify`) that require extra fields from the JSON params.
+fn parse_ipc_action(name: &str, params: Option<&Value>) -> Result<crate::action::Action, String> {
+    use crate::action::Action;
+
+    // Parametric: shell action with command template.
+    if name == "shell" || name.starts_with("shell:") {
+        let cmd = if let Some(suffix) = name.strip_prefix("shell:") {
+            suffix.to_owned()
+        } else {
+            params
+                .and_then(|p| p.get("cmd"))
+                .and_then(Value::as_str)
+                .ok_or("shell action requires 'cmd' parameter")?
+                .to_owned()
+        };
+        let run_mode = params
+            .and_then(|p| p.get("run_mode"))
+            .and_then(Value::as_str)
+            .and_then(|s| serde_json::from_value(Value::String(s.to_owned())).ok())
+            .unwrap_or_default();
+        return Ok(Action::Shell { cmd, run_mode });
+    }
+
+    // Parametric: notify action with method name.
+    if name == "notify" || name.starts_with("notify:") {
+        let method = if let Some(suffix) = name.strip_prefix("notify:") {
+            suffix.to_owned()
+        } else {
+            params
+                .and_then(|p| p.get("method"))
+                .and_then(Value::as_str)
+                .ok_or("notify action requires 'method' parameter")?
+                .to_owned()
+        };
+        return Ok(Action::Notify(method));
+    }
+
+    // Standard action: parse via FromStr.
+    name.parse::<Action>()
 }
 
 /// Write a JSON-RPC message to the writer as a newline-delimited JSON line.

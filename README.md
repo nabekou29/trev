@@ -98,6 +98,7 @@ trev --no-preview # Disable preview panel
 trev ctl reveal <PATH>    # Reveal file in a running trev instance
 trev ctl ping             # Check if instance is alive
 trev ctl quit             # Stop a running trev instance
+trev ctl action <NAME>    # Execute an action (e.g., tree.move_down)
 trev socket-path          # List running trev instance sockets
 trev schema               # Print config JSON Schema
 trev completions <SHELL>  # Generate shell completions (bash, zsh, fish, etc.)

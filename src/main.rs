@@ -154,6 +154,10 @@ async fn handle_ctl(
             let params = serde_json::json!({"path": abs_path.to_string_lossy()});
             ("reveal", Some(params))
         }
+        CtlAction::Action { name } => {
+            let params = serde_json::json!({"name": name});
+            ("action", Some(params))
+        }
     };
 
     let socket_path = find_socket(socket, pid, workspace)?;
