@@ -26,7 +26,7 @@ Built in Rust for speed and safety.
 - **Image preview** — Sixel/Kitty protocol support for inline images
 - **External command preview** — Pipe files through custom commands (e.g. `jq`, `glow`, `dust`)
 - **Fuzzy search** — Filter files interactively with nucleo
-- **File operations** — Copy, cut, paste, rename, delete, undo/redo
+- **File operations** — Copy, cut, paste, rename, delete, undo/redo, OS clipboard integration
 - **File system watcher** — Auto-refresh on external changes
 - **Session persistence** — Restore tree state across restarts
 - **Neovim integration** — IPC server mode via [trev.nvim](https://github.com/nabekou29/trev.nvim)
