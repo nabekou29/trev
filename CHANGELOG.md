@@ -1,4 +1,23 @@
 
+## [0.1.5] - 2026-03-21
+
+### Documentation
+
+- Mention OS clipboard integration in README features
+- Replace remaining "daemon" references with "IPC" in Japanese docs
+
+### Features
+
+- Allow users to override and disable built-in preview providers
+- Add OS clipboard paste support for files and images
+- Bind C to copy relative path to clipboard
+- Add clipboard_sync option for yank/cut
+- Add copy_to_clipboard action and copy menu Files entry
+- Add env option to external preview providers
+- Add show_preview and hide_preview actions
+- Add action method to execute arbitrary actions via IPC
+
+
 ## [0.1.4] - 2026-03-20
 
 ### Bug Fixes
