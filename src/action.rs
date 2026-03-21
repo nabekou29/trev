@@ -213,6 +213,10 @@ pub enum PreviewAction {
     CyclePrevProvider,
     /// Toggle preview panel visibility.
     TogglePreview,
+    /// Show preview panel.
+    ShowPreview,
+    /// Hide preview panel.
+    HidePreview,
     /// Toggle word wrap in preview.
     ToggleWrap,
 }
@@ -308,6 +312,8 @@ impl fmt::Display for PreviewAction {
             Self::CycleNextProvider => "preview.cycle_next_provider",
             Self::CyclePrevProvider => "preview.cycle_prev_provider",
             Self::TogglePreview => "preview.toggle_preview",
+            Self::ShowPreview => "preview.show_preview",
+            Self::HidePreview => "preview.hide_preview",
             Self::ToggleWrap => "preview.toggle_wrap",
         };
         f.write_str(s)
@@ -461,6 +467,8 @@ impl FromStr for PreviewAction {
             "preview.cycle_next_provider" => Ok(Self::CycleNextProvider),
             "preview.cycle_prev_provider" => Ok(Self::CyclePrevProvider),
             "preview.toggle_preview" => Ok(Self::TogglePreview),
+            "preview.show_preview" => Ok(Self::ShowPreview),
+            "preview.hide_preview" => Ok(Self::HidePreview),
             "preview.toggle_wrap" => Ok(Self::ToggleWrap),
             _ => Err(format!("unknown preview action: {s}")),
         }
@@ -610,6 +618,8 @@ impl PreviewAction {
             "preview.cycle_next_provider",
             "preview.cycle_prev_provider",
             "preview.toggle_preview",
+            "preview.show_preview",
+            "preview.hide_preview",
             "preview.toggle_wrap",
         ]
     }
@@ -745,6 +755,8 @@ impl PreviewAction {
             Self::CycleNextProvider => "Next provider",
             Self::CyclePrevProvider => "Previous provider",
             Self::TogglePreview => "Toggle preview",
+            Self::ShowPreview => "Show preview",
+            Self::HidePreview => "Hide preview",
             Self::ToggleWrap => "Toggle word wrap",
         }
     }
@@ -854,6 +866,8 @@ mod tests {
             PreviewAction::CycleNextProvider,
             PreviewAction::CyclePrevProvider,
             PreviewAction::TogglePreview,
+            PreviewAction::ShowPreview,
+            PreviewAction::HidePreview,
             PreviewAction::ToggleWrap,
         ];
         for action in actions {

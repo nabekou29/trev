@@ -894,6 +894,8 @@
                 "preview.cycle_next_provider",
                 "preview.cycle_prev_provider",
                 "preview.toggle_preview",
+                "preview.show_preview",
+                "preview.hide_preview",
                 "preview.toggle_wrap",
                 "file_op.yank",
                 "file_op.cut",

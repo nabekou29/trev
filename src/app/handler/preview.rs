@@ -69,6 +69,15 @@ pub fn handle_preview_action(
                 trigger_preview_immediate(state, ctx);
             }
         }
+        PreviewAction::ShowPreview => {
+            if !state.show_preview {
+                state.show_preview = true;
+                trigger_preview_immediate(state, ctx);
+            }
+        }
+        PreviewAction::HidePreview => {
+            state.show_preview = false;
+        }
         PreviewAction::ToggleWrap => {
             state.preview_state.word_wrap = !state.preview_state.word_wrap;
             if state.preview_state.word_wrap {

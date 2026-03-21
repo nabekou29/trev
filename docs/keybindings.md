@@ -44,6 +44,8 @@ Auto-generated from source. Do not edit manually.
 | `<Tab>` | `preview.cycle_next_provider` | Next provider |
 | `<S-Tab>` | `preview.cycle_prev_provider` | Previous provider |
 | `P` | `preview.toggle_preview` | Toggle preview |
+| `-` | `preview.show_preview` | Show preview |
+| `-` | `preview.hide_preview` | Hide preview |
 | `w` | `preview.toggle_wrap` | Toggle word wrap |
 
 ## File Operations
