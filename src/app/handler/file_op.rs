@@ -85,6 +85,9 @@ pub fn handle_file_op_action(
         FileOpAction::Paste => {
             execute_paste(state, ctx);
         }
+        FileOpAction::PasteFromClipboard => {
+            execute_clipboard_paste(state, ctx);
+        }
         FileOpAction::Delete => {
             if let Some(info) = state.tree_state.current_node_info() {
                 let targets = state.selection.mark_targets_or_cursor(&info.path);
@@ -424,14 +427,17 @@ pub fn execute_rename(target: &Path, new_name: &str, state: &mut AppState, ctx: 
 }
 
 /// Execute paste operation: copy or move selected files to the cursor directory.
+///
+/// Falls back to OS clipboard when the internal selection buffer is empty.
 fn execute_paste(state: &mut AppState, ctx: &AppContext) {
     use crate::file_op::executor::is_ancestor;
 
     let mode = state.selection.mode().copied();
     let is_cut = matches!(mode, Some(SelectionMode::Cut));
 
-    // Paste only works in Copy or Cut mode.
+    // Fall back to OS clipboard when the internal buffer is empty.
     if !matches!(mode, Some(SelectionMode::Copy | SelectionMode::Cut)) {
+        execute_clipboard_paste(state, ctx);
         return;
     }
 
@@ -517,6 +523,109 @@ fn execute_paste(state: &mut AppState, ctx: &AppContext) {
 
     let action = if is_cut { "Moved" } else { "Pasted" };
     state.set_status(format!("{action} {paste_count} file(s)"));
+}
+
+/// Handle a paste event from the terminal (Cmd+V / bracketed paste).
+///
+/// Only acts in Normal mode to avoid interfering with text input.
+pub fn handle_clipboard_paste(state: &mut AppState, ctx: &AppContext) {
+    if !matches!(state.mode, AppMode::Normal) {
+        return;
+    }
+    handle_file_op_action(crate::action::FileOpAction::PasteFromClipboard, state, ctx);
+}
+
+/// Execute paste from the OS clipboard.
+///
+/// Reads the clipboard content (file list or image data) and pastes it
+/// into the directory at the cursor position.
+fn execute_clipboard_paste(state: &mut AppState, ctx: &AppContext) {
+    use crate::file_op::clipboard::{
+        ClipboardContent,
+        read_clipboard,
+    };
+    use crate::file_op::executor::is_ancestor;
+
+    let Some(content) = read_clipboard() else {
+        state.set_status("Clipboard is empty");
+        return;
+    };
+
+    let Some(dst_dir) = cursor_parent_dir(state) else {
+        return;
+    };
+
+    match content {
+        ClipboardContent::Files(paths) => {
+            let _guard = SuppressGuard::new(&ctx.suppressed);
+            let mut undo_ops: Vec<UndoOp> = Vec::new();
+            let mut paste_count: usize = 0;
+
+            for src in &paths {
+                if !src.exists() {
+                    tracing::warn!(?src, "clipboard file does not exist, skipping");
+                    continue;
+                }
+
+                // Prevent copying a directory into itself.
+                if src.is_dir() && is_ancestor(src, &dst_dir) {
+                    tracing::warn!(?src, ?dst_dir, "skipping: cannot copy directory into itself");
+                    continue;
+                }
+
+                let Some(file_name) = src.file_name() else {
+                    tracing::warn!(?src, "skipping: no file name");
+                    continue;
+                };
+
+                let desired_dst = dst_dir.join(file_name);
+                let final_dst = crate::file_op::conflict::resolve_conflict(&desired_dst);
+                let op = FsOp::Copy { src: src.clone(), dst: final_dst.clone() };
+
+                if let Err(e) = execute(&op) {
+                    tracing::error!(%e, ?src, "clipboard paste failed");
+                    continue;
+                }
+
+                let reverse = reverse_for_copy(&final_dst);
+                undo_ops.push(UndoOp { forward: op, reverse });
+                paste_count += 1;
+            }
+
+            if !undo_ops.is_empty() {
+                state.undo_history.push(OpGroup {
+                    description: format!("Paste {paste_count} file(s) from clipboard"),
+                    ops: undo_ops,
+                });
+            }
+
+            refresh_directory(state, &dst_dir, ctx);
+            state.set_status(format!("Pasted {paste_count} file(s) from clipboard"));
+        }
+        ClipboardContent::Image { width, height, bytes } => {
+            let _guard = SuppressGuard::new(&ctx.suppressed);
+
+            match crate::file_op::clipboard::save_image_as_png(&dst_dir, width, height, &bytes) {
+                Ok(saved_path) => {
+                    // Build undo op: reverse is removing the created file.
+                    let forward = FsOp::CreateFile { path: saved_path.clone() };
+                    let reverse = FsOp::RemoveFile { path: saved_path.clone() };
+                    let file_name = saved_path.file_name().unwrap_or_default().to_string_lossy();
+                    state.undo_history.push(OpGroup {
+                        description: format!("Paste clipboard image as {file_name}"),
+                        ops: vec![UndoOp { forward, reverse }],
+                    });
+
+                    refresh_directory(state, &dst_dir, ctx);
+                    state.set_status(format!("Saved clipboard image: {file_name}"));
+                }
+                Err(e) => {
+                    tracing::error!(%e, "failed to save clipboard image");
+                    state.set_status(format!("Failed to save image: {e}"));
+                }
+            }
+        }
+    }
 }
 
 /// Execute undo: reverse the most recent operation group.

@@ -12,6 +12,7 @@ pub mod tree;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+pub use file_op::handle_clipboard_paste;
 use file_op::handle_file_op_action;
 use input::{
     handle_confirm_mode_key,

@@ -3,7 +3,9 @@
 use std::io::stdout;
 
 use crossterm::event::{
+    DisableBracketedPaste,
     DisableMouseCapture,
+    EnableBracketedPaste,
     EnableMouseCapture,
     KeyboardEnhancementFlags,
     PopKeyboardEnhancementFlags,
@@ -33,6 +35,9 @@ pub fn init(mouse: bool) -> DefaultTerminal {
         PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
     );
 
+    // Enable bracketed paste so Cmd+V triggers Event::Paste.
+    let _ = crossterm::execute!(stdout(), EnableBracketedPaste);
+
     terminal
 }
 
@@ -41,6 +46,7 @@ pub fn init(mouse: bool) -> DefaultTerminal {
 /// Disables raw mode, leaves the alternate screen, pops keyboard enhancement,
 /// and disables mouse capture (safe to call even if mouse was never enabled).
 pub fn restore() {
+    let _ = crossterm::execute!(stdout(), DisableBracketedPaste);
     let _ = crossterm::execute!(stdout(), PopKeyboardEnhancementFlags);
     let _ = crossterm::execute!(stdout(), DisableMouseCapture);
     ratatui::restore();

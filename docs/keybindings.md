@@ -53,6 +53,7 @@ Auto-generated from source. Do not edit manually.
 | `y` | `file_op.yank` | Copy (yank) files |
 | `x` | `file_op.cut` | Cut files |
 | `p` | `file_op.paste` | Paste files |
+| `-` | `file_op.paste_from_clipboard` | Paste from clipboard |
 | `a` | `file_op.create_file` | Create file |
 | `A` | `file_op.create_directory` | Create directory |
 | `r` | `file_op.rename` | Rename |

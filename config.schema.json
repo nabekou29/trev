@@ -892,6 +892,7 @@
                 "file_op.yank",
                 "file_op.cut",
                 "file_op.paste",
+                "file_op.paste_from_clipboard",
                 "file_op.create_file",
                 "file_op.create_directory",
                 "file_op.rename",
