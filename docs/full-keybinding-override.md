@@ -106,6 +106,8 @@ keybindings:
         action: file_op.clear_selections
       - key: c
         action: file_op.copy.menu
+      - key: C
+        action: file_op.copy.relative_path
 
       # --- Search ---
       - key: "/"

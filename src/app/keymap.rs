@@ -405,6 +405,12 @@ impl KeyMap {
             &[],
             Action::FileOp(FileOpAction::Copy(CopyAction::Menu)),
         );
+        self.bind(
+            KeyCode::Char('C'),
+            KeyModifiers::SHIFT,
+            &[],
+            Action::FileOp(FileOpAction::Copy(CopyAction::RelativePath)),
+        );
     }
 }
 
