@@ -842,6 +842,10 @@ pub async fn run(args: &Args) -> Result<()> {
                         handle_clipboard_paste(&mut state, &ctx);
                         state.dirty = true;
                     }
+                    Some(Ok(Event::Resize(_, _))) => {
+                        state.needs_redraw = true;
+                        state.dirty = true;
+                    }
                     Some(Ok(_)) => {}
                     Some(Err(e)) => {
                         tracing::error!(%e, "terminal event stream error");
