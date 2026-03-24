@@ -98,7 +98,7 @@ impl PreviewProvider for DiffPreviewProvider {
         let _span = tracing::info_span!("diff_load", path = %path.display()).entered();
 
         if ctx.cancel_token.is_cancelled() {
-            return Ok(PreviewContent::Empty);
+            return Ok(PreviewContent::Cancelled);
         }
 
         let status = self.file_status(path);
@@ -121,7 +121,7 @@ impl PreviewProvider for DiffPreviewProvider {
         let output = wait_with_timeout(child, self.timeout)?;
 
         if ctx.cancel_token.is_cancelled() {
-            return Ok(PreviewContent::Empty);
+            return Ok(PreviewContent::Cancelled);
         }
 
         if !output.status.success() {

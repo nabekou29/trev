@@ -168,7 +168,7 @@ impl PreviewProvider for ExternalCmdProvider {
         )
         .entered();
         if ctx.cancel_token.is_cancelled() {
-            return Ok(PreviewContent::Empty);
+            return Ok(PreviewContent::Cancelled);
         }
 
         // Build the command with file path as final argument.
@@ -188,7 +188,7 @@ impl PreviewProvider for ExternalCmdProvider {
         let output = wait_with_timeout(child, self.timeout)?;
 
         if ctx.cancel_token.is_cancelled() {
-            return Ok(PreviewContent::Empty);
+            return Ok(PreviewContent::Cancelled);
         }
 
         if !output.status.success() {
@@ -637,7 +637,7 @@ mod tests {
     }
 
     #[rstest]
-    fn load_cancelled_returns_empty() {
+    fn load_cancelled_returns_cancelled() {
         let provider = make_echo_provider();
         let ctx = LoadContext {
             max_lines: 1000,
@@ -648,7 +648,7 @@ mod tests {
         ctx.cancel_token.cancel();
 
         let result = provider.load(&PathBuf::from("test.csv"), &ctx).unwrap();
-        assert!(matches!(result, PreviewContent::Empty));
+        assert!(matches!(result, PreviewContent::Cancelled));
     }
 
     #[rstest]

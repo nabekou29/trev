@@ -56,6 +56,11 @@ pub enum PreviewContent {
     },
     /// Empty file.
     Empty,
+    /// Load was cancelled (navigation changed before completion).
+    ///
+    /// This variant is never cached or displayed — it signals that the
+    /// result should be silently discarded.
+    Cancelled,
 }
 
 impl PreviewContent {
@@ -71,6 +76,7 @@ impl PreviewContent {
             Self::Loading => "loading",
             Self::Error { .. } => "error",
             Self::Empty => "empty",
+            Self::Cancelled => "cancelled",
         }
     }
 
@@ -97,6 +103,7 @@ impl PreviewContent {
             Self::Loading => Some(Self::Loading),
             Self::Error { message } => Some(Self::Error { message: message.clone() }),
             Self::Empty => Some(Self::Empty),
+            Self::Cancelled => Some(Self::Cancelled),
         }
     }
 }
@@ -126,6 +133,7 @@ impl std::fmt::Debug for PreviewContent {
             Self::Loading => write!(f, "Loading"),
             Self::Error { message } => f.debug_struct("Error").field("message", message).finish(),
             Self::Empty => write!(f, "Empty"),
+            Self::Cancelled => write!(f, "Cancelled"),
         }
     }
 }

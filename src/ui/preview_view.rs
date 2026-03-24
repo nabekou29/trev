@@ -106,6 +106,7 @@ pub fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &mut PreviewStat
             let widget = StatefulImage::default();
             frame.render_stateful_widget(widget, inner, &mut **protocol);
         }
+        PreviewContent::Cancelled => {}
     }
 
     provider_areas

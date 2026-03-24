@@ -79,7 +79,7 @@ impl PreviewProvider for TextPreviewProvider {
 
         for line_result in reader.lines() {
             if ctx.cancel_token.is_cancelled() {
-                return Ok(PreviewContent::Empty);
+                return Ok(PreviewContent::Cancelled);
             }
 
             let line = line_result?;
@@ -320,7 +320,7 @@ mod tests {
     }
 
     #[rstest]
-    fn load_cancelled_produces_empty(temp_dir: TempDir) {
+    fn load_cancelled_produces_cancelled(temp_dir: TempDir) {
         let path = temp_dir.path().join("test.txt");
         fs::write(&path, "some content\n").unwrap();
 
@@ -335,6 +335,6 @@ mod tests {
         let provider = TextPreviewProvider::new();
         let result = provider.load(&path, &ctx).unwrap();
 
-        assert!(matches!(result, PreviewContent::Empty));
+        assert!(matches!(result, PreviewContent::Cancelled));
     }
 }

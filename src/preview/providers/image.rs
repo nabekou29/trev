@@ -73,13 +73,13 @@ impl PreviewProvider for ImagePreviewProvider {
     fn load(&self, path: &Path, ctx: &LoadContext) -> anyhow::Result<PreviewContent> {
         let _span = tracing::info_span!("image_load", path = %path.display()).entered();
         if ctx.cancel_token.is_cancelled() {
-            return Ok(PreviewContent::Empty);
+            return Ok(PreviewContent::Cancelled);
         }
 
         let dyn_image = load_image(path)?;
 
         if ctx.cancel_token.is_cancelled() {
-            return Ok(PreviewContent::Empty);
+            return Ok(PreviewContent::Cancelled);
         }
 
         let Ok(picker) = self.picker.lock() else {

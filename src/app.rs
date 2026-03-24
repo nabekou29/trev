@@ -61,6 +61,7 @@ use crate::git::{
 use crate::input::AppMode;
 use crate::ipc::types::IpcCommand;
 use crate::preview::cache::PreviewCache;
+use crate::preview::content::PreviewContent;
 use crate::preview::provider::{
     PreviewProvider,
     PreviewRegistry,
@@ -1393,6 +1394,10 @@ fn process_preview_results(
     let mut had_results = false;
     for result in results {
         had_results = true;
+        // Cancelled loads should not be cached or displayed.
+        if matches!(result.content, PreviewContent::Cancelled) {
+            continue;
+        }
         let is_prefetch = result.prefetch;
         // Store in cache (skip non-cloneable Image content).
         if let Some(cloned) = result.content.try_clone() {
