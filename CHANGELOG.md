@@ -1,4 +1,11 @@
 
+## [0.1.7] - 2026-03-24
+
+### Bug Fixes
+
+- Prevent cancelled preview loads from being cached as empty
+
+
 ## [0.1.6] - 2026-03-23
 
 ### Features
