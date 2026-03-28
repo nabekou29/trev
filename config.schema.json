@@ -196,6 +196,9 @@
       "default": {
         "cache_size": 50,
         "command_timeout": 3,
+        "diff": {
+          "pager": null
+        },
         "max_bytes": 10485760,
         "max_lines": 1000,
         "narrow_split_ratio": 60,
@@ -499,6 +502,20 @@
           "const": "custom_trash"
         }
       ]
+    },
+    "DiffConfig": {
+      "description": "Diff preview configuration.",
+      "type": "object",
+      "properties": {
+        "pager": {
+          "description": "External pager command for diff output (e.g. \"delta --color-only --paging=never\").\n\nWhen set and the command is available, git diff output is piped through this\ncommand. When unset or the command is not found, the built-in diff renderer is used.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
     },
     "DisplayConfig": {
       "description": "Display configuration.",
@@ -1166,6 +1183,13 @@
           "format": "uint64",
           "default": 3,
           "minimum": 0
+        },
+        "diff": {
+          "description": "Diff preview settings.",
+          "$ref": "#/$defs/DiffConfig",
+          "default": {
+            "pager": null
+          }
         },
         "max_bytes": {
           "description": "Maximum bytes to read per file (default: 10 MB).",
