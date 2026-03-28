@@ -998,6 +998,7 @@ fn build_preview_registry(
             Arc::clone(git_state),
             root_path.to_path_buf(),
             config.preview.command_timeout,
+            config.preview.diff.pager.as_deref(),
         )),
         Arc::new(FallbackProvider::new()),
     ];

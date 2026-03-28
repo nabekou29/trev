@@ -703,6 +703,20 @@ pub struct PreviewConfig {
     pub narrow_width: u16,
     /// Enable word wrap in preview (default: false).
     pub word_wrap: bool,
+    /// Diff preview settings.
+    pub diff: DiffConfig,
+}
+
+/// Diff preview configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct DiffConfig {
+    /// External pager command for diff output (e.g. "delta --color-only --paging=never").
+    ///
+    /// When set and the command is available, git diff output is piped through this
+    /// command. When unset or the command is not found, the built-in diff renderer is used.
+    #[serde(default)]
+    pub pager: Option<String>,
 }
 
 /// Preview provider entry configuration.
@@ -977,6 +991,7 @@ impl Default for PreviewConfig {
             narrow_split_ratio: 60,
             narrow_width: 80,
             word_wrap: false,
+            diff: DiffConfig::default(),
         }
     }
 }
@@ -1372,6 +1387,8 @@ pub struct PreviewConfigOverride {
     pub narrow_width: Option<u16>,
     /// Enable word wrap in preview.
     pub word_wrap: Option<bool>,
+    /// Diff preview settings.
+    pub diff: Option<DiffConfig>,
 }
 
 impl PreviewConfigOverride {
@@ -1389,6 +1406,9 @@ impl PreviewConfigOverride {
             narrow_width,
             word_wrap,
         );
+        if let Some(diff) = self.diff {
+            target.diff = diff;
+        }
         if let Some(providers) = self.providers {
             for entry in providers {
                 if let Some(ref name) = entry.name {
