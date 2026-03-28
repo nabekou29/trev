@@ -1,9 +1,9 @@
 # Development-only tools and tasks (loaded when MISE_ENV=development)
 
 [tools]
-"cargo:cargo-release" = "latest"
-"cargo:git-cliff" = "latest"
-"cargo:cargo-llvm-cov" = "latest"
+"cargo:cargo-release" = "1.1.2"
+"cargo:git-cliff" = "2.12.0"
+"cargo:cargo-llvm-cov" = "0.8.5"
 
 [tasks.coverage]
 description = "Run tests with coverage"
