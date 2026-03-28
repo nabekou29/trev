@@ -1,4 +1,11 @@
 
+## [0.1.8] - 2026-03-28
+
+### Features
+
+- Add configurable diff pager with built-in fallback (#1)
+
+
 ## [0.1.7] - 2026-03-24
 
 ### Bug Fixes
