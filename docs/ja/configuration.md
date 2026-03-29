@@ -49,6 +49,7 @@ preview:
   narrow_split_ratio: 60 # ツリー/プレビューの分割比率 (%) （ナローレイアウト）
   narrow_width: 80 # ナローレイアウトの幅閾値（カラム数）
   word_wrap: false # プレビューの折り返しを有効にする
+  scroll_amount: 2 # 1ステップあたりのスクロール行数/列数
   providers: []
 
 file_op:
