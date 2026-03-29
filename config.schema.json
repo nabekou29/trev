@@ -204,6 +204,7 @@
         "narrow_split_ratio": 60,
         "narrow_width": 80,
         "providers": [],
+        "scroll_amount": 2,
         "split_ratio": 50,
         "word_wrap": false
       }
@@ -1228,6 +1229,13 @@
           "items": {
             "$ref": "#/$defs/PreviewProviderEntry"
           }
+        },
+        "scroll_amount": {
+          "description": "Number of lines/columns to scroll per step (default: 2).",
+          "type": "integer",
+          "format": "uint",
+          "default": 2,
+          "minimum": 0
         },
         "split_ratio": {
           "description": "Tree/preview split percentage in wide layout (default: 50).",

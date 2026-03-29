@@ -36,16 +36,16 @@ pub fn handle_preview_action(
 
     match action {
         PreviewAction::ScrollDown => {
-            state.preview_state.scroll_down(1, viewport_height);
+            state.preview_state.scroll_down(ctx.preview_config.scroll_amount, viewport_height);
         }
         PreviewAction::ScrollUp => {
-            state.preview_state.scroll_up(1);
+            state.preview_state.scroll_up(ctx.preview_config.scroll_amount);
         }
         PreviewAction::ScrollRight => {
-            state.preview_state.scroll_right(1);
+            state.preview_state.scroll_right(ctx.preview_config.scroll_amount);
         }
         PreviewAction::ScrollLeft => {
-            state.preview_state.scroll_left(1);
+            state.preview_state.scroll_left(ctx.preview_config.scroll_amount);
         }
         PreviewAction::HalfPageDown => {
             state.preview_state.scroll_down(viewport_height / 2, viewport_height);

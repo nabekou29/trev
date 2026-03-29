@@ -703,6 +703,8 @@ pub struct PreviewConfig {
     pub narrow_width: u16,
     /// Enable word wrap in preview (default: false).
     pub word_wrap: bool,
+    /// Number of lines/columns to scroll per step (default: 2).
+    pub scroll_amount: usize,
     /// Diff preview settings.
     pub diff: DiffConfig,
 }
@@ -991,6 +993,7 @@ impl Default for PreviewConfig {
             narrow_split_ratio: 60,
             narrow_width: 80,
             word_wrap: false,
+            scroll_amount: 2,
             diff: DiffConfig::default(),
         }
     }
@@ -1387,6 +1390,8 @@ pub struct PreviewConfigOverride {
     pub narrow_width: Option<u16>,
     /// Enable word wrap in preview.
     pub word_wrap: Option<bool>,
+    /// Number of lines/columns to scroll per step.
+    pub scroll_amount: Option<usize>,
     /// Diff preview settings.
     pub diff: Option<DiffConfig>,
 }
@@ -1405,6 +1410,7 @@ impl PreviewConfigOverride {
             narrow_split_ratio,
             narrow_width,
             word_wrap,
+            scroll_amount,
         );
         if let Some(diff) = self.diff {
             target.diff = diff;
