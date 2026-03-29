@@ -49,6 +49,7 @@ preview:
   narrow_split_ratio: 60 # Tree/preview split % (narrow layout)
   narrow_width: 80 # Width threshold for narrow layout (columns)
   word_wrap: false # Enable word wrap in preview
+  scroll_amount: 2 # Lines/columns to scroll per step
   providers: []
 
 file_op:
