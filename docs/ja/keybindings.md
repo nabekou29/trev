@@ -48,21 +48,24 @@
 
 ## ファイル操作
 
-| キー      | アクション                     | 説明                       |
-| --------- | ------------------------------ | -------------------------- |
-| `y`       | `file_op.yank`                 | ファイルをコピー（ヤンク） |
-| `x`       | `file_op.cut`                  | ファイルを切り取り         |
-| `p`       | `file_op.paste`                | ファイルを貼り付け         |
-| -         | `file_op.paste_from_clipboard` | クリップボードから貼り付け |
-| `a`       | `file_op.create_file`          | ファイルを作成             |
-| `A`       | `file_op.create_directory`     | ディレクトリを作成         |
-| `r`       | `file_op.rename`               | リネーム                   |
-| `d`       | `file_op.delete`               | 削除                       |
-| `D`       | `file_op.system_trash`         | ゴミ箱に移動               |
-| `u`       | `file_op.undo`                 | 元に戻す                   |
-| `<C-r>`   | `file_op.redo`                 | やり直す                   |
-| `<Space>` | `file_op.toggle_mark`          | マークの切替               |
-| `<Esc>`   | `file_op.clear_selections`     | 選択をクリア               |
+| キー      | アクション                     | 説明                             |
+| --------- | ------------------------------ | -------------------------------- |
+| `y`       | `file_op.yank`                 | ファイルをコピー（ヤンク）       |
+| `x`       | `file_op.cut`                  | ファイルを切り取り               |
+| `p`       | `file_op.paste`                | ファイルを貼り付け               |
+| -         | `file_op.paste_from_clipboard` | クリップボードから貼り付け       |
+| `a`       | `file_op.create_file`          | ファイルを作成                   |
+| `A`       | `file_op.create_directory`     | ディレクトリを作成               |
+| `r`       | `file_op.rename`               | リネーム                         |
+| `d`       | `file_op.delete`               | 削除                             |
+| `D`       | `file_op.system_trash`         | ゴミ箱に移動                     |
+| `u`       | `file_op.undo`                 | 元に戻す                         |
+| `<C-r>`   | `file_op.redo`                 | やり直す                         |
+| `<Space>` | `file_op.toggle_mark`          | マークの切替                     |
+| `<Esc>`   | `file_op.clear_selections`     | 選択をクリア                     |
+| `<C-p>`   | `file_op.paste_menu`           | 貼り付けオプション               |
+| `-`       | `file_op.paste_as_symlink`     | シンボリックリンクとして貼り付け |
+| `-`       | `file_op.paste_as_hardlink`    | ハードリンクとして貼り付け       |
 
 ## 検索
 

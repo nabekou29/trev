@@ -66,6 +66,9 @@ Auto-generated from source. Do not edit manually.
 | `<C-r>` | `file_op.redo` | Redo |
 | `<Space>` | `file_op.toggle_mark` | Toggle mark |
 | `<Esc>` | `file_op.clear_selections` | Clear selections |
+| `<C-p>` | `file_op.paste_menu` | Paste options |
+| `-` | `file_op.paste_as_symlink` | Paste as symlink |
+| `-` | `file_op.paste_as_hardlink` | Paste as hard link |
 
 ## Search
 

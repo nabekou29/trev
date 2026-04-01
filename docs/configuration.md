@@ -31,6 +31,11 @@ display:
   show_icons: true
   show_root_entry: false
   modal_avoid_preview: false # Constrain floating modals to the tree area
+  category_styles:
+    directory: { fg: blue, bold: true }
+    symlink: { fg: cyan }
+    orphan_symlink: { fg: red, dim: true } # Broken symlink
+    gitignored: { fg: dark_gray }
   columns: # Display order of metadata columns
     - git_status
     - size
