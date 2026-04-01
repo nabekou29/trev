@@ -602,6 +602,7 @@ pub(super) mod tests {
             is_dir: true,
             is_symlink: false,
             symlink_target: None,
+            is_orphan: false,
             size: 0,
             modified: None,
             recursive_max_mtime: None,

@@ -61,6 +61,7 @@ impl TreeBuilder {
             is_dir: true,
             is_symlink: false,
             symlink_target: None,
+            is_orphan: false,
             size: 0,
             modified: metadata.modified().ok(),
             recursive_max_mtime,
@@ -109,8 +110,8 @@ impl TreeBuilder {
 
     /// Walk directory entries using `file_type()` from readdir (no stat syscalls).
     ///
-    /// Returns `(path, is_dir, is_symlink, symlink_target)` tuples.
-    fn walk_entries(self, dir_path: &Path) -> Vec<(PathBuf, bool, bool, Option<String>)> {
+    /// Returns `(path, is_dir, is_symlink, symlink_target, is_orphan)` tuples.
+    fn walk_entries(self, dir_path: &Path) -> Vec<(PathBuf, bool, bool, Option<String>, bool)> {
         // Collect directory entries (readdir + gitignore filtering).
         let entries = {
             let _span = tracing::debug_span!("readdir").entered();
@@ -137,7 +138,7 @@ impl TreeBuilder {
         let _span = tracing::debug_span!("classify_entries", entry_count = entries.len()).entered();
         let mut result = Vec::with_capacity(entries.len());
         for entry in entries {
-            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+            let raw_is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
             let is_symlink = entry.path_is_symlink();
             let path = entry.into_path();
             let symlink_target = if is_symlink {
@@ -145,7 +146,15 @@ impl TreeBuilder {
             } else {
                 None
             };
-            result.push((path, is_dir, is_symlink, symlink_target));
+            let (is_dir, is_orphan) = if is_symlink {
+                match std::fs::metadata(&path) {
+                    Ok(meta) => (meta.is_dir(), false),
+                    Err(_) => (false, true),
+                }
+            } else {
+                (raw_is_dir, false)
+            };
+            result.push((path, is_dir, is_symlink, symlink_target, is_orphan));
         }
         result
     }
@@ -153,12 +162,12 @@ impl TreeBuilder {
 
 /// Build `TreeNode` structs from walk results (no metadata — size=0, modified=None).
 fn build_tree_nodes(
-    entry_data: Vec<(PathBuf, bool, bool, Option<String>)>,
+    entry_data: Vec<(PathBuf, bool, bool, Option<String>, bool)>,
     non_ignored_paths: Option<&std::collections::HashSet<PathBuf>>,
 ) -> Vec<TreeNode> {
     let _span = tracing::debug_span!("build_nodes", count = entry_data.len()).entered();
     let mut children = Vec::with_capacity(entry_data.len());
-    for (path, is_dir, is_symlink, symlink_target) in entry_data {
+    for (path, is_dir, is_symlink, symlink_target, is_orphan) in entry_data {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
         let is_ignored = non_ignored_paths.is_some_and(|set| !set.contains(&*path));
 
@@ -168,6 +177,7 @@ fn build_tree_nodes(
             is_dir,
             is_symlink,
             symlink_target,
+            is_orphan,
             size: 0,
             modified: None,
             recursive_max_mtime: None,
@@ -307,6 +317,58 @@ mod tests {
 
         let link = children.iter().find(|c| c.name == "link.txt").unwrap();
         verify_that!(link.is_symlink, eq(true))?;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[rstest]
+    fn symlink_to_directory_has_is_dir_true() -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join("real_dir")).unwrap();
+        fs::write(dir.path().join("real_dir/file.txt"), "content").unwrap();
+        symlink(dir.path().join("real_dir"), dir.path().join("link_dir")).unwrap();
+
+        let builder = TreeBuilder::new(false, false);
+        let root = builder.build(dir.path()).unwrap();
+        let children = root.children.as_loaded().unwrap();
+
+        let link = children.iter().find(|c| c.name == "link_dir").unwrap();
+        verify_that!(link.is_symlink, eq(true))?;
+        verify_that!(link.is_dir, eq(true))?;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[rstest]
+    fn broken_symlink_has_is_orphan_true() -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        symlink(dir.path().join("nonexistent"), dir.path().join("broken_link")).unwrap();
+
+        let builder = TreeBuilder::new(false, false);
+        let root = builder.build(dir.path()).unwrap();
+        let children = root.children.as_loaded().unwrap();
+
+        let link = children.iter().find(|c| c.name == "broken_link").unwrap();
+        verify_that!(link.is_symlink, eq(true))?;
+        verify_that!(link.is_orphan, eq(true))?;
+        verify_that!(link.is_dir, eq(false))?;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[rstest]
+    fn valid_symlink_has_is_orphan_false() -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("real.txt"), "content").unwrap();
+        symlink(dir.path().join("real.txt"), dir.path().join("link.txt")).unwrap();
+
+        let builder = TreeBuilder::new(false, false);
+        let root = builder.build(dir.path()).unwrap();
+        let children = root.children.as_loaded().unwrap();
+
+        let link = children.iter().find(|c| c.name == "link.txt").unwrap();
+        verify_that!(link.is_symlink, eq(true))?;
+        verify_that!(link.is_orphan, eq(false))?;
         Ok(())
     }
 }
