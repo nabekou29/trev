@@ -52,6 +52,20 @@ pub enum FsOp {
         /// Path to remove.
         path: PathBuf,
     },
+    /// Create a symbolic link.
+    CreateSymlink {
+        /// The target the symlink points to.
+        target: PathBuf,
+        /// The path where the symlink is created.
+        link: PathBuf,
+    },
+    /// Create a hard link.
+    CreateHardlink {
+        /// The original file path.
+        original: PathBuf,
+        /// The path where the hard link is created.
+        link: PathBuf,
+    },
 }
 
 /// Execute a single reversible file system operation.
@@ -63,6 +77,8 @@ pub fn execute(op: &FsOp) -> Result<()> {
         FsOp::CreateDir { path } => create_dir(path),
         FsOp::RemoveFile { path } => remove_file(path),
         FsOp::RemoveDir { path } => remove_dir(path),
+        FsOp::CreateSymlink { target, link } => create_symlink(target, link),
+        FsOp::CreateHardlink { original, link } => create_hardlink(original, link),
     }
 }
 
@@ -202,6 +218,32 @@ fn remove_dir(path: &Path) -> Result<()> {
         .with_context(|| format!("Failed to remove directory: {}", path.display()))
 }
 
+/// Create a symbolic link.
+fn create_symlink(target: &Path, link: &Path) -> Result<()> {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link)
+        .with_context(|| format!("Failed to create symlink: {}", link.display()))?;
+
+    #[cfg(windows)]
+    {
+        if target.is_dir() {
+            std::os::windows::fs::symlink_dir(target, link)
+                .with_context(|| format!("Failed to create symlink: {}", link.display()))?;
+        } else {
+            std::os::windows::fs::symlink_file(target, link)
+                .with_context(|| format!("Failed to create symlink: {}", link.display()))?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Create a hard link.
+fn create_hardlink(original: &Path, link: &Path) -> Result<()> {
+    std::fs::hard_link(original, link)
+        .with_context(|| format!("Failed to create hard link: {}", link.display()))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::expect_used)]
 mod tests {
@@ -305,5 +347,41 @@ mod tests {
 
         let result = execute(&FsOp::CreateFile { path });
         assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[rstest]
+    fn execute_create_symlink() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let target = tmp.path().join("target.txt");
+        std::fs::write(&target, "content").unwrap();
+        let link = tmp.path().join("link.txt");
+
+        execute(&FsOp::CreateSymlink { target: target.clone(), link: link.clone() }).unwrap();
+
+        assert_that!(link.is_symlink(), eq(true));
+        assert_eq!(std::fs::read_link(&link).unwrap(), target);
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "content");
+    }
+
+    #[rstest]
+    fn execute_create_hardlink() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let original = tmp.path().join("original.txt");
+        std::fs::write(&original, "content").unwrap();
+        let link = tmp.path().join("hardlink.txt");
+
+        execute(&FsOp::CreateHardlink { original: original.clone(), link: link.clone() }).unwrap();
+
+        assert_that!(link.exists(), eq(true));
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "content");
+        // Verify it's the same inode (hard link)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let orig_meta = std::fs::metadata(&original).unwrap();
+            let link_meta = std::fs::metadata(&link).unwrap();
+            assert_eq!(orig_meta.ino(), link_meta.ino());
+        }
     }
 }

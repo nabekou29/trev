@@ -158,6 +158,11 @@ fn validate_op_precondition(op: &FsOp) -> Result<()> {
                 bail!("Path does not exist: {}", path.display());
             }
         }
+        FsOp::CreateSymlink { link, .. } | FsOp::CreateHardlink { link, .. } => {
+            if link.exists() {
+                bail!("Link path already exists: {}", link.display());
+            }
+        }
     }
     Ok(())
 }
@@ -207,6 +212,14 @@ pub fn reverse_op(forward: &FsOp) -> Option<FsOp> {
         FsOp::RemoveDir { path } => {
             tracing::warn!(?path, "cannot reverse permanent directory removal");
             None
+        }
+        FsOp::CreateSymlink { link, .. } => {
+            // Undo symlink creation = remove the symlink file.
+            Some(FsOp::RemoveFile { path: link.clone() })
+        }
+        FsOp::CreateHardlink { link, .. } => {
+            // Undo hard link creation = remove the hard link.
+            Some(FsOp::RemoveFile { path: link.clone() })
         }
     }
 }

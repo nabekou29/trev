@@ -760,6 +760,11 @@ fn collect_affected_parents(ops: &[FsOp]) -> HashSet<PathBuf> {
                     parents.insert(p.to_path_buf());
                 }
             }
+            FsOp::CreateSymlink { link, .. } | FsOp::CreateHardlink { link, .. } => {
+                if let Some(p) = link.parent() {
+                    parents.insert(p.to_path_buf());
+                }
+            }
         }
     }
     parents
