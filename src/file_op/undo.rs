@@ -413,6 +413,59 @@ mod tests {
     }
 
     #[rstest]
+    fn reverse_op_for_create_symlink() {
+        let rev = reverse_op(&FsOp::CreateSymlink {
+            target: PathBuf::from("/target"),
+            link: PathBuf::from("/link"),
+        });
+        assert_eq!(rev, Some(FsOp::RemoveFile { path: PathBuf::from("/link") }));
+    }
+
+    #[rstest]
+    fn reverse_op_for_create_hardlink() {
+        let rev = reverse_op(&FsOp::CreateHardlink {
+            original: PathBuf::from("/original"),
+            link: PathBuf::from("/link"),
+        });
+        assert_eq!(rev, Some(FsOp::RemoveFile { path: PathBuf::from("/link") }));
+    }
+
+    #[rstest]
+    fn validate_precondition_rejects_existing_symlink_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let existing = tmp.path().join("exists.txt");
+        std::fs::write(&existing, "data").unwrap();
+
+        let result = validate_op_precondition(&FsOp::CreateSymlink {
+            target: PathBuf::from("/target"),
+            link: existing,
+        });
+        assert!(result.is_err());
+    }
+
+    #[rstest]
+    fn validate_precondition_accepts_nonexistent_symlink_path() {
+        let result = validate_op_precondition(&FsOp::CreateSymlink {
+            target: PathBuf::from("/target"),
+            link: PathBuf::from("/nonexistent/link"),
+        });
+        assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn validate_precondition_rejects_existing_hardlink_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let existing = tmp.path().join("exists.txt");
+        std::fs::write(&existing, "data").unwrap();
+
+        let result = validate_op_precondition(&FsOp::CreateHardlink {
+            original: PathBuf::from("/original"),
+            link: existing,
+        });
+        assert!(result.is_err());
+    }
+
+    #[rstest]
     fn export_and_from_stacks_roundtrip() {
         let mut history = UndoHistory::new(10);
         history.push(sample_group("first"));

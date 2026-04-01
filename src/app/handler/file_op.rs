@@ -928,4 +928,27 @@ mod tests {
     fn validate_name_rejects_absolute_path() {
         assert_that!(validate_name("/etc/passwd"), err(anything()));
     }
+
+    #[rstest]
+    fn collect_affected_parents_for_create_symlink() {
+        let ops = vec![FsOp::CreateSymlink {
+            target: PathBuf::from("/src/file.txt"),
+            link: PathBuf::from("/dst/link.txt"),
+        }];
+        let parents = collect_affected_parents(&ops);
+        assert_that!(parents.contains(&PathBuf::from("/dst")), eq(true));
+        // target parent is not included (only link location matters)
+        assert_that!(parents.contains(&PathBuf::from("/src")), eq(false));
+    }
+
+    #[rstest]
+    fn collect_affected_parents_for_create_hardlink() {
+        let ops = vec![FsOp::CreateHardlink {
+            original: PathBuf::from("/src/file.txt"),
+            link: PathBuf::from("/dst/hardlink.txt"),
+        }];
+        let parents = collect_affected_parents(&ops);
+        assert_that!(parents.contains(&PathBuf::from("/dst")), eq(true));
+        assert_that!(parents.contains(&PathBuf::from("/src")), eq(false));
+    }
 }

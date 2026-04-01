@@ -974,4 +974,13 @@ mod tests {
             assert_that!(parsed.to_string().as_str(), eq(*name));
         }
     }
+
+    #[rstest]
+    fn all_actions_have_nonempty_description() {
+        let names = Action::all_action_names();
+        for name in &names {
+            let parsed: Action = name.parse().unwrap();
+            assert!(!parsed.description().is_empty(), "empty description for {name}");
+        }
+    }
 }
