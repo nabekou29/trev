@@ -670,9 +670,15 @@ impl TreeState {
         let vnode = visible.first()?;
         let path = vnode.node.path.clone();
         let is_dir = vnode.node.is_dir;
+        let is_symlink = vnode.node.is_symlink;
         let is_expanded = vnode.node.is_expanded;
 
         if !is_dir {
+            return None;
+        }
+
+        // Block expansion of symlink directories that would create a cycle.
+        if is_symlink && !is_expanded && is_symlink_cycle(&path) {
             return None;
         }
 
@@ -826,6 +832,11 @@ impl TreeState {
         self.invalidate_caches();
         let node = self.find_node_mut(path)?;
         if node.is_expanded {
+            return None;
+        }
+
+        // Block expansion of symlink directories that would create a cycle.
+        if node.is_symlink && is_symlink_cycle(path) {
             return None;
         }
 
@@ -1003,6 +1014,19 @@ pub enum ExpandResult {
     OpenFile(PathBuf),
     /// The directory was expanded and its children are already loaded (e.g., via prefetch).
     AlreadyLoaded(PathBuf),
+}
+
+/// Check if expanding a symlink directory at `path` would create a cycle.
+///
+/// A symlink creates a cycle when its canonical target is an ancestor of
+/// (or equal to) the symlink's own path. For example, if `/a/b/link` points
+/// to `/a`, expanding it would re-enter `/a` and eventually `/a/b/link` again.
+fn is_symlink_cycle(path: &Path) -> bool {
+    let Ok(canonical) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    // If the canonical target is an ancestor of the symlink path, it's a cycle.
+    path.starts_with(&canonical)
 }
 
 /// Recursively collect visible nodes via DFS.
@@ -2064,6 +2088,77 @@ mod tests {
         let changed = state.collapse();
         assert!(changed);
         assert_eq!(state.visible_node_count(), 2);
+    }
+
+    // =========================================================================
+    // Symlink cycle detection
+    // =========================================================================
+
+    #[cfg(unix)]
+    #[rstest]
+    fn toggle_expand_blocks_circular_symlink() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create:
+        //   root/
+        //     real_dir/
+        //       file.txt
+        //       cycle_link → root (circular)
+        //       safe_link → real_dir's sibling (non-circular)
+        //     other_dir/
+        //       other.txt
+        let dir = TempDir::new().unwrap();
+        // Canonicalize to handle macOS /var → /private/var
+        let root = dir.path().canonicalize().unwrap();
+        fs::create_dir(root.join("real_dir")).unwrap();
+        fs::write(root.join("real_dir/file.txt"), "content").unwrap();
+        fs::create_dir(root.join("other_dir")).unwrap();
+        fs::write(root.join("other_dir/other.txt"), "x").unwrap();
+        // Circular: points back to an ancestor
+        std::os::unix::fs::symlink(&root, root.join("real_dir/cycle_link")).unwrap();
+        // Non-circular: points to a sibling directory
+        std::os::unix::fs::symlink(root.join("other_dir"), root.join("real_dir/safe_link")).unwrap();
+
+        let builder = crate::tree::builder::TreeBuilder::new(false, false);
+        let tree_root = builder.build(&root).unwrap();
+        let mut state = TreeState::new(tree_root, TreeOptions::default());
+        state.apply_sort(SortOrder::Name, SortDirection::Asc, true);
+
+        // visible: other_dir, real_dir (dirs first)
+        assert_eq!(state.visible_node_count(), 2);
+
+        // Expand real_dir (index 1) — should trigger NeedsLoad
+        let real_dir_tree_path = state.visible_nodes()[1].node.path.clone();
+        let result = state.toggle_expand(1);
+        assert!(matches!(result, Some(ExpandResult::NeedsLoad(_))));
+
+        // Load children of real_dir
+        let children = builder.load_children(&real_dir_tree_path).unwrap();
+        let child_names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();
+        assert!(child_names.contains(&"cycle_link"), "got: {child_names:?}");
+        assert!(child_names.contains(&"safe_link"), "got: {child_names:?}");
+        state.set_children(&real_dir_tree_path, children, true);
+
+        // visible: other_dir, real_dir, cycle_link, safe_link, file.txt
+        let visible = state.visible_nodes();
+        let cycle_node = visible.iter().find(|v| v.node.name == "cycle_link").unwrap();
+        assert!(cycle_node.node.is_symlink && cycle_node.node.is_dir);
+        let safe_node = visible.iter().find(|v| v.node.name == "safe_link").unwrap();
+        assert!(safe_node.node.is_symlink && safe_node.node.is_dir);
+
+        // Try to expand cycle_link — should be BLOCKED (circular)
+        let cycle_idx = visible.iter().position(|v| v.node.name == "cycle_link").unwrap();
+        drop(visible);
+        let result = state.toggle_expand(cycle_idx);
+        assert_eq!(result, None, "circular symlink should not expand");
+
+        // Try to expand safe_link — should SUCCEED (not circular)
+        let visible = state.visible_nodes();
+        let safe_idx = visible.iter().position(|v| v.node.name == "safe_link").unwrap();
+        drop(visible);
+        let result = state.toggle_expand(safe_idx);
+        assert!(matches!(result, Some(ExpandResult::NeedsLoad(_))), "non-circular symlink should expand");
     }
 
     // =========================================================================
