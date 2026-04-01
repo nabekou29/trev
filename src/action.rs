@@ -91,6 +91,12 @@ pub enum FileOpAction {
     ToggleMark,
     /// Clear yank buffer and mark set.
     ClearSelections,
+    /// Open paste options menu (symlink, hard link, etc.).
+    PasteMenu,
+    /// Paste as symbolic link (creates symlinks to yanked paths).
+    PasteAsSymlink,
+    /// Paste as hard link (creates hard links to yanked paths).
+    PasteAsHardlink,
     /// Copy-to-clipboard actions.
     Copy(CopyAction),
 }
@@ -337,6 +343,9 @@ impl fmt::Display for FileOpAction {
             Self::Redo => f.write_str("file_op.redo"),
             Self::ToggleMark => f.write_str("file_op.toggle_mark"),
             Self::ClearSelections => f.write_str("file_op.clear_selections"),
+            Self::PasteMenu => f.write_str("file_op.paste_menu"),
+            Self::PasteAsSymlink => f.write_str("file_op.paste_as_symlink"),
+            Self::PasteAsHardlink => f.write_str("file_op.paste_as_hardlink"),
             Self::Copy(action) => action.fmt(f),
         }
     }
@@ -497,6 +506,9 @@ impl FromStr for FileOpAction {
             "file_op.redo" => Ok(Self::Redo),
             "file_op.toggle_mark" => Ok(Self::ToggleMark),
             "file_op.clear_selections" => Ok(Self::ClearSelections),
+            "file_op.paste_menu" => Ok(Self::PasteMenu),
+            "file_op.paste_as_symlink" => Ok(Self::PasteAsSymlink),
+            "file_op.paste_as_hardlink" => Ok(Self::PasteAsHardlink),
             _ => Err(format!("unknown file_op action: {s}")),
         }
     }
@@ -643,6 +655,9 @@ impl FileOpAction {
             "file_op.redo",
             "file_op.toggle_mark",
             "file_op.clear_selections",
+            "file_op.paste_menu",
+            "file_op.paste_as_symlink",
+            "file_op.paste_as_hardlink",
         ];
         names.extend(CopyAction::action_names());
         names
@@ -780,6 +795,9 @@ impl FileOpAction {
             Self::Redo => "Redo",
             Self::ToggleMark => "Toggle mark",
             Self::ClearSelections => "Clear selections",
+            Self::PasteMenu => "Paste options",
+            Self::PasteAsSymlink => "Paste as symlink",
+            Self::PasteAsHardlink => "Paste as hard link",
             Self::Copy(a) => a.description(),
         }
     }
@@ -893,6 +911,9 @@ mod tests {
             FileOpAction::Redo,
             FileOpAction::ToggleMark,
             FileOpAction::ClearSelections,
+            FileOpAction::PasteMenu,
+            FileOpAction::PasteAsSymlink,
+            FileOpAction::PasteAsHardlink,
             FileOpAction::Copy(CopyAction::Menu),
             FileOpAction::Copy(CopyAction::AbsolutePath),
             FileOpAction::Copy(CopyAction::RelativePath),
