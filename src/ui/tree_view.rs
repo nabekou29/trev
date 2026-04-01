@@ -216,6 +216,7 @@ fn push_name_and_columns(
         vnode.node.is_dir,
         vnode.node.is_symlink,
         vnode.node.is_ignored,
+        vnode.node.is_orphan,
         git_status,
     );
 

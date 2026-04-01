@@ -310,6 +310,8 @@ pub struct CategoryStyles {
     pub directory: StyleConfig,
     /// Style for symbolic link names.
     pub symlink: StyleConfig,
+    /// Style for broken (orphan) symbolic link names.
+    pub orphan_symlink: StyleConfig,
     /// Style for gitignored file names.
     pub gitignored: StyleConfig,
     /// Per-status styles for git-tracked files.
@@ -326,6 +328,11 @@ impl Default for CategoryStyles {
             },
             symlink: StyleConfig {
                 fg: Some(ColorConfig(ratatui::style::Color::Cyan)),
+                ..StyleConfig::default()
+            },
+            orphan_symlink: StyleConfig {
+                fg: Some(ColorConfig(ratatui::style::Color::Red)),
+                dim: true,
                 ..StyleConfig::default()
             },
             gitignored: StyleConfig {

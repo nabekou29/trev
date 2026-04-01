@@ -127,6 +127,15 @@
             "italic": false,
             "underlined": false
           },
+          "orphan_symlink": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": true,
+            "fg": "red",
+            "italic": false,
+            "underlined": false
+          },
           "symlink": {
             "bg": null,
             "bold": false,
@@ -345,6 +354,19 @@
             "crossed_out": false,
             "dim": false,
             "fg": "dark_gray",
+            "italic": false,
+            "underlined": false
+          }
+        },
+        "orphan_symlink": {
+          "description": "Style for broken (orphan) symbolic link names.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": true,
+            "fg": "red",
             "italic": false,
             "underlined": false
           }
@@ -675,6 +697,15 @@
               "crossed_out": false,
               "dim": false,
               "fg": "dark_gray",
+              "italic": false,
+              "underlined": false
+            },
+            "orphan_symlink": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": true,
+              "fg": "red",
               "italic": false,
               "underlined": false
             },
