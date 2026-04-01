@@ -375,6 +375,12 @@ impl KeyMap {
         self.bind(KeyCode::Char('x'), KeyModifiers::NONE, &[], Action::FileOp(FileOpAction::Cut));
         self.bind(KeyCode::Char('p'), KeyModifiers::NONE, &[], Action::FileOp(FileOpAction::Paste));
         self.bind(
+            KeyCode::Char('p'),
+            KeyModifiers::CONTROL,
+            &[],
+            Action::FileOp(FileOpAction::PasteMenu),
+        );
+        self.bind(
             KeyCode::Char('d'),
             KeyModifiers::NONE,
             &[],
