@@ -306,7 +306,9 @@ fn execute_paste_as_link(state: &mut AppState, ctx: &AppContext, kind: LinkKind)
         let final_dst = crate::file_op::conflict::resolve_conflict(&desired_dst);
 
         let op = match kind {
-            LinkKind::Symlink => FsOp::CreateSymlink { target: src.clone(), link: final_dst.clone() },
+            LinkKind::Symlink => {
+                FsOp::CreateSymlink { target: src.clone(), link: final_dst.clone() }
+            }
             LinkKind::Hardlink => {
                 if src.is_dir() {
                     tracing::warn!(?src, "skipping: cannot create hard link to directory");

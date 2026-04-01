@@ -2098,6 +2098,7 @@ mod tests {
     #[rstest]
     fn toggle_expand_blocks_circular_symlink() {
         use std::fs;
+
         use tempfile::TempDir;
 
         // Create:
@@ -2118,7 +2119,8 @@ mod tests {
         // Circular: points back to an ancestor
         std::os::unix::fs::symlink(&root, root.join("real_dir/cycle_link")).unwrap();
         // Non-circular: points to a sibling directory
-        std::os::unix::fs::symlink(root.join("other_dir"), root.join("real_dir/safe_link")).unwrap();
+        std::os::unix::fs::symlink(root.join("other_dir"), root.join("real_dir/safe_link"))
+            .unwrap();
 
         let builder = crate::tree::builder::TreeBuilder::new(false, false);
         let tree_root = builder.build(&root).unwrap();
@@ -2158,7 +2160,10 @@ mod tests {
         let safe_idx = visible.iter().position(|v| v.node.name == "safe_link").unwrap();
         drop(visible);
         let result = state.toggle_expand(safe_idx);
-        assert!(matches!(result, Some(ExpandResult::NeedsLoad(_))), "non-circular symlink should expand");
+        assert!(
+            matches!(result, Some(ExpandResult::NeedsLoad(_))),
+            "non-circular symlink should expand"
+        );
     }
 
     // =========================================================================

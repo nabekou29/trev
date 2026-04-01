@@ -282,8 +282,7 @@ mod tests {
             style: StyleConfig { bold: true, ..StyleConfig::default() },
         }];
         let matcher = FileStyleMatcher::new(&rules, &category).unwrap();
-        let style =
-            matcher.resolve_style("main.rs", file_flags(), Some(GitFileStatus::Modified));
+        let style = matcher.resolve_style("main.rs", file_flags(), Some(GitFileStatus::Modified));
         assert_that!(style.fg.unwrap(), eq(Color::Yellow));
         assert_that!(style.add_modifier.contains(Modifier::BOLD), eq(true));
     }
@@ -328,7 +327,8 @@ mod tests {
     fn orphan_takes_priority_over_ignored() {
         let category = CategoryStyles::default();
         let matcher = FileStyleMatcher::new(&[], &category).unwrap();
-        let flags = NodeStyleFlags { is_symlink: true, is_ignored: true, is_orphan: true, ..file_flags() };
+        let flags =
+            NodeStyleFlags { is_symlink: true, is_ignored: true, is_orphan: true, ..file_flags() };
         let style = matcher.resolve_style("broken", flags, None);
         // orphan should win over gitignored
         assert_that!(style.fg.unwrap(), eq(Color::Red));
