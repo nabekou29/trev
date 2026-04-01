@@ -147,10 +147,7 @@ impl TreeBuilder {
                 None
             };
             let (is_dir, is_orphan) = if is_symlink {
-                match std::fs::metadata(&path) {
-                    Ok(meta) => (meta.is_dir(), false),
-                    Err(_) => (false, true),
-                }
+                std::fs::metadata(&path).map_or((false, true), |meta| (meta.is_dir(), false))
             } else {
                 (raw_is_dir, false)
             };

@@ -213,10 +213,12 @@ fn push_name_and_columns(
     let name_width = area_width.saturating_sub(left_prefix_width + columns_width);
     let name_style = state.file_style_matcher.resolve_style(
         name,
-        vnode.node.is_dir,
-        vnode.node.is_symlink,
-        vnode.node.is_ignored,
-        vnode.node.is_orphan,
+        crate::ui::file_style::NodeStyleFlags {
+            is_dir: vnode.node.is_dir,
+            is_symlink: vnode.node.is_symlink,
+            is_ignored: vnode.node.is_ignored,
+            is_orphan: vnode.node.is_orphan,
+        },
         git_status,
     );
 

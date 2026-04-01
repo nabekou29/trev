@@ -259,6 +259,7 @@ fn open_paste_menu(state: &mut AppState) {
 }
 
 /// Kind of link to create when pasting.
+#[derive(Clone, Copy)]
 enum LinkKind {
     /// Symbolic link.
     Symlink,
