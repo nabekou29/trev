@@ -23,6 +23,20 @@ use crate::config::{
 };
 use crate::git::GitFileStatus;
 
+/// Flags describing a node's category for style resolution.
+#[derive(Debug, Clone, Copy)]
+#[expect(clippy::struct_excessive_bools, reason = "one bool per independent category flag")]
+pub struct NodeStyleFlags {
+    /// Whether the node is a directory.
+    pub is_dir: bool,
+    /// Whether the node is a symbolic link.
+    pub is_symlink: bool,
+    /// Whether the node is gitignored.
+    pub is_ignored: bool,
+    /// Whether the node is a broken (orphan) symbolic link.
+    pub is_orphan: bool,
+}
+
 /// Pre-compiled file style matcher for efficient per-file style lookups.
 #[derive(Debug)]
 pub struct FileStyleMatcher {
@@ -65,13 +79,11 @@ impl FileStyleMatcher {
     pub fn resolve_style(
         &self,
         filename: &str,
-        is_dir: bool,
-        is_symlink: bool,
-        is_ignored: bool,
+        flags: NodeStyleFlags,
         git_status: Option<GitFileStatus>,
     ) -> Style {
         // 1. Start with category default.
-        let category = self.resolve_category_style(is_dir, is_symlink, is_ignored);
+        let category = self.resolve_category_style(flags);
         let mut style = apply_style_config(Style::default(), category);
 
         // 2. Apply git status color (only when category didn't set fg).
@@ -93,17 +105,14 @@ impl FileStyleMatcher {
     }
 
     /// Get the category style for a node based on its type flags.
-    fn resolve_category_style(
-        &self,
-        is_dir: bool,
-        is_symlink: bool,
-        is_ignored: bool,
-    ) -> &StyleConfig {
-        if is_ignored {
+    fn resolve_category_style(&self, flags: NodeStyleFlags) -> &StyleConfig {
+        if flags.is_orphan {
+            &self.category_styles.orphan_symlink
+        } else if flags.is_ignored {
             &self.category_styles.gitignored
-        } else if is_dir {
+        } else if flags.is_dir {
             &self.category_styles.directory
-        } else if is_symlink {
+        } else if flags.is_symlink {
             &self.category_styles.symlink
         } else {
             // Default file style: empty (no overrides).
@@ -197,11 +206,17 @@ mod tests {
     use super::*;
     use crate::config::ColorConfig;
 
+    /// Helper: create flags for a regular file.
+    const fn file_flags() -> NodeStyleFlags {
+        NodeStyleFlags { is_dir: false, is_symlink: false, is_ignored: false, is_orphan: false }
+    }
+
     #[rstest]
     fn empty_rules_directory_gets_default_blue_bold() {
         let category = CategoryStyles::default();
         let matcher = FileStyleMatcher::new(&[], &category).unwrap();
-        let style = matcher.resolve_style("src", true, false, false, None);
+        let flags = NodeStyleFlags { is_dir: true, ..file_flags() };
+        let style = matcher.resolve_style("src", flags, None);
         assert_that!(style.fg.unwrap(), eq(Color::Blue));
         assert_that!(style.add_modifier.contains(Modifier::BOLD), eq(true));
     }
@@ -210,7 +225,8 @@ mod tests {
     fn empty_rules_symlink_gets_cyan() {
         let category = CategoryStyles::default();
         let matcher = FileStyleMatcher::new(&[], &category).unwrap();
-        let style = matcher.resolve_style("link.txt", false, true, false, None);
+        let flags = NodeStyleFlags { is_symlink: true, ..file_flags() };
+        let style = matcher.resolve_style("link.txt", flags, None);
         assert_that!(style.fg.unwrap(), eq(Color::Cyan));
     }
 
@@ -218,7 +234,8 @@ mod tests {
     fn empty_rules_ignored_gets_dark_gray() {
         let category = CategoryStyles::default();
         let matcher = FileStyleMatcher::new(&[], &category).unwrap();
-        let style = matcher.resolve_style("target", false, false, true, None);
+        let flags = NodeStyleFlags { is_ignored: true, ..file_flags() };
+        let style = matcher.resolve_style("target", flags, None);
         assert_that!(style.fg.unwrap(), eq(Color::DarkGray));
     }
 
@@ -226,7 +243,7 @@ mod tests {
     fn empty_rules_regular_file_no_git_is_plain() {
         let category = CategoryStyles::default();
         let matcher = FileStyleMatcher::new(&[], &category).unwrap();
-        let style = matcher.resolve_style("main.rs", false, false, false, None);
+        let style = matcher.resolve_style("main.rs", file_flags(), None);
         assert_that!(style.fg, eq(None));
         assert_that!(style.add_modifier, eq(Modifier::empty()));
     }
@@ -235,8 +252,7 @@ mod tests {
     fn git_status_applies_fg_to_regular_file() {
         let category = CategoryStyles::default();
         let matcher = FileStyleMatcher::new(&[], &category).unwrap();
-        let style =
-            matcher.resolve_style("main.rs", false, false, false, Some(GitFileStatus::Modified));
+        let style = matcher.resolve_style("main.rs", file_flags(), Some(GitFileStatus::Modified));
         assert_that!(style.fg.unwrap(), eq(Color::Yellow));
     }
 
@@ -253,7 +269,7 @@ mod tests {
         }];
         let matcher = FileStyleMatcher::new(&rules, &category).unwrap();
         let style =
-            matcher.resolve_style("Cargo.lock", false, false, false, Some(GitFileStatus::Modified));
+            matcher.resolve_style("Cargo.lock", file_flags(), Some(GitFileStatus::Modified));
         assert_that!(style.fg.unwrap(), eq(Color::DarkGray));
         assert_that!(style.add_modifier.contains(Modifier::DIM), eq(true));
     }
@@ -266,8 +282,7 @@ mod tests {
             style: StyleConfig { bold: true, ..StyleConfig::default() },
         }];
         let matcher = FileStyleMatcher::new(&rules, &category).unwrap();
-        let style =
-            matcher.resolve_style("main.rs", false, false, false, Some(GitFileStatus::Modified));
+        let style = matcher.resolve_style("main.rs", file_flags(), Some(GitFileStatus::Modified));
         assert_that!(style.fg.unwrap(), eq(Color::Yellow));
         assert_that!(style.add_modifier.contains(Modifier::BOLD), eq(true));
     }
@@ -293,9 +308,30 @@ mod tests {
             },
         ];
         let matcher = FileStyleMatcher::new(&rules, &category).unwrap();
-        let style = matcher.resolve_style("README.md", false, false, false, None);
+        let style = matcher.resolve_style("README.md", file_flags(), None);
         assert_that!(style.fg.unwrap(), eq(Color::Yellow));
         assert_that!(style.add_modifier.contains(Modifier::BOLD), eq(true));
+    }
+
+    #[rstest]
+    fn orphan_symlink_gets_red_dim_style() {
+        let category = CategoryStyles::default();
+        let matcher = FileStyleMatcher::new(&[], &category).unwrap();
+        let flags = NodeStyleFlags { is_symlink: true, is_orphan: true, ..file_flags() };
+        let style = matcher.resolve_style("broken", flags, None);
+        assert_that!(style.fg.unwrap(), eq(Color::Red));
+        assert_that!(style.add_modifier.contains(Modifier::DIM), eq(true));
+    }
+
+    #[rstest]
+    fn orphan_takes_priority_over_ignored() {
+        let category = CategoryStyles::default();
+        let matcher = FileStyleMatcher::new(&[], &category).unwrap();
+        let flags =
+            NodeStyleFlags { is_symlink: true, is_ignored: true, is_orphan: true, ..file_flags() };
+        let style = matcher.resolve_style("broken", flags, None);
+        // orphan should win over gitignored
+        assert_that!(style.fg.unwrap(), eq(Color::Red));
     }
 
     #[rstest]

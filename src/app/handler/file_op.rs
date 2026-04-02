@@ -135,6 +135,15 @@ pub fn handle_file_op_action(
         FileOpAction::Redo => {
             execute_redo(state, ctx);
         }
+        FileOpAction::PasteMenu => {
+            open_paste_menu(state);
+        }
+        FileOpAction::PasteAsSymlink => {
+            execute_paste_as_link(state, ctx, LinkKind::Symlink);
+        }
+        FileOpAction::PasteAsHardlink => {
+            execute_paste_as_link(state, ctx, LinkKind::Hardlink);
+        }
         FileOpAction::Copy(copy_action) => {
             use crate::action::CopyAction;
             match copy_action {
@@ -215,6 +224,123 @@ fn open_copy_menu(state: &mut AppState) {
         on_select: MenuAction::Custom,
         item_actions,
     });
+}
+
+/// Build and open the paste options menu.
+fn open_paste_menu(state: &mut AppState) {
+    use crate::action::{
+        Action,
+        FileOpAction,
+    };
+    use crate::input::{
+        MenuAction,
+        MenuItem,
+        MenuState,
+    };
+
+    let items = vec![
+        MenuItem { key: 'p', label: "Paste".to_string(), value: String::new() },
+        MenuItem { key: 's', label: "Symlink".to_string(), value: String::new() },
+        MenuItem { key: 'h', label: "Hard link".to_string(), value: String::new() },
+    ];
+    let item_actions = vec![
+        Action::FileOp(FileOpAction::Paste),
+        Action::FileOp(FileOpAction::PasteAsSymlink),
+        Action::FileOp(FileOpAction::PasteAsHardlink),
+    ];
+
+    state.mode = AppMode::Menu(MenuState {
+        title: "Paste".to_string(),
+        items,
+        cursor: 0,
+        on_select: MenuAction::Custom,
+        item_actions,
+    });
+}
+
+/// Kind of link to create when pasting.
+#[derive(Clone, Copy)]
+enum LinkKind {
+    /// Symbolic link.
+    Symlink,
+    /// Hard link.
+    Hardlink,
+}
+
+/// Execute paste-as-link operation: create symlinks or hard links to yanked paths.
+fn execute_paste_as_link(state: &mut AppState, ctx: &AppContext, kind: LinkKind) {
+    let mode = state.selection.mode().copied();
+
+    // Only Copy mode makes sense for link creation.
+    if !matches!(mode, Some(SelectionMode::Copy)) {
+        state.set_status("Nothing to paste (yank files first)");
+        return;
+    }
+
+    let _guard = SuppressGuard::new(&ctx.suppressed);
+
+    let Some(info) = state.tree_state.current_node_info() else {
+        return;
+    };
+
+    let dst_dir = if info.is_dir {
+        info.path
+    } else {
+        info.path.parent().map_or_else(|| info.path.clone(), Path::to_path_buf)
+    };
+
+    let mut undo_ops: Vec<UndoOp> = Vec::new();
+    let sources = state.selection.deduplicated_paths();
+    let kind_name = match kind {
+        LinkKind::Symlink => "symlink",
+        LinkKind::Hardlink => "hard link",
+    };
+
+    for src in &sources {
+        let Some(file_name) = src.file_name() else {
+            tracing::warn!(?src, "skipping: no file name");
+            continue;
+        };
+
+        let desired_dst = dst_dir.join(file_name);
+        let final_dst = crate::file_op::conflict::resolve_conflict(&desired_dst);
+
+        let op = match kind {
+            LinkKind::Symlink => {
+                FsOp::CreateSymlink { target: src.clone(), link: final_dst.clone() }
+            }
+            LinkKind::Hardlink => {
+                if src.is_dir() {
+                    tracing::warn!(?src, "skipping: cannot create hard link to directory");
+                    state.set_status("Cannot create hard link to a directory");
+                    continue;
+                }
+                FsOp::CreateHardlink { original: src.clone(), link: final_dst.clone() }
+            }
+        };
+
+        if let Err(e) = execute(&op) {
+            tracing::error!(%e, ?src, "paste as {kind_name} failed");
+            continue;
+        }
+
+        if let Some(undo_op) = build_undo_op(op) {
+            undo_ops.push(undo_op);
+        }
+    }
+
+    let paste_count = undo_ops.len();
+    state.selection.clear();
+
+    if !undo_ops.is_empty() {
+        state.undo_history.push(OpGroup {
+            description: format!("Paste {paste_count} {kind_name}(s)"),
+            ops: undo_ops,
+        });
+    }
+
+    refresh_directory(state, &dst_dir, ctx);
+    state.set_status(format!("Created {paste_count} {kind_name}(s)"));
 }
 
 /// Copy a specific value to the clipboard directly (without opening the menu).
@@ -760,6 +886,11 @@ fn collect_affected_parents(ops: &[FsOp]) -> HashSet<PathBuf> {
                     parents.insert(p.to_path_buf());
                 }
             }
+            FsOp::CreateSymlink { link, .. } | FsOp::CreateHardlink { link, .. } => {
+                if let Some(p) = link.parent() {
+                    parents.insert(p.to_path_buf());
+                }
+            }
         }
     }
     parents
@@ -796,5 +927,28 @@ mod tests {
     #[rstest]
     fn validate_name_rejects_absolute_path() {
         assert_that!(validate_name("/etc/passwd"), err(anything()));
+    }
+
+    #[rstest]
+    fn collect_affected_parents_for_create_symlink() {
+        let ops = vec![FsOp::CreateSymlink {
+            target: PathBuf::from("/src/file.txt"),
+            link: PathBuf::from("/dst/link.txt"),
+        }];
+        let parents = collect_affected_parents(&ops);
+        assert_that!(parents.contains(&PathBuf::from("/dst")), eq(true));
+        // target parent is not included (only link location matters)
+        assert_that!(parents.contains(&PathBuf::from("/src")), eq(false));
+    }
+
+    #[rstest]
+    fn collect_affected_parents_for_create_hardlink() {
+        let ops = vec![FsOp::CreateHardlink {
+            original: PathBuf::from("/src/file.txt"),
+            link: PathBuf::from("/dst/hardlink.txt"),
+        }];
+        let parents = collect_affected_parents(&ops);
+        assert_that!(parents.contains(&PathBuf::from("/dst")), eq(true));
+        assert_that!(parents.contains(&PathBuf::from("/src")), eq(false));
     }
 }

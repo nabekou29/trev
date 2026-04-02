@@ -127,6 +127,15 @@
             "italic": false,
             "underlined": false
           },
+          "orphan_symlink": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": true,
+            "fg": "red",
+            "italic": false,
+            "underlined": false
+          },
           "symlink": {
             "bg": null,
             "bold": false,
@@ -345,6 +354,19 @@
             "crossed_out": false,
             "dim": false,
             "fg": "dark_gray",
+            "italic": false,
+            "underlined": false
+          }
+        },
+        "orphan_symlink": {
+          "description": "Style for broken (orphan) symbolic link names.",
+          "$ref": "#/$defs/StyleConfig",
+          "default": {
+            "bg": null,
+            "bold": false,
+            "crossed_out": false,
+            "dim": true,
+            "fg": "red",
             "italic": false,
             "underlined": false
           }
@@ -678,6 +700,15 @@
               "italic": false,
               "underlined": false
             },
+            "orphan_symlink": {
+              "bg": null,
+              "bold": false,
+              "crossed_out": false,
+              "dim": true,
+              "fg": "red",
+              "italic": false,
+              "underlined": false
+            },
             "symlink": {
               "bg": null,
               "bold": false,
@@ -929,6 +960,9 @@
                 "file_op.redo",
                 "file_op.toggle_mark",
                 "file_op.clear_selections",
+                "file_op.paste_menu",
+                "file_op.paste_as_symlink",
+                "file_op.paste_as_hardlink",
                 "file_op.copy.menu",
                 "file_op.copy.absolute_path",
                 "file_op.copy.relative_path",

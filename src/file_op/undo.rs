@@ -158,6 +158,11 @@ fn validate_op_precondition(op: &FsOp) -> Result<()> {
                 bail!("Path does not exist: {}", path.display());
             }
         }
+        FsOp::CreateSymlink { link, .. } | FsOp::CreateHardlink { link, .. } => {
+            if link.exists() {
+                bail!("Link path already exists: {}", link.display());
+            }
+        }
     }
     Ok(())
 }
@@ -207,6 +212,14 @@ pub fn reverse_op(forward: &FsOp) -> Option<FsOp> {
         FsOp::RemoveDir { path } => {
             tracing::warn!(?path, "cannot reverse permanent directory removal");
             None
+        }
+        FsOp::CreateSymlink { link, .. } => {
+            // Undo symlink creation = remove the symlink file.
+            Some(FsOp::RemoveFile { path: link.clone() })
+        }
+        FsOp::CreateHardlink { link, .. } => {
+            // Undo hard link creation = remove the hard link.
+            Some(FsOp::RemoveFile { path: link.clone() })
         }
     }
 }
@@ -397,6 +410,59 @@ mod tests {
         let op = op.unwrap();
         assert_eq!(op.forward, FsOp::CreateFile { path: PathBuf::from("/a") });
         assert_eq!(op.reverse, FsOp::RemoveFile { path: PathBuf::from("/a") });
+    }
+
+    #[rstest]
+    fn reverse_op_for_create_symlink() {
+        let rev = reverse_op(&FsOp::CreateSymlink {
+            target: PathBuf::from("/target"),
+            link: PathBuf::from("/link"),
+        });
+        assert_eq!(rev, Some(FsOp::RemoveFile { path: PathBuf::from("/link") }));
+    }
+
+    #[rstest]
+    fn reverse_op_for_create_hardlink() {
+        let rev = reverse_op(&FsOp::CreateHardlink {
+            original: PathBuf::from("/original"),
+            link: PathBuf::from("/link"),
+        });
+        assert_eq!(rev, Some(FsOp::RemoveFile { path: PathBuf::from("/link") }));
+    }
+
+    #[rstest]
+    fn validate_precondition_rejects_existing_symlink_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let existing = tmp.path().join("exists.txt");
+        std::fs::write(&existing, "data").unwrap();
+
+        let result = validate_op_precondition(&FsOp::CreateSymlink {
+            target: PathBuf::from("/target"),
+            link: existing,
+        });
+        assert!(result.is_err());
+    }
+
+    #[rstest]
+    fn validate_precondition_accepts_nonexistent_symlink_path() {
+        let result = validate_op_precondition(&FsOp::CreateSymlink {
+            target: PathBuf::from("/target"),
+            link: PathBuf::from("/nonexistent/link"),
+        });
+        assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn validate_precondition_rejects_existing_hardlink_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let existing = tmp.path().join("exists.txt");
+        std::fs::write(&existing, "data").unwrap();
+
+        let result = validate_op_precondition(&FsOp::CreateHardlink {
+            original: PathBuf::from("/original"),
+            link: existing,
+        });
+        assert!(result.is_err());
     }
 
     #[rstest]

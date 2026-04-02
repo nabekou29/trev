@@ -31,6 +31,11 @@ display:
   show_icons: true
   show_root_entry: false
   modal_avoid_preview: false # フローティングモーダルをツリー領域内に制限
+  category_styles:
+    directory: { fg: blue, bold: true }
+    symlink: { fg: cyan }
+    orphan_symlink: { fg: red, dim: true } # 壊れたシンボリックリンク
+    gitignored: { fg: dark_gray }
   columns: # メタデータカラムの表示順
     - git_status
     - size
