@@ -1,4 +1,12 @@
 
+## [0.1.9] - 2026-04-02
+
+### Features
+
+- Add configurable scroll amount (#3)
+- Improve symlink handling (#4)
+
+
 ## [0.1.8] - 2026-03-28
 
 ### Features
