@@ -44,91 +44,12 @@ fn make_nested_entries(root: &Path, dirs: usize, files_per_dir: usize) -> Vec<Se
 }
 
 // ---------------------------------------------------------------------------
-// search() benchmarks
-// ---------------------------------------------------------------------------
-
-fn bench_search_100k(c: &mut Criterion) {
-    let root = Path::new("/bench/root");
-    let entries = make_entries(root, 100_000);
-
-    c.bench_function("search_100k_entries", |b| {
-        b.iter(|| {
-            let results = search_engine::search(&entries, "file0005", root, SearchMode::Name);
-            std::hint::black_box(results.len());
-        });
-    });
-}
-
-fn bench_search_1m(c: &mut Criterion) {
-    let root = Path::new("/bench/root");
-    let entries = make_entries(root, 1_000_000);
-
-    c.bench_function("search_1m_entries", |b| {
-        b.iter(|| {
-            let results = search_engine::search(&entries, "file0005", root, SearchMode::Name);
-            std::hint::black_box(results.len());
-        });
-    });
-}
-
-fn bench_search_10m(c: &mut Criterion) {
-    let root = Path::new("/bench/root");
-    let entries = make_entries(root, 10_000_000);
-
-    c.bench_function("search_10m_entries", |b| {
-        b.iter(|| {
-            let results = search_engine::search(&entries, "file0005", root, SearchMode::Name);
-            std::hint::black_box(results.len());
-        });
-    });
-}
-
-fn bench_search_10m_path_mode(c: &mut Criterion) {
-    let root = Path::new("/bench/root");
-    let entries = make_nested_entries(root, 10_000, 1_000);
-
-    c.bench_function("search_10m_entries_path_mode", |b| {
-        b.iter(|| {
-            let results = search_engine::search(&entries, "dir0001/file", root, SearchMode::Path);
-            std::hint::black_box(results.len());
-        });
-    });
-}
-
-fn bench_search_10m_few_matches(c: &mut Criterion) {
-    let root = Path::new("/bench/root");
-    let entries = make_entries(root, 10_000_000);
-
-    // Very specific query that matches very few entries.
-    c.bench_function("search_10m_few_matches", |b| {
-        b.iter(|| {
-            let results = search_engine::search(&entries, "^file00000001", root, SearchMode::Name);
-            std::hint::black_box(results.len());
-        });
-    });
-}
-
-fn bench_search_10m_many_matches(c: &mut Criterion) {
-    let root = Path::new("/bench/root");
-    let entries = make_entries(root, 10_000_000);
-
-    // Broad query that matches most entries.
-    c.bench_function("search_10m_many_matches", |b| {
-        b.iter(|| {
-            let results = search_engine::search(&entries, "file", root, SearchMode::Name);
-            std::hint::black_box(results.len());
-        });
-    });
-}
-
-// ---------------------------------------------------------------------------
 // NucleoSearchEngine benchmarks (async parallel)
 // ---------------------------------------------------------------------------
 
 use std::sync::Arc;
 
 use trev::tree::search_engine::{
-    MAX_SEARCH_RESULTS,
     NucleoSearchEngine,
     inject_entry,
 };
@@ -164,7 +85,7 @@ fn bench_nucleo_search_100k(c: &mut Criterion) {
             |mut engine| {
                 engine.update_pattern("file0005", SearchMode::Name);
                 tick_until_done(&mut engine);
-                let results = engine.collect_results(SearchMode::Name, MAX_SEARCH_RESULTS);
+                let results = engine.collect_results(SearchMode::Name, usize::MAX);
                 std::hint::black_box(results.len());
             },
             criterion::BatchSize::LargeInput,
@@ -187,7 +108,7 @@ fn bench_nucleo_search_1m(c: &mut Criterion) {
             |mut engine| {
                 engine.update_pattern("file0005", SearchMode::Name);
                 tick_until_done(&mut engine);
-                let results = engine.collect_results(SearchMode::Name, MAX_SEARCH_RESULTS);
+                let results = engine.collect_results(SearchMode::Name, usize::MAX);
                 std::hint::black_box(results.len());
             },
             criterion::BatchSize::LargeInput,
@@ -210,7 +131,7 @@ fn bench_nucleo_search_10m(c: &mut Criterion) {
             |mut engine| {
                 engine.update_pattern("file0005", SearchMode::Name);
                 tick_until_done(&mut engine);
-                let results = engine.collect_results(SearchMode::Name, MAX_SEARCH_RESULTS);
+                let results = engine.collect_results(SearchMode::Name, usize::MAX);
                 std::hint::black_box(results.len());
             },
             criterion::BatchSize::LargeInput,
@@ -233,7 +154,7 @@ fn bench_nucleo_search_10m_path_mode(c: &mut Criterion) {
             |mut engine| {
                 engine.update_pattern("dir0001/file", SearchMode::Path);
                 tick_until_done(&mut engine);
-                let results = engine.collect_results(SearchMode::Path, MAX_SEARCH_RESULTS);
+                let results = engine.collect_results(SearchMode::Path, usize::MAX);
                 std::hint::black_box(results.len());
             },
             criterion::BatchSize::LargeInput,
@@ -259,7 +180,7 @@ fn bench_nucleo_incremental_keystrokes_1m(c: &mut Criterion) {
                     engine.update_pattern(query, SearchMode::Name);
                     tick_until_done(&mut engine);
                 }
-                let results = engine.collect_results(SearchMode::Name, MAX_SEARCH_RESULTS);
+                let results = engine.collect_results(SearchMode::Name, usize::MAX);
                 std::hint::black_box(results.len());
             },
             criterion::BatchSize::LargeInput,
@@ -285,7 +206,7 @@ fn bench_nucleo_incremental_keystrokes_10m(c: &mut Criterion) {
                     engine.update_pattern(query, SearchMode::Name);
                     tick_until_done(&mut engine);
                 }
-                let results = engine.collect_results(SearchMode::Name, MAX_SEARCH_RESULTS);
+                let results = engine.collect_results(SearchMode::Name, usize::MAX);
                 std::hint::black_box(results.len());
             },
             criterion::BatchSize::LargeInput,
@@ -425,21 +346,6 @@ fn bench_set_search_filter_10k(c: &mut Criterion) {
 }
 
 criterion_group! {
-    name = search_benches;
-    config = Criterion::default()
-        .sample_size(10)
-        .warm_up_time(std::time::Duration::from_secs(1))
-        .measurement_time(std::time::Duration::from_secs(5));
-    targets =
-        bench_search_100k,
-        bench_search_1m,
-        bench_search_10m,
-        bench_search_10m_path_mode,
-        bench_search_10m_few_matches,
-        bench_search_10m_many_matches
-}
-
-criterion_group! {
     name = visible_path_benches;
     config = Criterion::default()
         .sample_size(10)
@@ -476,4 +382,4 @@ criterion_group! {
         bench_nucleo_incremental_keystrokes_10m
 }
 
-criterion_main!(search_benches, visible_path_benches, filter_benches, nucleo_benches);
+criterion_main!(visible_path_benches, filter_benches, nucleo_benches);

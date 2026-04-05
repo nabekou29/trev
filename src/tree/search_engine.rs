@@ -1,9 +1,7 @@
 //! Fuzzy search engine for the file tree.
 //!
-//! Provides two search backends:
-//! - [`search()`]: Synchronous single-threaded fuzzy matching (used by benchmarks).
-//! - [`NucleoSearchEngine`]: Async parallel matching powered by `Nucleo<T>`,
-//!   designed for responsive TUI search with 10M+ entries.
+//! Powered by [`NucleoSearchEngine`], an async parallel matching backend built
+//! on `Nucleo<T>`, designed for responsive TUI search with 10M+ entries.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -17,17 +15,10 @@ use nucleo::Matcher;
 use nucleo::pattern::{
     CaseMatching,
     Normalization,
-    Pattern,
 };
 
 use super::search_index::SearchEntry;
 use crate::input::SearchMode;
-
-/// Maximum number of search results used for tree filtering.
-///
-/// Limits the cost of [`compute_visible_paths`] and tree filter operations
-/// while still showing the most relevant results.
-pub const MAX_SEARCH_RESULTS: usize = 10_000;
 
 /// Column index for the file/directory name (used in Name mode).
 const COL_NAME: usize = 0;
@@ -206,91 +197,6 @@ pub fn inject_entry(
 }
 
 // ===========================================================================
-// Synchronous search — kept for benchmarks and backward compatibility
-// ===========================================================================
-
-/// Search the given entries for the query using fuzzy matching.
-///
-/// Returns all matching results sorted by score descending.
-/// In `Name` mode, matches against the file/directory name.
-/// In `Path` mode, matches against the relative path from `root_path`.
-pub fn search(
-    entries: &[SearchEntry],
-    query: &str,
-    root_path: &Path,
-    mode: SearchMode,
-) -> Vec<SearchResult> {
-    if query.is_empty() {
-        return Vec::new();
-    }
-
-    // Use `parse` instead of `new` to support fzf-style syntax:
-    // 'foo (substring), ^foo (prefix), foo$ (suffix), !foo (negation).
-    let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
-
-    let mut ctx = MatchContext {
-        matcher: Matcher::new(nucleo::Config::DEFAULT),
-        indices_buf: Vec::new(),
-        utf32_buf: Vec::new(),
-        path_buf: String::new(),
-    };
-
-    let mut results: Vec<SearchResult> = entries
-        .iter()
-        .filter_map(|entry| {
-            let (score, indices) = match_entry(entry, &pattern, &mut ctx, root_path, mode)?;
-            Some(SearchResult {
-                path: entry.path.clone(),
-                is_dir: entry.is_dir,
-                score,
-                match_indices: indices,
-            })
-        })
-        .collect();
-    results.sort_by_key(|r| std::cmp::Reverse(r.score));
-    results
-}
-
-/// Reusable buffers for fuzzy matching, avoiding per-entry allocation.
-struct MatchContext {
-    /// The nucleo matcher instance.
-    matcher: Matcher,
-    /// Buffer for match indices.
-    indices_buf: Vec<u32>,
-    /// Buffer for UTF-32 conversion.
-    utf32_buf: Vec<char>,
-    /// Buffer for relative path strings.
-    path_buf: String,
-}
-
-/// Try to match a single entry against the pattern.
-///
-/// Returns `Some((score, match_indices))` if the entry matches, `None`
-/// otherwise.
-fn match_entry(
-    entry: &SearchEntry,
-    pattern: &Pattern,
-    ctx: &mut MatchContext,
-    root_path: &Path,
-    mode: SearchMode,
-) -> Option<(u32, Vec<u32>)> {
-    let haystack_str = match mode {
-        SearchMode::Name => &entry.name,
-        SearchMode::Path => {
-            ctx.path_buf.clear();
-            let rel = entry.path.strip_prefix(root_path).ok()?;
-            ctx.path_buf.push_str(&rel.to_string_lossy());
-            &ctx.path_buf
-        }
-    };
-    let haystack = nucleo::Utf32Str::new(haystack_str, &mut ctx.utf32_buf);
-
-    ctx.indices_buf.clear();
-    let score = pattern.indices(haystack, &mut ctx.matcher, &mut ctx.indices_buf)?;
-    Some((score, ctx.indices_buf.clone()))
-}
-
-// ===========================================================================
 // Shared utilities
 // ===========================================================================
 
@@ -329,70 +235,6 @@ mod tests {
         let p = PathBuf::from(path);
         let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
         SearchEntry { path: p, name, is_dir }
-    }
-
-    // ===================================================================
-    // Synchronous search tests
-    // ===================================================================
-
-    #[rstest]
-    fn search_empty_query_returns_empty() {
-        let entries = vec![make_entry("/root/foo.txt", false)];
-        let results = search(&entries, "", Path::new("/root"), SearchMode::Name);
-        assert_that!(results.len(), eq(0));
-    }
-
-    #[rstest]
-    fn search_matches_file_name() {
-        let entries = vec![
-            make_entry("/root/foo.txt", false),
-            make_entry("/root/bar.txt", false),
-            make_entry("/root/foobar.rs", false),
-        ];
-        let results = search(&entries, "foo", Path::new("/root"), SearchMode::Name);
-        assert_that!(results.len(), ge(1));
-        // "foo.txt" should be a match.
-        assert!(results.iter().any(|r| r.path == Path::new("/root/foo.txt")));
-    }
-
-    #[rstest]
-    fn search_returns_all_matches() {
-        let entries: Vec<SearchEntry> =
-            (0..100).map(|i| make_entry(&format!("/root/file{i}.txt"), false)).collect();
-        let results = search(&entries, "file", Path::new("/root"), SearchMode::Name);
-        assert_that!(results.len(), eq(100));
-    }
-
-    #[rstest]
-    fn search_results_sorted_by_score_descending() {
-        let entries = vec![
-            make_entry("/root/abcdef.txt", false),
-            make_entry("/root/abc.txt", false),
-            make_entry("/root/sub/abc_file.txt", false),
-        ];
-        let results = search(&entries, "abc", Path::new("/root"), SearchMode::Name);
-        // Scores should be in descending order.
-        for window in results.windows(2) {
-            assert!(window[0].score >= window[1].score);
-        }
-    }
-
-    #[rstest]
-    fn search_name_mode_does_not_match_path() {
-        let entries = vec![make_entry("/root/src/main.rs", false)];
-        // Name mode matches the file name only.
-        let results = search(&entries, "main", Path::new("/root"), SearchMode::Name);
-        assert_that!(results.len(), eq(1));
-        // Path-based query should not match in Name mode.
-        let results = search(&entries, "src/main", Path::new("/root"), SearchMode::Name);
-        assert_that!(results.len(), eq(0));
-    }
-
-    #[rstest]
-    fn search_path_mode_matches_relative_path() {
-        let entries = vec![make_entry("/root/src/main.rs", false)];
-        let results = search(&entries, "src/main", Path::new("/root"), SearchMode::Path);
-        assert_that!(results.len(), eq(1));
     }
 
     // ===================================================================
