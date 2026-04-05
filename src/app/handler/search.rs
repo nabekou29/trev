@@ -75,11 +75,11 @@ fn handle_typing_key(key: KeyEvent, state: &mut AppState, ctx: &AppContext) {
         }
         KeyCode::Up => {
             navigate_history(state, HistoryDirection::Older);
-            run_incremental_search(state, ctx);
+            run_incremental_search(state);
         }
         KeyCode::Down => {
             navigate_history(state, HistoryDirection::Newer);
-            run_incremental_search(state, ctx);
+            run_incremental_search(state);
         }
         KeyCode::Tab => {
             // Toggle search mode (Name ↔ Path) and re-run search.
@@ -87,7 +87,7 @@ fn handle_typing_key(key: KeyEvent, state: &mut AppState, ctx: &AppContext) {
                 return;
             };
             search.mode = search.mode.toggle();
-            run_incremental_search(state, ctx);
+            run_incremental_search(state);
         }
         _ => {
             // Try editing the text buffer.
@@ -96,7 +96,7 @@ fn handle_typing_key(key: KeyEvent, state: &mut AppState, ctx: &AppContext) {
             };
             if search.buffer.handle_key_event(key) {
                 // Text changed — run incremental search.
-                run_incremental_search(state, ctx);
+                run_incremental_search(state);
             }
         }
     }
@@ -211,11 +211,11 @@ pub fn reapply_search(state: &mut AppState, ctx: &AppContext, original_cursor_pa
 /// Called when the background search index build completes to replace stale
 /// results from the previous visibility settings.
 /// No-op when no search is active.
-pub fn refresh_search(state: &mut AppState, ctx: &AppContext) {
+pub fn refresh_search(state: &mut AppState) {
     if !matches!(state.mode, AppMode::Search(_)) {
         return;
     }
-    run_incremental_search(state, ctx);
+    run_incremental_search(state);
 }
 
 /// Flush any pending search debounce, applying results immediately.
@@ -242,7 +242,7 @@ const SEARCH_DEBOUNCE: Duration = Duration::from_millis(100);
 /// key input is never blocked. Sets a debounce deadline; the actual results
 /// are applied in [`apply_nucleo_results`] once the deadline expires and
 /// Nucleo workers have produced results.
-fn run_incremental_search(state: &mut AppState, _ctx: &AppContext) {
+fn run_incremental_search(state: &mut AppState) {
     let AppMode::Search(ref search) = state.mode else {
         return;
     };
@@ -286,14 +286,16 @@ pub fn apply_nucleo_results(state: &mut AppState, ctx: &AppContext) {
 
     let results = state.search_engine.collect_results(mode, usize::MAX);
 
-    // Store match indices for highlight rendering.
-    state.search_match_indices.clear();
-    for r in &results {
-        state.search_match_indices.insert(r.path.clone(), r.match_indices.clone());
-    }
-
     let current_path = state.tree_state.cursor_path();
+    let first_result_path = results.first().map(|r| r.path.clone());
     let visible_paths = search_engine::compute_visible_paths(&results, &ctx.root_path);
+
+    // Store match indices for highlight rendering (consume results by value
+    // to avoid re-cloning the PathBuf and Vec<u32> that collect_results already owns).
+    state.search_match_indices.clear();
+    for r in results {
+        state.search_match_indices.insert(r.path, r.match_indices);
+    }
 
     // Register unloaded ancestor directories for progressive async loading.
     let mut pending: Vec<std::path::PathBuf> = visible_paths.iter().cloned().collect();
@@ -316,8 +318,8 @@ pub fn apply_nucleo_results(state: &mut AppState, ctx: &AppContext) {
     // Keep cursor on the same file if it's still visible in the filtered
     // results; otherwise fall back to the first (highest score) result.
     let preserved = current_path.as_ref().is_some_and(|p| state.tree_state.move_cursor_to_path(p));
-    if !preserved && let Some(first) = results.first() {
-        state.tree_state.move_cursor_to_path(&first.path);
+    if !preserved && let Some(ref first) = first_result_path {
+        state.tree_state.move_cursor_to_path(first);
     }
 
     state.dirty = true;

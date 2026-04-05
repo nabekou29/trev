@@ -719,7 +719,7 @@ fn process_async_events(
     // Search index build completed — re-run the active search with the fresh index.
     if channels.drain_search_index_ready().next().is_some() {
         had_events = true;
-        handler::search::refresh_search(state, ctx);
+        handler::search::refresh_search(state);
     }
 
     // Nucleo worker notification — tick the search engine to process background work.

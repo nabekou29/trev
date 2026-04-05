@@ -155,7 +155,8 @@ impl NucleoSearchEngine {
             SearchMode::Path => COL_PATH,
         };
 
-        // Destructure to enable disjoint field borrows.
+        // Borrow checker requires destructuring: `nucleo` is borrowed immutably
+        // (snapshot + pattern) while `indices_matcher` and `indices_buf` are mutable.
         let Self { nucleo, indices_matcher, indices_buf } = self;
         let snapshot = nucleo.snapshot();
         let count = (snapshot.matched_item_count() as usize).min(max_results);
@@ -181,11 +182,6 @@ impl NucleoSearchEngine {
         }
 
         results
-    }
-
-    /// Check whether a search pattern is active (non-empty).
-    pub fn has_pattern(&self) -> bool {
-        !self.nucleo.pattern.is_empty()
     }
 }
 
