@@ -7,6 +7,10 @@
 //!   and the user can navigate with normal tree keys. Esc clears the filter.
 
 use std::path::Path;
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use crossterm::event::{
     KeyCode,
@@ -59,11 +63,14 @@ fn handle_typing_key(key: KeyEvent, state: &mut AppState, ctx: &AppContext) {
     match key.code {
         KeyCode::Esc => {
             // Cancel search, restore normal tree view.
+            state.search_debounce = None;
             state.clear_search();
             state.mode = AppMode::Normal;
             state.dirty = true;
         }
         KeyCode::Enter => {
+            // Flush pending debounce so results are up-to-date before confirming.
+            flush_search_debounce(state, ctx);
             confirm_search(state);
         }
         KeyCode::Up => {
@@ -211,11 +218,31 @@ pub fn refresh_search(state: &mut AppState, ctx: &AppContext) {
     run_incremental_search(state, ctx);
 }
 
+/// Flush any pending search debounce, applying results immediately.
+///
+/// Called before actions that depend on up-to-date results (e.g. confirming
+/// search with Enter) so the tree filter reflects the latest query.
+fn flush_search_debounce(state: &mut AppState, ctx: &AppContext) {
+    if state.search_debounce.take().is_some() {
+        state.search_engine.tick(10);
+        apply_nucleo_results(state, ctx);
+    }
+}
+
+/// Debounce duration for search result application.
+///
+/// During rapid typing, intermediate Nucleo results are deferred until input
+/// settles. Each keystroke resets the deadline, so only the final query's
+/// results trigger the expensive `apply_nucleo_results` pipeline.
+const SEARCH_DEBOUNCE: Duration = Duration::from_millis(100);
+
 /// Run the fuzzy search: update the Nucleo pattern and trigger background matching.
 ///
-/// The actual results are applied asynchronously in [`apply_nucleo_results`]
-/// when the Nucleo workers notify that matching has progressed.
-fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
+/// Only updates the pattern (instant, ~42µs) and returns immediately so that
+/// key input is never blocked. Sets a debounce deadline; the actual results
+/// are applied in [`apply_nucleo_results`] once the deadline expires and
+/// Nucleo workers have produced results.
+fn run_incremental_search(state: &mut AppState, _ctx: &AppContext) {
     let AppMode::Search(ref search) = state.mode else {
         return;
     };
@@ -224,19 +251,22 @@ fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
 
     if query.is_empty() {
         // Empty query: clear filter.
+        state.search_debounce = None;
         state.clear_search();
         state.dirty = true;
         return;
     }
 
     // Update the Nucleo pattern — matching happens asynchronously in worker threads.
-    // Results will arrive via the nucleo_notify channel and be applied in
-    // apply_nucleo_results().
     state.search_engine.update_pattern(query, mode);
 
-    // Immediately tick to start processing and pick up any already-available results.
-    state.search_engine.tick(10);
-    apply_nucleo_results(state, ctx);
+    // tick(0) dispatches work to workers without blocking. Without this call
+    // the pattern change is only recorded and workers never start.
+    state.search_engine.tick(0);
+
+    // Reset debounce — results will be applied after input settles.
+    state.search_debounce = Some(Instant::now() + SEARCH_DEBOUNCE);
+    state.dirty = true;
 }
 
 /// Apply current Nucleo search results to the tree filter.

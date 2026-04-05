@@ -117,6 +117,7 @@ fn app_state_from_tree(tree_state: TreeState) -> AppState {
         search_engine: trev::tree::search_engine::NucleoSearchEngine::new(std::sync::Arc::new(
             || {},
         )),
+        search_debounce: None,
     }
 }
 

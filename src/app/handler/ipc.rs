@@ -209,6 +209,7 @@ mod tests {
             search_pending_loads: None,
             search_index_cancelled: Arc::new(AtomicBool::new(false)),
             search_engine: crate::tree::search_engine::NucleoSearchEngine::new(Arc::new(|| {})),
+            search_debounce: None,
         }
     }
 

@@ -313,6 +313,7 @@ fn init_app(
         search_pending_loads: None,
         search_index_cancelled: Arc::new(AtomicBool::new(false)),
         search_engine: NucleoSearchEngine::new(nucleo_notify_fn),
+        search_debounce: None,
     };
 
     let (ctx, channels) = build_context_and_channels(
@@ -721,12 +722,18 @@ fn process_async_events(
         handler::search::refresh_search(state, ctx);
     }
 
-    // Nucleo worker notification — tick the search engine and update results.
+    // Nucleo worker notification — tick the search engine to process background work.
+    // Result application is deferred until the search debounce deadline passes
+    // (handled in the main event loop) so that rapid keystrokes skip intermediate
+    // heavy processing.
     if channels.drain_nucleo_notify().next().is_some() {
         let status = state.search_engine.tick(10);
         if status.changed {
             had_events = true;
-            handler::search::apply_nucleo_results(state, ctx);
+            if state.search_debounce.is_none() {
+                // No debounce active (e.g. results arriving after input settled) — apply now.
+                handler::search::apply_nucleo_results(state, ctx);
+            }
         }
     }
 
@@ -765,6 +772,10 @@ fn compute_poll_duration(state: &AppState) -> Duration {
         duration = duration.min(remaining);
     }
     if let Some(deadline) = state.preview_debounce {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        duration = duration.min(remaining);
+    }
+    if let Some(deadline) = state.search_debounce {
         let remaining = deadline.saturating_duration_since(Instant::now());
         duration = duration.min(remaining);
     }
@@ -928,6 +939,15 @@ pub async fn run(args: &Args) -> Result<()> {
         (last_cursor, had_events) =
             process_async_events(&mut state, &ctx, &mut channels, last_cursor);
         if had_events {
+            state.dirty = true;
+        }
+
+        // ── Fire pending debounced search results ───────────────
+        if state.search_debounce.is_some_and(|d| Instant::now() >= d) {
+            state.search_debounce = None;
+            // Tick once more to collect latest worker output before applying.
+            state.search_engine.tick(10);
+            handler::search::apply_nucleo_results(&mut state, &ctx);
             state.dirty = true;
         }
 
