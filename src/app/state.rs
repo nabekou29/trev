@@ -40,6 +40,7 @@ use crate::state::tree::{
     TreeNode,
     TreeState,
 };
+use crate::tree::search_engine::NucleoSearchEngine;
 use crate::ui::column::ResolvedColumn;
 use crate::watcher::FsWatcher;
 
@@ -137,6 +138,11 @@ pub struct AppState {
     /// Set to `true` to cancel the in-flight build before starting a new one
     /// (e.g. when toggling hidden/ignored file visibility).
     pub search_index_cancelled: Arc<AtomicBool>,
+    /// Async parallel search engine powered by `Nucleo<T>`.
+    ///
+    /// Items are injected from background threads; pattern updates and result
+    /// retrieval happen on the main thread via `tick()`.
+    pub search_engine: NucleoSearchEngine,
 }
 
 /// Cached layout areas from the last render, used for mouse hit-testing.
@@ -651,6 +657,7 @@ pub(super) mod tests {
             search_match_indices: HashMap::new(),
             search_pending_loads: None,
             search_index_cancelled: Arc::new(AtomicBool::new(false)),
+            search_engine: NucleoSearchEngine::new(Arc::new(|| {})),
         }
     }
 

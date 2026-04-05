@@ -394,7 +394,10 @@ pub(super) fn handle_filter_action(
 fn rebuild_search_index(state: &mut AppState, ctx: &AppContext) {
     use std::sync::atomic::Ordering;
 
-    use crate::tree::search_index::SearchIndex;
+    use crate::tree::search_index::{
+        self,
+        SearchIndex,
+    };
 
     // Cancel the previous build.
     state.search_index_cancelled.store(true, Ordering::Relaxed);
@@ -404,6 +407,9 @@ fn rebuild_search_index(state: &mut AppState, ctx: &AppContext) {
         *guard = SearchIndex::new();
     }
 
+    // Restart the Nucleo engine (clears all items and stale results).
+    state.search_engine.restart();
+
     // Start a new build with updated visibility settings.
     state.search_index_cancelled = crate::app::spawn_search_index_build(
         &ctx.search_index,
@@ -412,6 +418,23 @@ fn rebuild_search_index(state: &mut AppState, ctx: &AppContext) {
         state.show_ignored,
         &ctx.search_index_ready_tx,
     );
+
+    // Spawn Nucleo-based parallel index build.
+    let injector = state.search_engine.injector();
+    let cancelled = Arc::clone(&state.search_index_cancelled);
+    let root = ctx.root_path.clone();
+    let show_hidden = state.show_hidden;
+    let show_ignored = state.show_ignored;
+    tokio::task::spawn_blocking(move || {
+        search_index::inject_into_nucleo(
+            &injector,
+            &root,
+            show_hidden,
+            show_ignored,
+            &cancelled,
+            search_index::DEFAULT_MAX_ENTRIES,
+        );
+    });
 }
 
 /// Open a user-defined menu by name.

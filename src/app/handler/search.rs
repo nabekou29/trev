@@ -211,7 +211,10 @@ pub fn refresh_search(state: &mut AppState, ctx: &AppContext) {
     run_incremental_search(state, ctx);
 }
 
-/// Run the fuzzy search against the index and update the tree filter.
+/// Run the fuzzy search: update the Nucleo pattern and trigger background matching.
+///
+/// The actual results are applied asynchronously in [`apply_nucleo_results`]
+/// when the Nucleo workers notify that matching has progressed.
 fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
     let AppMode::Search(ref search) = state.mode else {
         return;
@@ -226,13 +229,32 @@ fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
         return;
     }
 
-    // Read the search index (may be partially built).
-    let Ok(index) = ctx.search_index.try_read() else {
-        // Index is being written to; skip this update.
+    // Update the Nucleo pattern — matching happens asynchronously in worker threads.
+    // Results will arrive via the nucleo_notify channel and be applied in
+    // apply_nucleo_results().
+    state.search_engine.update_pattern(query, mode);
+
+    // Immediately tick to start processing and pick up any already-available results.
+    state.search_engine.tick(10);
+    apply_nucleo_results(state, ctx);
+}
+
+/// Apply current Nucleo search results to the tree filter.
+///
+/// Called when Nucleo workers notify that results have changed, or immediately
+/// after a pattern update. Reads the snapshot, updates match indices and the
+/// tree filter.
+pub fn apply_nucleo_results(state: &mut AppState, ctx: &AppContext) {
+    let AppMode::Search(ref search) = state.mode else {
         return;
     };
+    let mode = search.mode;
 
-    let results = search_engine::search(index.entries(), query, &ctx.root_path, mode);
+    if search.buffer.value.is_empty() {
+        return;
+    }
+
+    let results = state.search_engine.collect_results(mode, search_engine::MAX_SEARCH_RESULTS);
 
     // Store match indices for highlight rendering.
     state.search_match_indices.clear();
@@ -256,10 +278,7 @@ fn run_incremental_search(state: &mut AppState, ctx: &AppContext) {
     schedule_search_loads(state, ctx);
 
     // When filtered results fit in the viewport, reset scroll to top so the
-    // user can see all results at a glance. Search is a "find the target
-    // quickly" operation — if a stale scroll offset hides part of a small
-    // result set, the user has to scroll manually to discover matches that
-    // are already on screen, which defeats the purpose.
+    // user can see all results at a glance.
     if state.tree_state.visible_node_count() <= state.viewport_height {
         state.scroll.set_offset(0);
     }

@@ -208,6 +208,7 @@ mod tests {
             search_match_indices: HashMap::new(),
             search_pending_loads: None,
             search_index_cancelled: Arc::new(AtomicBool::new(false)),
+            search_engine: crate::tree::search_engine::NucleoSearchEngine::new(Arc::new(|| {})),
         }
     }
 
