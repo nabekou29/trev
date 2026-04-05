@@ -77,6 +77,7 @@ use crate::state::tree::{
     TreeState,
 };
 use crate::tree::builder::TreeBuilder;
+use crate::tree::search_engine::NucleoSearchEngine;
 use crate::tree::search_index::{
     self,
     DEFAULT_MAX_ENTRIES,
@@ -111,6 +112,8 @@ struct EventReceivers {
     stat: tokio::sync::mpsc::Receiver<StatLoadResult>,
     /// Notification that a search index build has completed.
     search_index_ready: tokio::sync::mpsc::Receiver<()>,
+    /// Notification from Nucleo worker threads that search results changed.
+    nucleo_notify: tokio::sync::mpsc::Receiver<()>,
 
     // Pre-received items from `tokio::select!` (one per wake).
     /// Pre-received children load result.
@@ -129,6 +132,8 @@ struct EventReceivers {
     pre_stat: Option<StatLoadResult>,
     /// Pre-received search index ready signal.
     pre_search_index_ready: Option<()>,
+    /// Pre-received nucleo notification.
+    pre_nucleo_notify: Option<()>,
 }
 
 /// Generate a drain method that yields `pre_$field.take()` then `$field.try_recv()` items.
@@ -152,6 +157,7 @@ impl EventReceivers {
         self.pre_ipc = None;
         self.pre_stat = None;
         self.pre_search_index_ready = None;
+        self.pre_nucleo_notify = None;
     }
 
     impl_drain!(drain_children, pre_children, children, ChildrenLoadResult);
@@ -162,6 +168,7 @@ impl EventReceivers {
     impl_drain!(drain_ipc, pre_ipc, ipc, IpcCommand);
     impl_drain!(drain_stats, pre_stat, stat, StatLoadResult);
     impl_drain!(drain_search_index_ready, pre_search_index_ready, search_index_ready, ());
+    impl_drain!(drain_nucleo_notify, pre_nucleo_notify, nucleo_notify, ());
 }
 
 /// Initialize all application state, context, channels, and terminal.
@@ -253,6 +260,14 @@ fn init_app(
     )
     .context("Failed to compile file style rules")?;
 
+    // Create Nucleo search engine with notification channel.
+    let (nucleo_notify_tx, nucleo_notify_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let nucleo_notify_fn: Arc<dyn Fn() + Send + Sync> = {
+        Arc::new(move || {
+            let _ = nucleo_notify_tx.try_send(());
+        })
+    };
+
     // Create app state.
     let mut state = AppState {
         tree_state,
@@ -297,6 +312,8 @@ fn init_app(
         search_match_indices: std::collections::HashMap::new(),
         search_pending_loads: None,
         search_index_cancelled: Arc::new(AtomicBool::new(false)),
+        search_engine: NucleoSearchEngine::new(nucleo_notify_fn),
+        search_debounce: None,
     };
 
     let (ctx, channels) = build_context_and_channels(
@@ -307,6 +324,7 @@ fn init_app(
         &root_path,
         watcher_rx,
         ipc_rx,
+        nucleo_notify_rx,
     );
 
     trigger_initial_loads(&mut state, &ctx, &root_path);
@@ -331,6 +349,7 @@ fn build_context_and_channels(
     root_path: &Path,
     watcher_rx: tokio::sync::mpsc::UnboundedReceiver<Vec<notify_debouncer_mini::DebouncedEvent>>,
     ipc_rx: tokio::sync::mpsc::UnboundedReceiver<IpcCommand>,
+    nucleo_notify_rx: tokio::sync::mpsc::Receiver<()>,
 ) -> (AppContext, EventReceivers) {
     let (children_tx, children_rx) = tokio::sync::mpsc::channel::<ChildrenLoadResult>(64);
     let (preview_tx, preview_rx) = tokio::sync::mpsc::channel::<PreviewLoadResult>(16);
@@ -370,6 +389,7 @@ fn build_context_and_channels(
         ipc: ipc_rx,
         stat: stat_rx,
         search_index_ready: search_index_ready_rx,
+        nucleo_notify: nucleo_notify_rx,
         pre_children: None,
         pre_preview: None,
         pre_git: None,
@@ -378,6 +398,7 @@ fn build_context_and_channels(
         pre_ipc: None,
         pre_stat: None,
         pre_search_index_ready: None,
+        pre_nucleo_notify: None,
     };
 
     (ctx, channels)
@@ -698,7 +719,22 @@ fn process_async_events(
     // Search index build completed — re-run the active search with the fresh index.
     if channels.drain_search_index_ready().next().is_some() {
         had_events = true;
-        handler::search::refresh_search(state, ctx);
+        handler::search::refresh_search(state);
+    }
+
+    // Nucleo worker notification — tick the search engine to process background work.
+    // Result application is deferred until the search debounce deadline passes
+    // (handled in the main event loop) so that rapid keystrokes skip intermediate
+    // heavy processing.
+    if channels.drain_nucleo_notify().next().is_some() {
+        let status = state.search_engine.tick(10);
+        if status.changed {
+            had_events = true;
+            if state.search_debounce.is_none() {
+                // No debounce active (e.g. results arriving after input settled) — apply now.
+                handler::search::apply_nucleo_results(state, ctx);
+            }
+        }
     }
 
     // Trigger preview when cursor changes.
@@ -736,6 +772,10 @@ fn compute_poll_duration(state: &AppState) -> Duration {
         duration = duration.min(remaining);
     }
     if let Some(deadline) = state.preview_debounce {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        duration = duration.min(remaining);
+    }
+    if let Some(deadline) = state.search_debounce {
         let remaining = deadline.saturating_duration_since(Instant::now());
         duration = duration.min(remaining);
     }
@@ -790,6 +830,25 @@ pub async fn run(args: &Args) -> Result<()> {
         state.show_ignored,
         &ctx.search_index_ready_tx,
     );
+
+    // Start Nucleo-based parallel index build.
+    {
+        let injector = state.search_engine.injector();
+        let cancelled = Arc::clone(&state.search_index_cancelled);
+        let root = root_path.clone();
+        let show_hidden = state.show_hidden;
+        let show_ignored = state.show_ignored;
+        tokio::task::spawn_blocking(move || {
+            search_index::inject_into_nucleo(
+                &injector,
+                &root,
+                show_hidden,
+                show_ignored,
+                &cancelled,
+                DEFAULT_MAX_ENTRIES,
+            );
+        });
+    }
 
     // Create the async terminal event stream.
     let mut event_stream = EventStream::new();
@@ -863,6 +922,7 @@ pub async fn run(args: &Args) -> Result<()> {
             Some(v) = channels.ipc.recv()      => { channels.pre_ipc = Some(v); }
             Some(v) = channels.stat.recv()     => { channels.pre_stat = Some(v); }
             Some(v) = channels.search_index_ready.recv() => { channels.pre_search_index_ready = Some(v); }
+            Some(v) = channels.nucleo_notify.recv() => { channels.pre_nucleo_notify = Some(v); }
 
             () = &mut timeout => {}
         }
@@ -879,6 +939,15 @@ pub async fn run(args: &Args) -> Result<()> {
         (last_cursor, had_events) =
             process_async_events(&mut state, &ctx, &mut channels, last_cursor);
         if had_events {
+            state.dirty = true;
+        }
+
+        // ── Fire pending debounced search results ───────────────
+        if state.search_debounce.is_some_and(|d| Instant::now() >= d) {
+            state.search_debounce = None;
+            // Tick once more to collect latest worker output before applying.
+            state.search_engine.tick(10);
+            handler::search::apply_nucleo_results(&mut state, &ctx);
             state.dirty = true;
         }
 
