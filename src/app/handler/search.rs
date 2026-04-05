@@ -284,7 +284,7 @@ pub fn apply_nucleo_results(state: &mut AppState, ctx: &AppContext) {
         return;
     }
 
-    let results = state.search_engine.collect_results(mode, search_engine::MAX_SEARCH_RESULTS);
+    let results = state.search_engine.collect_results(mode, usize::MAX);
 
     // Store match indices for highlight rendering.
     state.search_match_indices.clear();
