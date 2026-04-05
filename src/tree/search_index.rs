@@ -8,8 +8,11 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::{
     AtomicBool,
+    AtomicUsize,
     Ordering,
 };
+
+use super::search_engine::inject_entry;
 
 /// A single entry in the search index.
 #[derive(Debug, Clone)]
@@ -226,6 +229,119 @@ impl ignore::ParallelVisitor for IndexVisitor<'_> {
 impl Drop for IndexVisitor<'_> {
     fn drop(&mut self) {
         self.flush();
+    }
+}
+
+// ===========================================================================
+// Nucleo Injector — parallel scan that pushes directly into Nucleo<T>
+// ===========================================================================
+
+/// Build a search index by injecting entries into a `Nucleo` injector.
+///
+/// Same parallel directory walk as [`build_search_index`], but pushes entries
+/// directly into a lock-free [`nucleo::Injector`] for immediate availability
+/// to the async fuzzy matcher.
+///
+/// This function is synchronous and should be called via `tokio::task::spawn_blocking`.
+pub fn inject_into_nucleo(
+    injector: &nucleo::Injector<SearchEntry>,
+    root_path: &Path,
+    show_hidden: bool,
+    show_ignored: bool,
+    cancelled: &Arc<AtomicBool>,
+    max_entries: usize,
+) {
+    let span = tracing::info_span!(
+        "inject_into_nucleo",
+        root_path = %root_path.display(),
+        entries = tracing::field::Empty,
+    );
+    let _guard = span.enter();
+
+    let root_owned = root_path.to_path_buf();
+    let count = Arc::new(AtomicUsize::new(0));
+
+    ignore::WalkBuilder::new(root_path)
+        .hidden(!show_hidden)
+        .git_ignore(!show_ignored)
+        .git_global(!show_ignored)
+        .git_exclude(!show_ignored)
+        .build_parallel()
+        .visit(&mut NucleoVisitorBuilder {
+            root: &root_owned,
+            injector,
+            cancelled,
+            max_entries,
+            count: &count,
+        });
+
+    span.record("entries", count.load(Ordering::Relaxed));
+}
+
+/// Builder that creates per-thread [`NucleoVisitor`]s.
+struct NucleoVisitorBuilder<'a> {
+    root: &'a Path,
+    injector: &'a nucleo::Injector<SearchEntry>,
+    cancelled: &'a Arc<AtomicBool>,
+    max_entries: usize,
+    count: &'a Arc<AtomicUsize>,
+}
+
+impl<'s> ignore::ParallelVisitorBuilder<'s> for NucleoVisitorBuilder<'s> {
+    fn build(&mut self) -> Box<dyn ignore::ParallelVisitor + 's> {
+        Box::new(NucleoVisitor {
+            root: self.root,
+            injector: self.injector.clone(),
+            cancelled: Arc::clone(self.cancelled),
+            max_entries: self.max_entries,
+            count: Arc::clone(self.count),
+        })
+    }
+}
+
+/// Per-thread visitor that pushes entries directly into the Nucleo injector.
+struct NucleoVisitor<'a> {
+    root: &'a Path,
+    injector: nucleo::Injector<SearchEntry>,
+    cancelled: Arc<AtomicBool>,
+    max_entries: usize,
+    count: Arc<AtomicUsize>,
+}
+
+impl ignore::ParallelVisitor for NucleoVisitor<'_> {
+    fn visit(&mut self, entry: Result<ignore::DirEntry, ignore::Error>) -> ignore::WalkState {
+        if self.cancelled.load(Ordering::Relaxed) {
+            return ignore::WalkState::Quit;
+        }
+
+        let entry = match entry {
+            Ok(e) => e,
+            Err(err) => {
+                tracing::warn!("Nucleo index: skipping entry: {err}");
+                return ignore::WalkState::Continue;
+            }
+        };
+
+        let path = entry.path();
+
+        // Skip the root directory itself.
+        if path == self.root {
+            return ignore::WalkState::Continue;
+        }
+
+        let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+
+        let search_entry = SearchEntry { path: path.to_path_buf(), name, is_dir };
+        inject_entry(&self.injector, search_entry, self.root);
+
+        let prev = self.count.fetch_add(1, Ordering::Relaxed);
+        if prev + 1 >= self.max_entries {
+            tracing::info!(max = self.max_entries, "nucleo index entry limit reached");
+            return ignore::WalkState::Quit;
+        }
+
+        ignore::WalkState::Continue
     }
 }
 
