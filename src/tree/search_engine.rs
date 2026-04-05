@@ -591,4 +591,75 @@ mod tests {
         // But total matched count should be higher.
         assert_that!(engine.matched_item_count(), eq(100));
     }
+
+    #[rstest]
+    fn nucleo_collect_results_empty_when_no_match() {
+        let engine_notify = Arc::new(|| {});
+        let mut engine = NucleoSearchEngine::new(engine_notify);
+        let injector = engine.injector();
+        let root = Path::new("/root");
+
+        inject(&injector, root, "/root/foo.txt", false);
+        engine.update_pattern("zzzzz_no_match", SearchMode::Name);
+        tick_until_done(&mut engine);
+
+        let results = engine.collect_results(SearchMode::Name, 100);
+        assert_that!(results.len(), eq(0));
+        assert_that!(engine.matched_item_count(), eq(0));
+    }
+
+    #[rstest]
+    fn nucleo_debug_format() {
+        let engine_notify = Arc::new(|| {});
+        let engine = NucleoSearchEngine::new(engine_notify);
+
+        let debug = format!("{engine:?}");
+        assert!(debug.contains("NucleoSearchEngine"));
+        assert!(debug.contains("item_count"));
+        assert!(debug.contains("matched_count"));
+    }
+
+    #[rstest]
+    fn inject_entry_populates_name_and_path_columns() {
+        let engine_notify = Arc::new(|| {});
+        let mut engine = NucleoSearchEngine::new(engine_notify);
+        let injector = engine.injector();
+        let root = Path::new("/root");
+
+        inject(&injector, root, "/root/src/main.rs", false);
+        tick_until_done(&mut engine);
+
+        // Name mode should match "main.rs".
+        engine.update_pattern("main.rs", SearchMode::Name);
+        tick_until_done(&mut engine);
+        let results = engine.collect_results(SearchMode::Name, 10);
+        assert_that!(results.len(), eq(1));
+
+        // Path mode should match "src/main.rs".
+        engine.update_pattern("src/main", SearchMode::Path);
+        tick_until_done(&mut engine);
+        let results = engine.collect_results(SearchMode::Path, 10);
+        assert_that!(results.len(), eq(1));
+    }
+
+    #[rstest]
+    fn nucleo_directory_entries_flagged_correctly() {
+        let engine_notify = Arc::new(|| {});
+        let mut engine = NucleoSearchEngine::new(engine_notify);
+        let injector = engine.injector();
+        let root = Path::new("/root");
+
+        inject(&injector, root, "/root/mydir", true);
+        inject(&injector, root, "/root/myfile.txt", false);
+
+        engine.update_pattern("my", SearchMode::Name);
+        tick_until_done(&mut engine);
+
+        let results = engine.collect_results(SearchMode::Name, 100);
+        assert_that!(results.len(), eq(2));
+        let dir_result = results.iter().find(|r| r.path == Path::new("/root/mydir")).unwrap();
+        let file_result = results.iter().find(|r| r.path == Path::new("/root/myfile.txt")).unwrap();
+        assert!(dir_result.is_dir);
+        assert!(!file_result.is_dir);
+    }
 }

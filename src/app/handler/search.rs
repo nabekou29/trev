@@ -515,11 +515,23 @@ fn navigate_history(state: &mut AppState, direction: HistoryDirection) {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::RwLock;
+    use std::sync::atomic::AtomicBool;
+
     use googletest::prelude::*;
     use rstest::*;
 
     use super::*;
+    use crate::app::keymap::{
+        ActionKeyLookup,
+        KeyMap,
+    };
+    use crate::app::state::AppContext;
+    use crate::config::KeybindingConfig;
     use crate::input::TextBuffer;
+    use crate::tree::search_engine::NucleoSearchEngine;
+    use crate::tree::search_index::SearchIndex;
 
     /// Build a `SearchState` with the given query.
     fn search_with_query(query: &str) -> SearchState {
@@ -529,6 +541,57 @@ mod tests {
             mode: crate::input::SearchMode::Name,
             history_index: None,
             original_query: String::new(),
+        }
+    }
+
+    /// Create a minimal `AppContext` for search tests.
+    fn test_context(root: &Path) -> AppContext {
+        let (children_tx, _) = tokio::sync::mpsc::channel(1);
+        let (preview_tx, _) = tokio::sync::mpsc::channel(1);
+        let (git_tx, _) = tokio::sync::mpsc::channel(1);
+        let (rebuild_tx, _) = tokio::sync::mpsc::channel(1);
+        let (search_index_ready_tx, _) = tokio::sync::mpsc::channel(1);
+        let (stat_tx, _) = tokio::sync::mpsc::channel(1);
+        let keymap = KeyMap::from_config(&KeybindingConfig::default(), &HashMap::new());
+        let action_key_lookup = ActionKeyLookup::from_keymap(&keymap);
+        AppContext {
+            children_tx,
+            preview_tx,
+            preview_config: crate::config::PreviewConfig::default(),
+            file_op_config: crate::config::FileOpConfig::default(),
+            keymap,
+            action_key_lookup,
+            suppressed: std::sync::Arc::new(AtomicBool::new(false)),
+            ipc_server: None,
+            git_tx,
+            git_enabled: false,
+            root_path: root.to_path_buf(),
+            rebuild_tx,
+            menus: HashMap::new(),
+            search_index: std::sync::Arc::new(RwLock::new(SearchIndex::new())),
+            search_index_ready_tx,
+            stat_tx,
+            custom_actions: HashMap::new(),
+        }
+    }
+
+    /// Helper: inject entries into the search engine and tick until done.
+    fn inject_and_tick(engine: &mut NucleoSearchEngine, root: &Path, paths: &[&str]) {
+        use crate::tree::search_engine::inject_entry;
+        use crate::tree::search_index::SearchEntry;
+
+        let injector = engine.injector();
+        for &p in paths {
+            let path = std::path::PathBuf::from(p);
+            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let entry = SearchEntry { path, name, is_dir: false };
+            inject_entry(&injector, entry, root);
+        }
+        for _ in 0..100 {
+            let status = engine.tick(50);
+            if !status.running {
+                break;
+            }
         }
     }
 
@@ -606,5 +669,176 @@ mod tests {
         };
         assert_that!(s.buffer.value.as_str(), eq("current"));
         assert_that!(s.history_index, eq(None));
+    }
+
+    // ===================================================================
+    // run_incremental_search tests
+    // ===================================================================
+
+    #[rstest]
+    fn run_incremental_search_sets_debounce_for_nonempty_query() {
+        let mut state = crate::app::state::tests::minimal_app_state();
+        let root = Path::new("/test/root");
+
+        // Inject items so the engine has something to match.
+        inject_and_tick(&mut state.search_engine, root, &["/test/root/foo.txt"]);
+
+        state.mode = AppMode::Search(search_with_query("foo"));
+        assert!(state.search_debounce.is_none());
+
+        run_incremental_search(&mut state);
+
+        // Debounce should be set.
+        assert!(state.search_debounce.is_some());
+        assert!(state.dirty);
+    }
+
+    #[rstest]
+    fn run_incremental_search_clears_filter_for_empty_query() {
+        let mut state = crate::app::state::tests::minimal_app_state();
+
+        // Set up some prior search state.
+        state
+            .search_match_indices
+            .insert(std::path::PathBuf::from("/test/root/old.txt"), vec![0, 1]);
+        state.mode = AppMode::Search(search_with_query(""));
+
+        run_incremental_search(&mut state);
+
+        // Debounce should NOT be set for empty query.
+        assert!(state.search_debounce.is_none());
+        // Match indices should be cleared.
+        assert!(state.search_match_indices.is_empty());
+    }
+
+    #[rstest]
+    fn run_incremental_search_noop_when_not_in_search_mode() {
+        let mut state = crate::app::state::tests::minimal_app_state();
+        state.mode = AppMode::Normal;
+
+        run_incremental_search(&mut state);
+
+        assert!(state.search_debounce.is_none());
+    }
+
+    // ===================================================================
+    // flush_search_debounce tests
+    // ===================================================================
+
+    #[rstest]
+    fn flush_search_debounce_noop_when_no_debounce() {
+        let mut state = crate::app::state::tests::minimal_app_state();
+        let ctx = test_context(Path::new("/test/root"));
+        state.mode = AppMode::Search(search_with_query("foo"));
+        state.search_debounce = None;
+
+        flush_search_debounce(&mut state, &ctx);
+
+        // Nothing should change.
+        assert!(state.search_debounce.is_none());
+        assert!(state.search_match_indices.is_empty());
+    }
+
+    #[rstest]
+    fn flush_search_debounce_applies_results_immediately() {
+        let mut state = crate::app::state::tests::minimal_app_state();
+        let root = Path::new("/test/root");
+        let ctx = test_context(root);
+
+        // Inject items and set up a pending search.
+        inject_and_tick(
+            &mut state.search_engine,
+            root,
+            &["/test/root/foo.txt", "/test/root/bar.txt"],
+        );
+
+        state.mode = AppMode::Search(search_with_query("foo"));
+        state.search_engine.update_pattern("foo", crate::input::SearchMode::Name);
+        state.search_engine.tick(10);
+        state.search_debounce = Some(Instant::now() + Duration::from_secs(10));
+
+        flush_search_debounce(&mut state, &ctx);
+
+        // Debounce should be cleared.
+        assert!(state.search_debounce.is_none());
+        // Results should have been applied (match indices populated).
+        assert!(!state.search_match_indices.is_empty());
+    }
+
+    // ===================================================================
+    // apply_nucleo_results tests
+    // ===================================================================
+
+    #[rstest]
+    fn apply_nucleo_results_populates_match_indices() {
+        let mut state = crate::app::state::tests::minimal_app_state();
+        let root = Path::new("/test/root");
+        let ctx = test_context(root);
+
+        inject_and_tick(
+            &mut state.search_engine,
+            root,
+            &["/test/root/foo.txt", "/test/root/bar.txt"],
+        );
+
+        state.mode = AppMode::Search(search_with_query("foo"));
+        state.search_engine.update_pattern("foo", crate::input::SearchMode::Name);
+        state.search_engine.tick(10);
+
+        apply_nucleo_results(&mut state, &ctx);
+
+        assert!(!state.search_match_indices.is_empty());
+        assert!(state.search_match_indices.contains_key(Path::new("/test/root/foo.txt")));
+        assert!(state.dirty);
+    }
+
+    #[rstest]
+    fn apply_nucleo_results_noop_for_empty_query() {
+        let mut state = crate::app::state::tests::minimal_app_state();
+        let ctx = test_context(Path::new("/test/root"));
+        state.mode = AppMode::Search(search_with_query(""));
+
+        apply_nucleo_results(&mut state, &ctx);
+
+        assert!(state.search_match_indices.is_empty());
+    }
+
+    #[rstest]
+    fn apply_nucleo_results_noop_when_not_in_search_mode() {
+        let mut state = crate::app::state::tests::minimal_app_state();
+        let ctx = test_context(Path::new("/test/root"));
+        state.mode = AppMode::Normal;
+
+        apply_nucleo_results(&mut state, &ctx);
+
+        assert!(state.search_match_indices.is_empty());
+    }
+
+    // ===================================================================
+    // refresh_search tests
+    // ===================================================================
+
+    #[rstest]
+    fn refresh_search_noop_when_not_in_search_mode() {
+        let mut state = crate::app::state::tests::minimal_app_state();
+        state.mode = AppMode::Normal;
+
+        refresh_search(&mut state);
+
+        assert!(state.search_debounce.is_none());
+    }
+
+    #[rstest]
+    fn refresh_search_triggers_incremental_search() {
+        let mut state = crate::app::state::tests::minimal_app_state();
+        let root = Path::new("/test/root");
+        inject_and_tick(&mut state.search_engine, root, &["/test/root/foo.txt"]);
+
+        state.mode = AppMode::Search(search_with_query("foo"));
+
+        refresh_search(&mut state);
+
+        // Should have set the debounce (via run_incremental_search).
+        assert!(state.search_debounce.is_some());
     }
 }

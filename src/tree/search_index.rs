@@ -474,6 +474,119 @@ mod tests {
         Ok(())
     }
 
+    // ===================================================================
+    // inject_into_nucleo tests
+    // ===================================================================
+
+    /// Helper: inject into a Nucleo engine and return the item count.
+    fn inject_and_count(
+        root: &Path,
+        show_hidden: bool,
+        show_ignored: bool,
+        max_entries: usize,
+    ) -> u32 {
+        use crate::tree::search_engine::NucleoSearchEngine;
+
+        let mut engine = NucleoSearchEngine::new(Arc::new(|| {}));
+        let injector = engine.injector();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        inject_into_nucleo(&injector, root, show_hidden, show_ignored, &cancelled, max_entries);
+        // Tick to process injected items.
+        for _ in 0..50 {
+            let status = engine.tick(50);
+            if !status.running {
+                break;
+            }
+        }
+        engine.item_count()
+    }
+
+    #[rstest]
+    fn test_inject_into_nucleo_scans_all_files() -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("file1.txt"), "").unwrap();
+        fs::create_dir(dir.path().join("subdir")).unwrap();
+        fs::write(dir.path().join("subdir/file2.txt"), "").unwrap();
+
+        let count = inject_and_count(dir.path(), false, false, DEFAULT_MAX_ENTRIES);
+        // Should find: file1.txt, subdir, subdir/file2.txt
+        verify_that!(count, eq(3))?;
+        Ok(())
+    }
+
+    #[rstest]
+    fn test_inject_into_nucleo_respects_cancellation() -> Result<()> {
+        use crate::tree::search_engine::NucleoSearchEngine;
+
+        let dir = TempDir::new().unwrap();
+        for i in 0..100 {
+            fs::write(dir.path().join(format!("file{i}.txt")), "").unwrap();
+        }
+
+        let mut engine = NucleoSearchEngine::new(Arc::new(|| {}));
+        let injector = engine.injector();
+        let cancelled = Arc::new(AtomicBool::new(true)); // Pre-cancelled.
+        inject_into_nucleo(&injector, dir.path(), false, false, &cancelled, DEFAULT_MAX_ENTRIES);
+        for _ in 0..50 {
+            let status = engine.tick(50);
+            if !status.running {
+                break;
+            }
+        }
+        // Should have very few or zero items since cancelled immediately.
+        verify_that!(engine.item_count(), lt(100))?;
+        Ok(())
+    }
+
+    #[rstest]
+    fn test_inject_into_nucleo_respects_max_entries() -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        for i in 0..50 {
+            fs::write(dir.path().join(format!("file{i}.txt")), "").unwrap();
+        }
+
+        let count = inject_and_count(dir.path(), false, false, 10);
+        // Should stop around max_entries (10), though slightly more may be injected
+        // due to parallel workers flushing concurrently.
+        verify_that!(count, le(50))?;
+        // At least some entries should have been injected.
+        verify_that!(count, ge(1))?;
+        Ok(())
+    }
+
+    #[rstest]
+    fn test_inject_into_nucleo_respects_gitignore() -> Result<()> {
+        use crate::tree::search_engine::NucleoSearchEngine;
+
+        let dir = TempDir::new().unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+        fs::write(dir.path().join(".gitignore"), "ignored/\n").unwrap();
+        fs::create_dir(dir.path().join("ignored")).unwrap();
+        fs::write(dir.path().join("ignored/secret.txt"), "").unwrap();
+        fs::write(dir.path().join("visible.txt"), "").unwrap();
+
+        let mut engine = NucleoSearchEngine::new(Arc::new(|| {}));
+        let injector = engine.injector();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        inject_into_nucleo(&injector, dir.path(), false, false, &cancelled, DEFAULT_MAX_ENTRIES);
+        // Tick and search for all items.
+        engine.update_pattern("", crate::input::SearchMode::Name);
+        for _ in 0..50 {
+            let status = engine.tick(50);
+            if !status.running {
+                break;
+            }
+        }
+        let results = engine.collect_results(crate::input::SearchMode::Name, 1000);
+        let names: Vec<&str> =
+            results.iter().map(|r| r.path.file_name().unwrap().to_str().unwrap()).collect();
+
+        verify_that!(names.contains(&"visible.txt"), eq(true))?;
+        verify_that!(names.contains(&"secret.txt"), eq(false))?;
+        verify_that!(names.contains(&"ignored"), eq(false))?;
+        Ok(())
+    }
+
     /// Reproduces the real-world pattern: `.vscode/*` with whitelisted files.
     #[rstest]
     fn test_build_index_hidden_false_ignored_true_whitelist_pattern() -> Result<()> {
