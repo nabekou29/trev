@@ -112,6 +112,10 @@ harness = false
 name = "search_index"
 harness = false
 
+[[bench]]
+name = "search_engine"
+harness = false
+
 [lints.rust]
 # === Forbidden ===
 unsafe_code = "forbid"

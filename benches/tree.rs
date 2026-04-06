@@ -515,6 +515,95 @@ criterion_group!(
     bench_set_children_100k,
 );
 
+fn bench_visible_node_count_10m(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+    let children: Vec<TreeNode> =
+        (0..10_000_000).map(|i| file_node(&format!("file{i:08}.txt"), root_path)).collect();
+    let state = state_with_children(children);
+
+    c.bench_function("visible_node_count_10m", |b| {
+        b.iter(|| state.visible_node_count());
+    });
+}
+
+fn bench_set_children_10m_fresh(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+
+    c.bench_function("set_children_10m_fresh", |b| {
+        b.iter_batched(
+            || {
+                let target = TreeNode {
+                    name: "target".to_string(),
+                    path: root_path.join("target"),
+                    is_dir: true,
+                    is_symlink: false,
+                    symlink_target: None,
+                    is_orphan: false,
+                    size: 0,
+                    modified: None,
+                    recursive_max_mtime: None,
+                    children: ChildrenState::Loading,
+                    is_expanded: true,
+                    is_ignored: false,
+                    is_root: false,
+                };
+                let state = state_with_children(vec![target]);
+                let children: Vec<TreeNode> = (0..10_000_000)
+                    .rev()
+                    .map(|i| file_node(&format!("file{i:08}.txt"), &root_path.join("target")))
+                    .collect();
+                (state, children)
+            },
+            |(mut state, children)| {
+                state.set_children(&root_path.join("target"), children, false);
+            },
+            criterion::BatchSize::LargeInput,
+        );
+    });
+}
+
+fn bench_move_cursor_to_path_10m(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+    let children: Vec<TreeNode> =
+        (0..10_000_000).map(|i| file_node(&format!("file{i:08}.txt"), root_path)).collect();
+    let mut state = state_with_children(children);
+    let target = root_path.join("file05000000.txt");
+
+    c.bench_function("move_cursor_to_path_10m", |b| {
+        b.iter(|| {
+            state.move_cursor_to_path(&target);
+        });
+    });
+}
+
+fn bench_visible_nodes_in_range_10m(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+    let children: Vec<TreeNode> =
+        (0..10_000_000).map(|i| file_node(&format!("file{i:08}.txt"), root_path)).collect();
+    let state = state_with_children(children);
+
+    c.bench_function("visible_nodes_in_range_10m", |b| {
+        b.iter(|| state.visible_nodes_in_range(5_000_000, 50));
+    });
+}
+
+fn bench_visible_node_count_filtered_10m(c: &mut Criterion) {
+    let root_path = Path::new("/perf/root");
+    let children: Vec<TreeNode> =
+        (0..10_000_000).map(|i| file_node(&format!("file{i:08}.txt"), root_path)).collect();
+    let mut state = state_with_children(children);
+
+    // Filter: every 1000th file = ~10k visible paths.
+    let mut filter: HashSet<std::path::PathBuf> =
+        (0..10_000_000).step_by(1000).map(|i| root_path.join(format!("file{i:08}.txt"))).collect();
+    filter.insert(root_path.to_path_buf());
+    state.set_search_filter(filter);
+
+    c.bench_function("visible_node_count_filtered_10m", |b| {
+        b.iter(|| state.visible_node_count());
+    });
+}
+
 criterion_group! {
     name = large_benches;
     config = Criterion::default()
@@ -534,6 +623,20 @@ criterion_group! {
 }
 
 criterion_group! {
+    name = huge_benches;
+    config = Criterion::default()
+        .sample_size(10)
+        .warm_up_time(std::time::Duration::from_secs(1))
+        .measurement_time(std::time::Duration::from_secs(10));
+    targets =
+        bench_visible_node_count_10m,
+        bench_set_children_10m_fresh,
+        bench_move_cursor_to_path_10m,
+        bench_visible_nodes_in_range_10m,
+        bench_visible_node_count_filtered_10m
+}
+
+criterion_group! {
     name = io_benches;
     config = Criterion::default()
         .sample_size(10)
@@ -542,4 +645,4 @@ criterion_group! {
     targets = bench_build_100k_files, bench_load_children_100k
 }
 
-criterion_main!(fast_benches, large_benches, io_benches);
+criterion_main!(fast_benches, large_benches, huge_benches, io_benches);
