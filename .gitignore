@@ -13,6 +13,11 @@ target/
 !.vscode/extensions.json
 .idea/
 
+# Nix
+result
+.direnv
+!.envrc
+
 # OS
 .DS_Store
 ._*
