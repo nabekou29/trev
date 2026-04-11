@@ -21,7 +21,7 @@ Analyze profiler output and identify bottlenecks before making changes.
 ### 2. Benchmarking (hot path comparison)
 
 ```bash
-mise run bench
+just bench
 ```
 
 - Criterion benchmarks (`benches/` directory)

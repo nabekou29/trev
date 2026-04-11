@@ -2627,7 +2627,7 @@ keybindings:
 
         assert_eq!(
             generated, on_disk,
-            "config.schema.json is out of date. Run `mise run schema` to regenerate."
+            "config.schema.json is out of date. Run `just schema` to regenerate."
         );
     }
 }

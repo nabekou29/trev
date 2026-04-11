@@ -9,7 +9,7 @@ paths: "demo/**"
 When modifying demo.tape, always follow this workflow:
 
 1. **Add debug screenshots at each step**: `Screenshot demo/debug-XX-description.png`
-2. **Run `mise run demo`** to generate the recording
+2. **Run `just demo`** to generate the recording
 3. **Verify each screenshot with the Read tool**: check cursor position, tree expansion state, and preview content
 4. **Fix and re-run** if anything is off
 5. **Remove all debug screenshot lines and image files** once every step is confirmed correct

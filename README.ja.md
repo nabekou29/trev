@@ -60,6 +60,16 @@ mise use -g github:nabekou29/trev
 mise use -g cargo:trev@https://github.com/nabekou29/trev
 ```
 
+### Nix
+
+```sh
+# 直接実行
+nix run github:nabekou29/trev
+
+# プロファイルにインストール
+nix profile install github:nabekou29/trev
+```
+
 ### 動作要件
 
 - [Nerd Fonts](https://www.nerdfonts.com/) 対応のターミナル（ファイルアイコン表示用）

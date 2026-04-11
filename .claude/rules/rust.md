@@ -4,7 +4,7 @@ paths: "src/**/*.rs, benches/**/*.rs, Cargo.toml"
 
 # Rust Conventions
 
-- Rust 2024 edition, nightly-2026-01-24
+- Rust 2024 edition, nightly-2026-03-27 (via nix flake + rust-toolchain.toml)
 - TUI: ratatui 0.30, crossterm 0.29
 - Async: tokio (full)
 - Config: YAML (`~/.config/trev/config.yml`), schemars for JSON Schema
