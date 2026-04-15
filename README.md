@@ -60,6 +60,16 @@ mise use -g github:nabekou29/trev
 mise use -g cargo:trev@https://github.com/nabekou29/trev
 ```
 
+### Nix
+
+```sh
+# Run directly
+nix run github:nabekou29/trev
+
+# Install to profile
+nix profile install github:nabekou29/trev
+```
+
 ### Requirements
 
 - A terminal with [Nerd Fonts](https://www.nerdfonts.com/) for file icons

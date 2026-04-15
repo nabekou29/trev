@@ -2,7 +2,7 @@
 # https://github.com/charmbracelet/vhs
 #
 # Usage:
-#   mise run demo
+#   just demo
 
 Output demo/demo.gif
 Output demo/demo.mp4

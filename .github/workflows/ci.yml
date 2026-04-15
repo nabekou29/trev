@@ -13,17 +13,24 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    env:
-      MISE_ENV: ci
     steps:
       - uses: actions/checkout@v6
 
-      - uses: jdx/mise-action@v4
+      - uses: nixbuild/nix-quick-install-action@v34
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}
+          gc-max-store-size-linux: 1073741824
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Run tests
-        run: mise run test
+        run: nix develop .#ci --command cargo test --all-features
 
   build:
     name: Build (${{ matrix.os }})
@@ -32,71 +39,88 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
-    env:
-      MISE_ENV: ci
     steps:
       - uses: actions/checkout@v6
 
-      - uses: jdx/mise-action@v4
+      - uses: nixbuild/nix-quick-install-action@v34
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}
+          gc-max-store-size-linux: 1073741824
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: mise run build
+        run: nix develop .#ci --command cargo build --all-features
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
-    env:
-      MISE_ENV: ci
     steps:
       - uses: actions/checkout@v6
 
-      - uses: jdx/mise-action@v4
-
-      - name: Install clippy
-        run: rustup component add clippy
+      - uses: nixbuild/nix-quick-install-action@v34
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}
+          gc-max-store-size-linux: 1073741824
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Run Clippy
-        run: mise run lint
+        run: nix develop .#ci --command cargo clippy --all-targets --all-features
 
   fmt:
     name: Format
     runs-on: ubuntu-latest
-    env:
-      MISE_ENV: ci
     steps:
       - uses: actions/checkout@v6
 
-      - uses: jdx/mise-action@v4
-
-      - name: Install rustfmt
-        run: rustup component add rustfmt
+      - uses: nixbuild/nix-quick-install-action@v34
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}
+          gc-max-store-size-linux: 1073741824
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Check formatting
-        run: mise run format-check
+        run: nix develop .#ci --command cargo fmt --all -- --check
 
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
-    env:
-      MISE_ENV: ci
     steps:
       - uses: actions/checkout@v6
 
-      - uses: jdx/mise-action@v4
-
-      - name: Install llvm-tools-preview
-        run: rustup component add llvm-tools-preview
-
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: nixbuild/nix-quick-install-action@v34
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}
+          gc-max-store-size-linux: 1073741824
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Generate coverage report
-        run: mise run coverage-ci
+        run: nix develop .#ci --command cargo llvm-cov --all-features --codecov --output-path codecov.json
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
