@@ -50,7 +50,10 @@ impl PreviewState {
     /// When switching to a different file, resets scroll position and provider
     /// index. Re-requesting the same file (e.g. after a file-watcher event)
     /// preserves both so the user's view is not disrupted.
-    pub fn request_preview(&mut self, path: PathBuf) {
+    ///
+    /// `providers` is the list of provider names available for the file; it
+    /// becomes the new available list and drives the provider-index decision.
+    pub fn request_preview(&mut self, path: PathBuf, providers: Vec<String>) {
         let same_file = self.current_path.as_ref() == Some(&path);
         if same_file {
             self.begin_reload();
@@ -58,6 +61,7 @@ impl PreviewState {
             self.active_provider_index = 0;
             self.begin_load(path);
         }
+        self.set_available_providers(providers);
     }
 
     /// Reload the current file with a different provider.
@@ -181,14 +185,19 @@ mod tests {
 
     use super::*;
 
+    /// A single-provider list used by tests that don't exercise carry-over.
+    fn text_only() -> Vec<String> {
+        vec!["Text".to_string()]
+    }
+
     #[rstest]
     fn request_preview_different_file_resets_scroll() {
         let mut state = PreviewState::new();
-        state.request_preview(PathBuf::from("/a.rs"));
+        state.request_preview(PathBuf::from("/a.rs"), text_only());
         state.scroll_row = 10;
         state.scroll_col = 5;
 
-        state.request_preview(PathBuf::from("/b.rs"));
+        state.request_preview(PathBuf::from("/b.rs"), text_only());
         assert_that!(state.scroll_row, eq(0));
         assert_that!(state.scroll_col, eq(0));
     }
@@ -196,11 +205,11 @@ mod tests {
     #[rstest]
     fn request_preview_same_file_preserves_scroll() {
         let mut state = PreviewState::new();
-        state.request_preview(PathBuf::from("/test.rs"));
+        state.request_preview(PathBuf::from("/test.rs"), text_only());
         state.scroll_row = 10;
         state.scroll_col = 5;
 
-        state.request_preview(PathBuf::from("/test.rs"));
+        state.request_preview(PathBuf::from("/test.rs"), text_only());
         assert_that!(state.scroll_row, eq(10));
         assert_that!(state.scroll_col, eq(5));
     }
@@ -208,7 +217,7 @@ mod tests {
     #[rstest]
     fn request_preview_sets_loading() {
         let mut state = PreviewState::new();
-        state.request_preview(PathBuf::from("/test.rs"));
+        state.request_preview(PathBuf::from("/test.rs"), text_only());
 
         assert!(matches!(state.content, PreviewContent::Loading));
     }
@@ -298,23 +307,25 @@ mod tests {
 
     #[rstest]
     fn request_preview_same_file_preserves_provider_index() {
+        let providers = vec!["A".to_string(), "B".to_string(), "C".to_string()];
         let mut state = PreviewState::new();
-        state.request_preview(PathBuf::from("/test.rs"));
+        state.request_preview(PathBuf::from("/test.rs"), providers.clone());
         state.active_provider_index = 2;
 
         // Same file — index should be preserved.
-        state.request_preview(PathBuf::from("/test.rs"));
+        state.request_preview(PathBuf::from("/test.rs"), providers);
         assert_that!(state.active_provider_index, eq(2));
     }
 
     #[rstest]
     fn request_preview_different_file_resets_provider_index() {
+        let providers = vec!["A".to_string(), "B".to_string(), "C".to_string()];
         let mut state = PreviewState::new();
-        state.request_preview(PathBuf::from("/test.rs"));
+        state.request_preview(PathBuf::from("/test.rs"), providers.clone());
         state.active_provider_index = 2;
 
-        // Different file — index should reset.
-        state.request_preview(PathBuf::from("/other.rs"));
+        // Different file with no remembered preference — index should reset.
+        state.request_preview(PathBuf::from("/other.rs"), providers);
         assert_that!(state.active_provider_index, eq(0));
     }
 
