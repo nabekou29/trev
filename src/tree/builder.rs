@@ -277,6 +277,47 @@ mod tests {
     }
 
     #[rstest]
+    #[case(false)]
+    #[case(true)]
+    fn hidden_dotfile_whitelisted_by_gitignore_stays_hidden(
+        #[case] show_ignored: bool,
+    ) -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        // `*` ignores everything, `!.gitignore` whitelists the .gitignore
+        // dotfile — a very common pattern. A gitignore whitelist produces a
+        // Match::Whitelist that overrides the `ignore` crate's hidden filter,
+        // so the dotfile would otherwise leak through when show_hidden=false.
+        fs::write(dir.path().join(".gitignore"), "*\n!.gitignore\n").unwrap();
+        fs::write(dir.path().join("visible.txt"), "").unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+
+        // show_hidden=false → .gitignore must stay hidden regardless of show_ignored.
+        let builder = TreeBuilder::new(false, show_ignored);
+        let root = builder.build(dir.path()).unwrap();
+        let children = root.children.as_loaded().unwrap();
+        let has_gitignore = children.iter().any(|c| c.name == ".gitignore");
+
+        verify_that!(has_gitignore, eq(false))?;
+        Ok(())
+    }
+
+    #[rstest]
+    fn show_hidden_true_reveals_whitelisted_dotfile() -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(".gitignore"), "*\n!.gitignore\n").unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+
+        // show_hidden=true → dotfiles are shown (the guard must not over-filter).
+        let builder = TreeBuilder::new(true, false);
+        let root = builder.build(dir.path()).unwrap();
+        let children = root.children.as_loaded().unwrap();
+        let has_gitignore = children.iter().any(|c| c.name == ".gitignore");
+
+        verify_that!(has_gitignore, eq(true))?;
+        Ok(())
+    }
+
+    #[rstest]
     fn test_build_show_hidden_true_includes_dotfiles() -> Result<()> {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(".hidden"), "").unwrap();

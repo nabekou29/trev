@@ -466,6 +466,25 @@ mod tests {
         Ok(())
     }
 
+    #[rstest]
+    #[case(false)]
+    #[case(true)]
+    fn build_index_keeps_whitelisted_dotfile_hidden(#[case] show_ignored: bool) -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+        // `!.gitignore` whitelists the dotfile, which overrides the hidden
+        // filter in the `ignore` crate unless guarded against.
+        fs::write(dir.path().join(".gitignore"), "*\n!.gitignore\n").unwrap();
+        fs::write(dir.path().join("visible.txt"), "").unwrap();
+
+        // show_hidden=false → .gitignore must not appear in search results.
+        let index = build_index(dir.path(), false, show_ignored);
+        let has_gitignore = index.entries().iter().any(|e| e.name == ".gitignore");
+
+        verify_that!(has_gitignore, eq(false))?;
+        Ok(())
+    }
+
     // ===================================================================
     // inject_into_nucleo tests
     // ===================================================================
