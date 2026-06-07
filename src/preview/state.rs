@@ -350,6 +350,35 @@ mod tests {
     }
 
     #[rstest]
+    fn request_preview_carries_over_selection_to_same_provider_list() {
+        let json = vec!["Text".to_string(), "jq".to_string()];
+        let mut state = PreviewState::new();
+
+        // xxx.json: switch to jq.
+        state.request_preview(PathBuf::from("/xxx.json"), json.clone());
+        state.cycle_next_provider();
+        assert_that!(state.active_provider_index, eq(1));
+
+        // yyy.json shares the same provider list — jq stays selected.
+        state.request_preview(PathBuf::from("/yyy.json"), json);
+        assert_that!(state.active_provider_index, eq(1));
+    }
+
+    #[rstest]
+    fn request_preview_resets_selection_for_different_provider_list() {
+        let json = vec!["Text".to_string(), "jq".to_string()];
+        let md = vec!["Text".to_string(), "Markdown".to_string()];
+        let mut state = PreviewState::new();
+
+        state.request_preview(PathBuf::from("/xxx.json"), json);
+        state.cycle_next_provider();
+
+        // A different provider list has no remembered preference — defaults to 0.
+        state.request_preview(PathBuf::from("/readme.md"), md);
+        assert_that!(state.active_provider_index, eq(0));
+    }
+
+    #[rstest]
     fn request_preview_restores_selection_across_intervening_file_type() {
         let json = vec!["Text".to_string(), "jq".to_string()];
         let md = vec!["Text".to_string(), "Markdown".to_string()];
