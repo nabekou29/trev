@@ -109,7 +109,8 @@ pub fn trigger_preview(state: &mut AppState, ctx: &AppContext) {
     let Some((path, providers)) = resolve_preview_providers(state) else {
         return;
     };
-    state.preview_state.request_preview(path.clone());
+    let provider_names = providers.iter().map(|p| p.name().to_string()).collect();
+    state.preview_state.request_preview(path.clone(), provider_names);
 
     let cache_hit = try_load_from_cache(state, &path, &providers);
     let _span = tracing::info_span!("trigger_preview", path = %path.display(), cache_hit).entered();
@@ -131,7 +132,8 @@ pub fn trigger_preview_immediate(state: &mut AppState, ctx: &AppContext) {
     let Some((path, providers)) = resolve_preview_providers(state) else {
         return;
     };
-    state.preview_state.request_preview(path.clone());
+    let provider_names = providers.iter().map(|p| p.name().to_string()).collect();
+    state.preview_state.request_preview(path.clone(), provider_names);
     state.preview_debounce = None;
 
     let cache_hit = try_load_from_cache(state, &path, &providers);
@@ -225,9 +227,6 @@ fn resolve_preview_providers(
         state.preview_state.set_content(PreviewContent::Empty);
         return None;
     }
-
-    let provider_names: Vec<String> = providers.iter().map(|p| p.name().to_string()).collect();
-    state.preview_state.set_available_providers(provider_names);
 
     Some((path, providers))
 }

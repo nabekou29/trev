@@ -1,5 +1,6 @@
 //! Preview display state management.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use tokio_util::sync::CancellationToken;
@@ -28,6 +29,11 @@ pub struct PreviewState {
     pub available_providers: Vec<String>,
     /// Whether word wrap is enabled for text preview.
     pub word_wrap: bool,
+    /// Remembered active-provider index keyed by the provider-name list.
+    ///
+    /// Lets the chosen provider carry over between files that share the same
+    /// provider list, even when an unrelated file type is visited in between.
+    provider_preferences: HashMap<Vec<String>, usize>,
 }
 
 impl PreviewState {
@@ -42,6 +48,7 @@ impl PreviewState {
             active_provider_index: 0,
             available_providers: Vec::new(),
             word_wrap: false,
+            provider_preferences: HashMap::new(),
         }
     }
 
@@ -50,14 +57,21 @@ impl PreviewState {
     /// When switching to a different file, resets scroll position and provider
     /// index. Re-requesting the same file (e.g. after a file-watcher event)
     /// preserves both so the user's view is not disrupted.
-    pub fn request_preview(&mut self, path: PathBuf) {
+    ///
+    /// `providers` is the list of provider names available for the file; it
+    /// becomes the new available list and drives the provider-index decision.
+    pub fn request_preview(&mut self, path: PathBuf, providers: Vec<String>) {
         let same_file = self.current_path.as_ref() == Some(&path);
         if same_file {
             self.begin_reload();
         } else {
-            self.active_provider_index = 0;
+            // Restore the provider chosen previously for this exact list, so
+            // the selection carries over across files with matching providers.
+            self.active_provider_index =
+                self.provider_preferences.get(&providers).copied().unwrap_or(0);
             self.begin_load(path);
         }
+        self.set_available_providers(providers);
     }
 
     /// Reload the current file with a different provider.
@@ -136,12 +150,13 @@ impl PreviewState {
     /// Cycle to the next available provider (wrap-around).
     ///
     /// Returns `true` if the provider changed.
-    pub const fn cycle_next_provider(&mut self) -> bool {
+    pub fn cycle_next_provider(&mut self) -> bool {
         if self.available_providers.len() <= 1 {
             return false;
         }
         self.active_provider_index =
             (self.active_provider_index + 1) % self.available_providers.len();
+        self.remember_preference();
         self.scroll_row = 0;
         self.scroll_col = 0;
         true
@@ -150,15 +165,24 @@ impl PreviewState {
     /// Cycle to the previous available provider (wrap-around).
     ///
     /// Returns `true` if the provider changed.
-    pub const fn cycle_prev_provider(&mut self) -> bool {
+    pub fn cycle_prev_provider(&mut self) -> bool {
         if self.available_providers.len() <= 1 {
             return false;
         }
         let len = self.available_providers.len();
         self.active_provider_index = (self.active_provider_index + len - 1) % len;
+        self.remember_preference();
         self.scroll_row = 0;
         self.scroll_col = 0;
         true
+    }
+
+    /// Record the active provider as the preference for the current list.
+    fn remember_preference(&mut self) {
+        if !self.available_providers.is_empty() {
+            self.provider_preferences
+                .insert(self.available_providers.clone(), self.active_provider_index);
+        }
     }
 
     /// Get the name of the currently active provider, if any.
@@ -181,14 +205,19 @@ mod tests {
 
     use super::*;
 
+    /// A single-provider list used by tests that don't exercise carry-over.
+    fn text_only() -> Vec<String> {
+        vec!["Text".to_string()]
+    }
+
     #[rstest]
     fn request_preview_different_file_resets_scroll() {
         let mut state = PreviewState::new();
-        state.request_preview(PathBuf::from("/a.rs"));
+        state.request_preview(PathBuf::from("/a.rs"), text_only());
         state.scroll_row = 10;
         state.scroll_col = 5;
 
-        state.request_preview(PathBuf::from("/b.rs"));
+        state.request_preview(PathBuf::from("/b.rs"), text_only());
         assert_that!(state.scroll_row, eq(0));
         assert_that!(state.scroll_col, eq(0));
     }
@@ -196,11 +225,11 @@ mod tests {
     #[rstest]
     fn request_preview_same_file_preserves_scroll() {
         let mut state = PreviewState::new();
-        state.request_preview(PathBuf::from("/test.rs"));
+        state.request_preview(PathBuf::from("/test.rs"), text_only());
         state.scroll_row = 10;
         state.scroll_col = 5;
 
-        state.request_preview(PathBuf::from("/test.rs"));
+        state.request_preview(PathBuf::from("/test.rs"), text_only());
         assert_that!(state.scroll_row, eq(10));
         assert_that!(state.scroll_col, eq(5));
     }
@@ -208,7 +237,7 @@ mod tests {
     #[rstest]
     fn request_preview_sets_loading() {
         let mut state = PreviewState::new();
-        state.request_preview(PathBuf::from("/test.rs"));
+        state.request_preview(PathBuf::from("/test.rs"), text_only());
 
         assert!(matches!(state.content, PreviewContent::Loading));
     }
@@ -298,24 +327,75 @@ mod tests {
 
     #[rstest]
     fn request_preview_same_file_preserves_provider_index() {
+        let providers = vec!["A".to_string(), "B".to_string(), "C".to_string()];
         let mut state = PreviewState::new();
-        state.request_preview(PathBuf::from("/test.rs"));
+        state.request_preview(PathBuf::from("/test.rs"), providers.clone());
         state.active_provider_index = 2;
 
         // Same file — index should be preserved.
-        state.request_preview(PathBuf::from("/test.rs"));
+        state.request_preview(PathBuf::from("/test.rs"), providers);
         assert_that!(state.active_provider_index, eq(2));
     }
 
     #[rstest]
     fn request_preview_different_file_resets_provider_index() {
+        let providers = vec!["A".to_string(), "B".to_string(), "C".to_string()];
         let mut state = PreviewState::new();
-        state.request_preview(PathBuf::from("/test.rs"));
+        state.request_preview(PathBuf::from("/test.rs"), providers.clone());
         state.active_provider_index = 2;
 
-        // Different file — index should reset.
-        state.request_preview(PathBuf::from("/other.rs"));
+        // Different file with no remembered preference — index should reset.
+        state.request_preview(PathBuf::from("/other.rs"), providers);
         assert_that!(state.active_provider_index, eq(0));
+    }
+
+    #[rstest]
+    fn request_preview_carries_over_selection_to_same_provider_list() {
+        let json = vec!["Text".to_string(), "jq".to_string()];
+        let mut state = PreviewState::new();
+
+        // xxx.json: switch to jq.
+        state.request_preview(PathBuf::from("/xxx.json"), json.clone());
+        state.cycle_next_provider();
+        assert_that!(state.active_provider_index, eq(1));
+
+        // yyy.json shares the same provider list — jq stays selected.
+        state.request_preview(PathBuf::from("/yyy.json"), json);
+        assert_that!(state.active_provider_index, eq(1));
+    }
+
+    #[rstest]
+    fn request_preview_resets_selection_for_different_provider_list() {
+        let json = vec!["Text".to_string(), "jq".to_string()];
+        let md = vec!["Text".to_string(), "Markdown".to_string()];
+        let mut state = PreviewState::new();
+
+        state.request_preview(PathBuf::from("/xxx.json"), json);
+        state.cycle_next_provider();
+
+        // A different provider list has no remembered preference — defaults to 0.
+        state.request_preview(PathBuf::from("/readme.md"), md);
+        assert_that!(state.active_provider_index, eq(0));
+    }
+
+    #[rstest]
+    fn request_preview_restores_selection_across_intervening_file_type() {
+        let json = vec!["Text".to_string(), "jq".to_string()];
+        let md = vec!["Text".to_string(), "Markdown".to_string()];
+        let mut state = PreviewState::new();
+
+        // Open a .json file and switch to the jq provider.
+        state.request_preview(PathBuf::from("/xxx.json"), json.clone());
+        state.cycle_next_provider();
+        assert_that!(state.active_provider_index, eq(1));
+
+        // Detour through a .md file (different list) — defaults to index 0.
+        state.request_preview(PathBuf::from("/zzz.md"), md);
+        assert_that!(state.active_provider_index, eq(0));
+
+        // Back to another .json with the same provider list — jq is restored.
+        state.request_preview(PathBuf::from("/yyy.json"), json);
+        assert_that!(state.active_provider_index, eq(1));
     }
 
     #[rstest]
