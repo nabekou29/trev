@@ -526,6 +526,21 @@ mod tests {
     }
 
     #[rstest]
+    fn inject_into_nucleo_keeps_whitelisted_dotfile_hidden() -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+        // Whitelist both the dotfile and a regular file. The guard must keep
+        // .gitignore hidden while visible.txt still shows — so without the fix
+        // the count would be 2 (.gitignore leaks), with the fix it is 1.
+        fs::write(dir.path().join(".gitignore"), "*\n!.gitignore\n!visible.txt\n").unwrap();
+        fs::write(dir.path().join("visible.txt"), "").unwrap();
+
+        let count = inject_and_count(dir.path(), false, false, DEFAULT_MAX_ENTRIES);
+        verify_that!(count, eq(1))?;
+        Ok(())
+    }
+
+    #[rstest]
     fn test_inject_into_nucleo_respects_cancellation() -> Result<()> {
         use crate::tree::search_engine::NucleoSearchEngine;
 
