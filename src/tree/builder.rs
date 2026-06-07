@@ -84,13 +84,12 @@ impl TreeBuilder {
         let non_ignored_paths = if self.show_ignored {
             let _span = tracing::debug_span!("collect_non_ignored").entered();
             let mut set = std::collections::HashSet::new();
-            let strict_walker = ignore::WalkBuilder::new(dir_path)
-                .max_depth(Some(1))
-                .hidden(!self.show_hidden)
-                .git_ignore(true)
-                .git_global(true)
-                .git_exclude(true)
-                .build();
+            // Strict pass: same as the `show_ignored = false` visibility rules,
+            // so the set holds exactly the non-ignored, visible paths.
+            let strict_walker =
+                crate::tree::walk::configured_walk_builder(dir_path, self.show_hidden, false)
+                    .max_depth(Some(1))
+                    .build();
             for entry in strict_walker.flatten() {
                 if entry.path() != dir_path {
                     set.insert(entry.into_path());
@@ -115,13 +114,13 @@ impl TreeBuilder {
         // Collect directory entries (readdir + gitignore filtering).
         let entries = {
             let _span = tracing::debug_span!("readdir").entered();
-            let walker = ignore::WalkBuilder::new(dir_path)
-                .max_depth(Some(1))
-                .hidden(!self.show_hidden)
-                .git_ignore(!self.show_ignored)
-                .git_global(!self.show_ignored)
-                .git_exclude(!self.show_ignored)
-                .build();
+            let walker = crate::tree::walk::configured_walk_builder(
+                dir_path,
+                self.show_hidden,
+                self.show_ignored,
+            )
+            .max_depth(Some(1))
+            .build();
 
             let mut entries = Vec::new();
             for entry in walker {

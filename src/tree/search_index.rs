@@ -118,11 +118,7 @@ pub fn build_search_index(
 
     let root_owned = root_path.to_path_buf();
 
-    ignore::WalkBuilder::new(root_path)
-        .hidden(!show_hidden)
-        .git_ignore(!show_ignored)
-        .git_global(!show_ignored)
-        .git_exclude(!show_ignored)
+    crate::tree::walk::configured_walk_builder(root_path, show_hidden, show_ignored)
         .build_parallel()
         .visit(&mut IndexVisitorBuilder { root: &root_owned, index, cancelled, max_entries });
 
@@ -261,11 +257,7 @@ pub fn inject_into_nucleo(
     let root_owned = root_path.to_path_buf();
     let count = Arc::new(AtomicUsize::new(0));
 
-    ignore::WalkBuilder::new(root_path)
-        .hidden(!show_hidden)
-        .git_ignore(!show_ignored)
-        .git_global(!show_ignored)
-        .git_exclude(!show_ignored)
+    crate::tree::walk::configured_walk_builder(root_path, show_hidden, show_ignored)
         .build_parallel()
         .visit(&mut NucleoVisitorBuilder {
             root: &root_owned,
