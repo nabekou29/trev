@@ -1,5 +1,6 @@
 //! Preview display state management.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use tokio_util::sync::CancellationToken;
@@ -28,6 +29,11 @@ pub struct PreviewState {
     pub available_providers: Vec<String>,
     /// Whether word wrap is enabled for text preview.
     pub word_wrap: bool,
+    /// Remembered active-provider index keyed by the provider-name list.
+    ///
+    /// Lets the chosen provider carry over between files that share the same
+    /// provider list, even when an unrelated file type is visited in between.
+    provider_preferences: HashMap<Vec<String>, usize>,
 }
 
 impl PreviewState {
@@ -42,6 +48,7 @@ impl PreviewState {
             active_provider_index: 0,
             available_providers: Vec::new(),
             word_wrap: false,
+            provider_preferences: HashMap::new(),
         }
     }
 
@@ -58,7 +65,10 @@ impl PreviewState {
         if same_file {
             self.begin_reload();
         } else {
-            self.active_provider_index = 0;
+            // Restore the provider chosen previously for this exact list, so
+            // the selection carries over across files with matching providers.
+            self.active_provider_index =
+                self.provider_preferences.get(&providers).copied().unwrap_or(0);
             self.begin_load(path);
         }
         self.set_available_providers(providers);
@@ -140,12 +150,13 @@ impl PreviewState {
     /// Cycle to the next available provider (wrap-around).
     ///
     /// Returns `true` if the provider changed.
-    pub const fn cycle_next_provider(&mut self) -> bool {
+    pub fn cycle_next_provider(&mut self) -> bool {
         if self.available_providers.len() <= 1 {
             return false;
         }
         self.active_provider_index =
             (self.active_provider_index + 1) % self.available_providers.len();
+        self.remember_preference();
         self.scroll_row = 0;
         self.scroll_col = 0;
         true
@@ -154,15 +165,24 @@ impl PreviewState {
     /// Cycle to the previous available provider (wrap-around).
     ///
     /// Returns `true` if the provider changed.
-    pub const fn cycle_prev_provider(&mut self) -> bool {
+    pub fn cycle_prev_provider(&mut self) -> bool {
         if self.available_providers.len() <= 1 {
             return false;
         }
         let len = self.available_providers.len();
         self.active_provider_index = (self.active_provider_index + len - 1) % len;
+        self.remember_preference();
         self.scroll_row = 0;
         self.scroll_col = 0;
         true
+    }
+
+    /// Record the active provider as the preference for the current list.
+    fn remember_preference(&mut self) {
+        if !self.available_providers.is_empty() {
+            self.provider_preferences
+                .insert(self.available_providers.clone(), self.active_provider_index);
+        }
     }
 
     /// Get the name of the currently active provider, if any.
@@ -327,6 +347,26 @@ mod tests {
         // Different file with no remembered preference — index should reset.
         state.request_preview(PathBuf::from("/other.rs"), providers);
         assert_that!(state.active_provider_index, eq(0));
+    }
+
+    #[rstest]
+    fn request_preview_restores_selection_across_intervening_file_type() {
+        let json = vec!["Text".to_string(), "jq".to_string()];
+        let md = vec!["Text".to_string(), "Markdown".to_string()];
+        let mut state = PreviewState::new();
+
+        // Open a .json file and switch to the jq provider.
+        state.request_preview(PathBuf::from("/xxx.json"), json.clone());
+        state.cycle_next_provider();
+        assert_that!(state.active_provider_index, eq(1));
+
+        // Detour through a .md file (different list) — defaults to index 0.
+        state.request_preview(PathBuf::from("/zzz.md"), md);
+        assert_that!(state.active_provider_index, eq(0));
+
+        // Back to another .json with the same provider list — jq is restored.
+        state.request_preview(PathBuf::from("/yyy.json"), json);
+        assert_that!(state.active_provider_index, eq(1));
     }
 
     #[rstest]
