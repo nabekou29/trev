@@ -30,9 +30,9 @@ two-face = "0.5"
 
 # Preview
 content_inspector = "0.2"
-lru = "0.16"
+lru = "0.18"
 terminal-light = "1"
-ratatui-image = { version = "10", default-features = false, features = ["crossterm"] }
+ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
 image = { version = "0.25", default-features = false, features = ["rayon", "bmp", "gif", "ico", "jpeg", "png", "tiff", "webp"] }
 resvg = "0.47"
 ansi-to-tui = "8"
@@ -53,7 +53,7 @@ trash = "5"
 chrono = { version = "0.4", features = ["serde"] }
 
 # Hashing
-sha2 = "0.10"
+sha2 = "0.11"
 
 # Clipboard
 arboard = "3"

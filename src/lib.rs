@@ -26,4 +26,5 @@ pub mod state;
 pub mod terminal;
 pub mod tree;
 pub mod ui;
+pub mod util;
 pub mod watcher;

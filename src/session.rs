@@ -102,7 +102,7 @@ fn session_path(root: &Path) -> Result<PathBuf> {
     let mut hasher = Sha256::new();
     hasher.update(root.to_string_lossy().as_bytes());
     let hash = hasher.finalize();
-    let hex = format!("{hash:x}");
+    let hex = crate::util::hex_encode(hash.as_ref());
     let short_hash = &hex[..16];
     Ok(session_dir()?.join(format!("{short_hash}.json")))
 }
@@ -416,7 +416,7 @@ mod tests {
         let mut hasher = Sha256::new();
         hasher.update(state.root_path.to_string_lossy().as_bytes());
         let hash = hasher.finalize();
-        let hex = format!("{hash:x}");
+        let hex = crate::util::hex_encode(hash.as_ref());
         let file_path = dir.join(format!("{}.json", &hex[..16]));
 
         let json = serde_json::to_string_pretty(state).unwrap();
