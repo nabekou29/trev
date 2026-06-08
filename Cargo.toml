@@ -32,7 +32,7 @@ two-face = "0.5"
 content_inspector = "0.2"
 lru = "0.18"
 terminal-light = "1"
-ratatui-image = { version = "10", default-features = false, features = ["crossterm"] }
+ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
 image = { version = "0.25", default-features = false, features = ["rayon", "bmp", "gif", "ico", "jpeg", "png", "tiff", "webp"] }
 resvg = "0.47"
 ansi-to-tui = "8"
