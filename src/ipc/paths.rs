@@ -29,7 +29,7 @@ pub fn workspace_key(path: &Path) -> String {
     let mut hasher = Sha256::new();
     hasher.update(path_str.as_bytes());
     let digest = hasher.finalize();
-    let hash_hex = format!("{digest:x}");
+    let hash_hex = crate::util::hex_encode(digest.as_ref());
     let short_hash = hash_hex.get(..8).unwrap_or(&hash_hex);
 
     format!("{dir_name}-{short_hash}")
