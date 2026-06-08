@@ -1,4 +1,19 @@
 
+## [0.1.10] - 2026-06-08
+
+### Bug Fixes
+
+- Keep hidden dotfiles hidden despite gitignore whitelist (#9)
+
+### Features
+
+- Carry over the selected preview provider across files (#8)
+
+### Performance
+
+- Migrate to Nucleo async parallel search engine (#5)
+
+
 ## [0.1.9] - 2026-04-02
 
 ### Features
