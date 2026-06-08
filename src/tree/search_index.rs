@@ -118,11 +118,7 @@ pub fn build_search_index(
 
     let root_owned = root_path.to_path_buf();
 
-    ignore::WalkBuilder::new(root_path)
-        .hidden(!show_hidden)
-        .git_ignore(!show_ignored)
-        .git_global(!show_ignored)
-        .git_exclude(!show_ignored)
+    crate::tree::walk::configured_walk_builder(root_path, show_hidden, show_ignored)
         .build_parallel()
         .visit(&mut IndexVisitorBuilder { root: &root_owned, index, cancelled, max_entries });
 
@@ -261,11 +257,7 @@ pub fn inject_into_nucleo(
     let root_owned = root_path.to_path_buf();
     let count = Arc::new(AtomicUsize::new(0));
 
-    ignore::WalkBuilder::new(root_path)
-        .hidden(!show_hidden)
-        .git_ignore(!show_ignored)
-        .git_global(!show_ignored)
-        .git_exclude(!show_ignored)
+    crate::tree::walk::configured_walk_builder(root_path, show_hidden, show_ignored)
         .build_parallel()
         .visit(&mut NucleoVisitorBuilder {
             root: &root_owned,
@@ -474,6 +466,25 @@ mod tests {
         Ok(())
     }
 
+    #[rstest]
+    #[case(false)]
+    #[case(true)]
+    fn build_index_keeps_whitelisted_dotfile_hidden(#[case] show_ignored: bool) -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+        // `!.gitignore` whitelists the dotfile, which overrides the hidden
+        // filter in the `ignore` crate unless guarded against.
+        fs::write(dir.path().join(".gitignore"), "*\n!.gitignore\n").unwrap();
+        fs::write(dir.path().join("visible.txt"), "").unwrap();
+
+        // show_hidden=false → .gitignore must not appear in search results.
+        let index = build_index(dir.path(), false, show_ignored);
+        let has_gitignore = index.entries().iter().any(|e| e.name == ".gitignore");
+
+        verify_that!(has_gitignore, eq(false))?;
+        Ok(())
+    }
+
     // ===================================================================
     // inject_into_nucleo tests
     // ===================================================================
@@ -511,6 +522,21 @@ mod tests {
         let count = inject_and_count(dir.path(), false, false, DEFAULT_MAX_ENTRIES);
         // Should find: file1.txt, subdir, subdir/file2.txt
         verify_that!(count, eq(3))?;
+        Ok(())
+    }
+
+    #[rstest]
+    fn inject_into_nucleo_keeps_whitelisted_dotfile_hidden() -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+        // Whitelist both the dotfile and a regular file. The guard must keep
+        // .gitignore hidden while visible.txt still shows — so without the fix
+        // the count would be 2 (.gitignore leaks), with the fix it is 1.
+        fs::write(dir.path().join(".gitignore"), "*\n!.gitignore\n!visible.txt\n").unwrap();
+        fs::write(dir.path().join("visible.txt"), "").unwrap();
+
+        let count = inject_and_count(dir.path(), false, false, DEFAULT_MAX_ENTRIES);
+        verify_that!(count, eq(1))?;
         Ok(())
     }
 

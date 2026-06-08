@@ -4,3 +4,4 @@ pub mod builder;
 pub mod search_engine;
 pub mod search_index;
 pub mod sort;
+pub mod walk;

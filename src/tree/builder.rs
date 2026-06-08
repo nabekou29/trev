@@ -84,13 +84,12 @@ impl TreeBuilder {
         let non_ignored_paths = if self.show_ignored {
             let _span = tracing::debug_span!("collect_non_ignored").entered();
             let mut set = std::collections::HashSet::new();
-            let strict_walker = ignore::WalkBuilder::new(dir_path)
-                .max_depth(Some(1))
-                .hidden(!self.show_hidden)
-                .git_ignore(true)
-                .git_global(true)
-                .git_exclude(true)
-                .build();
+            // Strict pass: same as the `show_ignored = false` visibility rules,
+            // so the set holds exactly the non-ignored, visible paths.
+            let strict_walker =
+                crate::tree::walk::configured_walk_builder(dir_path, self.show_hidden, false)
+                    .max_depth(Some(1))
+                    .build();
             for entry in strict_walker.flatten() {
                 if entry.path() != dir_path {
                     set.insert(entry.into_path());
@@ -115,13 +114,13 @@ impl TreeBuilder {
         // Collect directory entries (readdir + gitignore filtering).
         let entries = {
             let _span = tracing::debug_span!("readdir").entered();
-            let walker = ignore::WalkBuilder::new(dir_path)
-                .max_depth(Some(1))
-                .hidden(!self.show_hidden)
-                .git_ignore(!self.show_ignored)
-                .git_global(!self.show_ignored)
-                .git_exclude(!self.show_ignored)
-                .build();
+            let walker = crate::tree::walk::configured_walk_builder(
+                dir_path,
+                self.show_hidden,
+                self.show_ignored,
+            )
+            .max_depth(Some(1))
+            .build();
 
             let mut entries = Vec::new();
             for entry in walker {
@@ -274,6 +273,47 @@ mod tests {
         let names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();
         verify_that!(names.contains(&".hidden"), eq(false))?;
         verify_that!(names.contains(&"visible.txt"), eq(true))?;
+        Ok(())
+    }
+
+    #[rstest]
+    #[case(false)]
+    #[case(true)]
+    fn hidden_dotfile_whitelisted_by_gitignore_stays_hidden(
+        #[case] show_ignored: bool,
+    ) -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        // `*` ignores everything, `!.gitignore` whitelists the .gitignore
+        // dotfile — a very common pattern. A gitignore whitelist produces a
+        // Match::Whitelist that overrides the `ignore` crate's hidden filter,
+        // so the dotfile would otherwise leak through when show_hidden=false.
+        fs::write(dir.path().join(".gitignore"), "*\n!.gitignore\n").unwrap();
+        fs::write(dir.path().join("visible.txt"), "").unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+
+        // show_hidden=false → .gitignore must stay hidden regardless of show_ignored.
+        let builder = TreeBuilder::new(false, show_ignored);
+        let root = builder.build(dir.path()).unwrap();
+        let children = root.children.as_loaded().unwrap();
+        let has_gitignore = children.iter().any(|c| c.name == ".gitignore");
+
+        verify_that!(has_gitignore, eq(false))?;
+        Ok(())
+    }
+
+    #[rstest]
+    fn show_hidden_true_reveals_whitelisted_dotfile() -> Result<()> {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(".gitignore"), "*\n!.gitignore\n").unwrap();
+        std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+
+        // show_hidden=true → dotfiles are shown (the guard must not over-filter).
+        let builder = TreeBuilder::new(true, false);
+        let root = builder.build(dir.path()).unwrap();
+        let children = root.children.as_loaded().unwrap();
+        let has_gitignore = children.iter().any(|c| c.name == ".gitignore");
+
+        verify_that!(has_gitignore, eq(true))?;
         Ok(())
     }
 
