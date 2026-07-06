@@ -224,7 +224,7 @@ fn init_app(
     let (fs_watcher, suppressed) = setup_watcher(&config, watcher_tx, &root_path);
 
     // Start IPC server if enabled.
-    let (ipc_server, ipc_rx) = start_ipc_if_enabled(args.ipc, &root_path);
+    let (ipc_server, ipc_rx, ipc_error) = start_ipc_if_enabled(args.ipc, &root_path);
 
     // --- Phase 2: restore remaining session state (expanded dirs, cursor, etc.) ---
     let search_history = session_state.as_ref().map_or_else(Vec::new, |s| s.search_history.clone());
@@ -315,6 +315,11 @@ fn init_app(
         search_engine: NucleoSearchEngine::new(nucleo_notify_fn),
         search_debounce: None,
     };
+
+    // Surface IPC startup failure in the status bar instead of only logging it.
+    if let Some(msg) = ipc_error {
+        state.set_status(msg);
+    }
 
     let (ctx, channels) = build_context_and_channels(
         &config,
@@ -1419,41 +1424,60 @@ fn shutdown(root_path: &Path, state: &AppState) {
 
 /// Start IPC server when the `--ipc` flag is set.
 ///
-/// Returns the server handle (kept alive for the process lifetime) and
-/// the receiver end of the command channel.
+/// Returns the server handle (kept alive for the process lifetime),
+/// the receiver end of the command channel, and a user-visible error
+/// message when the server failed to start.
 fn start_ipc_if_enabled(
     ipc: bool,
     root_path: &Path,
-) -> (Option<Arc<crate::ipc::server::IpcServer>>, tokio::sync::mpsc::UnboundedReceiver<IpcCommand>)
-{
+) -> (
+    Option<Arc<crate::ipc::server::IpcServer>>,
+    tokio::sync::mpsc::UnboundedReceiver<IpcCommand>,
+    Option<String>,
+) {
     let (ipc_tx, ipc_rx) = tokio::sync::mpsc::unbounded_channel::<IpcCommand>();
-    let server = if ipc {
-        // Clean up stale sockets from crashed processes in the background.
-        tokio::spawn(async {
-            let removed = crate::ipc::paths::cleanup_stale_sockets();
-            if removed > 0 {
-                tracing::info!(removed, "cleaned up stale sockets");
-            }
-        });
-
-        let socket_path = crate::ipc::paths::socket_path(root_path);
-        match crate::ipc::server::IpcServer::start_on_path(socket_path.clone(), ipc_tx) {
-            Ok(s) => {
-                if let Err(e) = crate::ipc::paths::write_meta(&socket_path, root_path) {
-                    tracing::warn!(%e, "failed to write IPC metadata");
-                }
-                Some(s)
-            }
-            Err(e) => {
-                tracing::warn!(%e, "failed to start IPC server");
-                None
-            }
-        }
-    } else {
+    if !ipc {
         drop(ipc_tx);
-        None
-    };
-    (server, ipc_rx)
+        return (None, ipc_rx, None);
+    }
+
+    // Clean up stale sockets from crashed processes in the background.
+    tokio::spawn(async {
+        let removed = crate::ipc::paths::cleanup_stale_sockets();
+        if removed > 0 {
+            tracing::info!(removed, "cleaned up stale sockets");
+        }
+    });
+
+    let socket_path = crate::ipc::paths::socket_path(root_path);
+    match start_ipc_server(socket_path, root_path, ipc_tx) {
+        Ok(s) => (Some(s), ipc_rx, None),
+        Err(msg) => (None, ipc_rx, Some(msg)),
+    }
+}
+
+/// Bind the IPC server on `socket_path` and write its workspace metadata.
+///
+/// # Errors
+///
+/// Returns a user-visible message when the socket cannot be bound.
+fn start_ipc_server(
+    socket_path: PathBuf,
+    root_path: &Path,
+    ipc_tx: tokio::sync::mpsc::UnboundedSender<IpcCommand>,
+) -> Result<Arc<crate::ipc::server::IpcServer>, String> {
+    match crate::ipc::server::IpcServer::start_on_path(socket_path, ipc_tx) {
+        Ok(s) => {
+            if let Err(e) = crate::ipc::paths::write_meta(s.socket_path(), root_path) {
+                tracing::warn!(%e, "failed to write IPC metadata");
+            }
+            Ok(s)
+        }
+        Err(e) => {
+            tracing::warn!(%e, "failed to start IPC server");
+            Err(format!("IPC unavailable: {e}"))
+        }
+    }
 }
 
 /// Process async preview load results: cache and display.
@@ -1699,4 +1723,41 @@ fn process_watcher_events(
         }
     }
     had_events
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use rstest::*;
+
+    use super::*;
+
+    #[rstest]
+    #[tokio::test]
+    async fn start_ipc_server_returns_user_message_on_bind_failure() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace = tmp.path();
+        // Socket path exceeding the sun_path limit forces a bind failure.
+        let socket_path = tmp.path().join("a".repeat(150)).join("x.sock");
+        let (ipc_tx, _ipc_rx) = tokio::sync::mpsc::unbounded_channel::<IpcCommand>();
+
+        let result = start_ipc_server(socket_path, workspace, ipc_tx);
+
+        assert!(result.is_err(), "bind should fail for an over-long socket path");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("IPC"), "message should mention IPC: {msg}");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn start_ipc_server_succeeds_on_valid_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace = tmp.path();
+        let socket_path = tmp.path().join("x.sock");
+        let (ipc_tx, _ipc_rx) = tokio::sync::mpsc::unbounded_channel::<IpcCommand>();
+
+        let result = start_ipc_server(socket_path, workspace, ipc_tx);
+
+        assert!(result.is_ok(), "bind should succeed: {:?}", result.err());
+    }
 }
