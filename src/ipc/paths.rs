@@ -10,9 +10,19 @@ use sha2::{
     Sha256,
 };
 
+/// Maximum byte length of the directory-name prefix in a workspace key.
+///
+/// The socket path lives in `sockaddr_un.sun_path`, which is limited to
+/// 104 bytes on macOS. The runtime dir alone (`$TMPDIR/trev`) is ~54 bytes
+/// there, so the name prefix must stay short. Uniqueness comes from the
+/// hash, not the name — the prefix is only for readability.
+const MAX_KEY_NAME_BYTES: usize = 16;
+
 /// Derive a workspace key from a canonical directory path.
 ///
 /// Always uses `<dir_name>-<hash8>` format for a compact, collision-free key.
+/// The directory name is truncated to [`MAX_KEY_NAME_BYTES`] so the socket
+/// path stays within the platform's `sun_path` limit.
 /// The full workspace path is stored in a separate metadata file for reverse lookup.
 ///
 /// # Examples
@@ -25,6 +35,7 @@ pub fn workspace_key(path: &Path) -> String {
 
     let dir_name =
         path.file_name().map_or_else(|| "trev".to_owned(), |n| n.to_string_lossy().into_owned());
+    let dir_name = truncate_at_char_boundary(&dir_name, MAX_KEY_NAME_BYTES);
 
     let mut hasher = Sha256::new();
     hasher.update(path_str.as_bytes());
@@ -33,6 +44,15 @@ pub fn workspace_key(path: &Path) -> String {
     let short_hash = hash_hex.get(..8).unwrap_or(&hash_hex);
 
     format!("{dir_name}-{short_hash}")
+}
+
+/// Truncate a string to at most `max_bytes` bytes without splitting a character.
+fn truncate_at_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let end = s.char_indices().map(|(i, _)| i).take_while(|&i| i <= max_bytes).last().unwrap_or(0);
+    s.get(..end).unwrap_or("")
 }
 
 /// Get the runtime directory for trev sockets.
@@ -191,6 +211,58 @@ mod tests {
         assert!(key_a.starts_with("app-"));
         assert!(key_b.starts_with("app-"));
         assert_ne!(key_a, key_b);
+    }
+
+    #[rstest]
+    fn workspace_key_truncates_long_dir_name() {
+        let tmp = TempDir::new().unwrap();
+        // 31-char name reproduces the macOS sun_path overflow when untruncated.
+        let dir = tmp.path().join("feature-awesome-widget-redesign");
+        std::fs::create_dir(&dir).unwrap();
+
+        let key = workspace_key(&dir);
+
+        // name(≤16) + "-" + hash(8)
+        assert!(key.len() <= 25, "key should be at most 25 bytes: {key} ({})", key.len());
+        assert!(key.starts_with("feature-awesome-"), "key should keep a readable prefix: {key}");
+    }
+
+    #[rstest]
+    fn workspace_key_truncation_respects_char_boundary() {
+        let tmp = TempDir::new().unwrap();
+        // Multibyte name: 3 bytes per char, byte 16 falls mid-character.
+        let dir = tmp.path().join("日本語のディレクトリ名です");
+        std::fs::create_dir(&dir).unwrap();
+
+        let key = workspace_key(&dir);
+
+        assert!(key.len() <= 25, "key should be at most 25 bytes: {key} ({})", key.len());
+        // 16 bytes fit 5 whole 3-byte chars (15 bytes); the 6th would split at byte 16.
+        assert!(key.starts_with("日本語のデ-"), "prefix should be whole chars: {key}");
+    }
+
+    #[rstest]
+    fn workspace_key_long_names_with_same_prefix_differ() {
+        let tmp = TempDir::new().unwrap();
+        let dir_a = tmp.path().join("feature-awesome-widget-redesign");
+        let dir_b = tmp.path().join("feature-awesome-widget-redesign-v2");
+        std::fs::create_dir(&dir_a).unwrap();
+        std::fs::create_dir(&dir_b).unwrap();
+
+        assert_ne!(workspace_key(&dir_a), workspace_key(&dir_b));
+    }
+
+    #[rstest]
+    fn socket_path_filename_is_bounded_for_long_dir_names() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("a".repeat(100));
+        std::fs::create_dir(&dir).unwrap();
+
+        let path = socket_path(&dir);
+        let filename = path.file_name().unwrap().to_str().unwrap();
+
+        // name(≤16) + "-" + hash(8) + "-" + pid(≤10) + ".sock"(5) = 41 max.
+        assert!(filename.len() <= 41, "filename should stay short: {filename}");
     }
 
     #[rstest]
