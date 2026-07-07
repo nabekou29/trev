@@ -43,6 +43,16 @@ impl TextBuffer {
         self.cursor_pos += ch.len_utf8();
     }
 
+    /// Insert a string at the current cursor position, skipping control characters.
+    ///
+    /// Intended for paste input: newlines, tabs, and escape sequences make no
+    /// sense in a single-line field, so control characters are dropped.
+    pub fn insert_str(&mut self, text: &str) {
+        for ch in text.chars().filter(|ch| !ch.is_control()) {
+            self.insert_char(ch);
+        }
+    }
+
     /// Delete the character before the cursor (Backspace).
     pub fn delete_char_backward(&mut self) {
         if self.cursor_pos == 0 {
@@ -773,6 +783,35 @@ mod tests {
         b.insert_char('c');
         assert_that!(b.value.as_str(), eq("abc.txt"));
         assert_that!(b.cursor_pos, eq(3));
+    }
+
+    #[rstest]
+    fn insert_str_inserts_at_cursor() {
+        let mut b = buf("ab.txt", 2); // ab|.txt
+        b.insert_str("cd");
+        assert_that!(b.value.as_str(), eq("abcd.txt"));
+        assert_that!(b.cursor_pos, eq(4));
+    }
+
+    #[rstest]
+    #[case::newline("foo\nbar", "foobar")]
+    #[case::crlf("foo\r\nbar", "foobar")]
+    #[case::tab("foo\tbar", "foobar")]
+    #[case::escape("foo\u{1b}[31mbar", "foo[31mbar")]
+    #[case::plain_kept("hello world.txt", "hello world.txt")]
+    fn insert_str_filters_control_chars(#[case] pasted: &str, #[case] expected: &str) {
+        let mut b = buf("", 0);
+        b.insert_str(pasted);
+        assert_that!(b.value.as_str(), eq(expected));
+        assert_that!(b.cursor_pos, eq(expected.len()));
+    }
+
+    #[rstest]
+    fn insert_str_multibyte_moves_cursor_by_bytes() {
+        let mut b = buf("x", 1);
+        b.insert_str("日本");
+        assert_that!(b.value.as_str(), eq("x日本"));
+        assert_that!(b.cursor_pos, eq(7)); // 1 + 3 + 3 bytes
     }
 
     #[rstest]
