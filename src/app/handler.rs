@@ -12,7 +12,7 @@ pub mod tree;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-pub use file_op::handle_clipboard_paste;
+use file_op::handle_clipboard_paste;
 use file_op::handle_file_op_action;
 use input::{
     handle_confirm_mode_key,
@@ -62,6 +62,42 @@ pub fn handle_key_event(key: crossterm::event::KeyEvent, state: &mut AppState, c
         AppMode::Help(_) => {
             handle_help_mode_key(key, state, ctx);
         }
+    }
+}
+
+/// Handle a bracketed-paste event from the terminal (Cmd+V etc.).
+///
+/// In Normal mode the pasted text is ignored and the OS clipboard is pasted
+/// as a file operation. In text-input modes the pasted string is inserted
+/// into the active text buffer.
+pub fn handle_paste_event(text: &str, state: &mut AppState, ctx: &AppContext) {
+    if matches!(state.mode, AppMode::Normal) {
+        handle_clipboard_paste(state, ctx);
+    } else {
+        paste_into_active_buffer(text, state);
+    }
+}
+
+/// Insert pasted text into the currently active text buffer, if any.
+///
+/// Control characters are stripped by [`crate::input::TextBuffer::insert_str`].
+/// Modes without an active text input (Confirm, Menu, Search in Filtered
+/// phase, Help without filter) ignore the paste.
+fn paste_into_active_buffer(text: &str, state: &mut AppState) {
+    match state.mode {
+        AppMode::Input(ref mut input) => {
+            input.buffer.insert_str(text);
+        }
+        AppMode::Search(ref mut search) if search.phase == crate::input::SearchPhase::Typing => {
+            search.buffer.insert_str(text);
+            search::run_incremental_search(state);
+        }
+        AppMode::Help(ref mut help) if help.filtering => {
+            help.filter.insert_str(text);
+            help.cursor = 0;
+            help.scroll_offset = 0;
+        }
+        _ => {}
     }
 }
 
@@ -720,7 +756,12 @@ fn shell_escape(s: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::literal_string_with_formatting_args)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::literal_string_with_formatting_args,
+    clippy::panic
+)]
 mod tests {
     use std::path::Path;
 
@@ -1103,5 +1144,139 @@ mod tests {
         assert_that!(items.len(), eq(2));
         assert_that!(items[0].as_str(), eq("Valid"));
         assert_that!(items[1].as_str(), eq("Also valid"));
+    }
+
+    // --- paste_into_active_buffer tests ---
+
+    #[rstest]
+    fn paste_inserts_into_input_mode_buffer() {
+        use crate::input::{
+            AppMode,
+            InputState,
+        };
+
+        let mut state = crate::app::state::tests::minimal_app_state();
+        state.mode = AppMode::Input(InputState::for_create(std::path::PathBuf::from("/tmp")));
+
+        super::paste_into_active_buffer("new file\n.txt", &mut state);
+
+        let AppMode::Input(ref input) = state.mode else {
+            panic!("expected Input mode");
+        };
+        assert_that!(input.buffer.value.as_str(), eq("new file.txt"));
+    }
+
+    #[rstest]
+    fn paste_inserts_into_search_typing_buffer_and_triggers_search() {
+        use crate::input::{
+            AppMode,
+            SearchState,
+        };
+
+        let mut state = crate::app::state::tests::minimal_app_state();
+        state.mode = AppMode::Search(SearchState::new());
+
+        super::paste_into_active_buffer("foo", &mut state);
+
+        let AppMode::Search(ref search) = state.mode else {
+            panic!("expected Search mode");
+        };
+        assert_that!(search.buffer.value.as_str(), eq("foo"));
+        // Incremental search ran: debounce deadline is set for a non-empty query.
+        assert!(state.search_debounce.is_some());
+    }
+
+    #[rstest]
+    fn paste_ignored_in_search_filtered_phase() {
+        use crate::input::{
+            AppMode,
+            SearchPhase,
+            SearchState,
+        };
+
+        let mut state = crate::app::state::tests::minimal_app_state();
+        let mut search = SearchState::new();
+        search.phase = SearchPhase::Filtered;
+        state.mode = AppMode::Search(search);
+
+        super::paste_into_active_buffer("foo", &mut state);
+
+        let AppMode::Search(ref search) = state.mode else {
+            panic!("expected Search mode");
+        };
+        assert_that!(search.buffer.value.as_str(), eq(""));
+    }
+
+    #[rstest]
+    fn paste_inserts_into_help_filter_when_filtering() {
+        use crate::input::{
+            AppMode,
+            HelpState,
+            TextBuffer,
+        };
+
+        let mut state = crate::app::state::tests::minimal_app_state();
+        state.mode = AppMode::Help(HelpState {
+            scroll_offset: 3,
+            cursor: 5,
+            bindings: vec![],
+            filter: TextBuffer::new(),
+            filtering: true,
+        });
+
+        super::paste_into_active_buffer("move", &mut state);
+
+        let AppMode::Help(ref help) = state.mode else {
+            panic!("expected Help mode");
+        };
+        assert_that!(help.filter.value.as_str(), eq("move"));
+        // Filter changed — cursor and scroll reset like keyboard filtering.
+        assert_that!(help.cursor, eq(0));
+        assert_that!(help.scroll_offset, eq(0));
+    }
+
+    #[rstest]
+    fn paste_ignored_in_help_when_not_filtering() {
+        use crate::input::{
+            AppMode,
+            HelpState,
+            TextBuffer,
+        };
+
+        let mut state = crate::app::state::tests::minimal_app_state();
+        state.mode = AppMode::Help(HelpState {
+            scroll_offset: 0,
+            cursor: 0,
+            bindings: vec![],
+            filter: TextBuffer::new(),
+            filtering: false,
+        });
+
+        super::paste_into_active_buffer("move", &mut state);
+
+        let AppMode::Help(ref help) = state.mode else {
+            panic!("expected Help mode");
+        };
+        assert_that!(help.filter.value.as_str(), eq(""));
+    }
+
+    #[rstest]
+    fn paste_ignored_in_confirm_mode() {
+        use crate::input::{
+            AppMode,
+            ConfirmAction,
+            ConfirmState,
+        };
+
+        let mut state = crate::app::state::tests::minimal_app_state();
+        state.mode = AppMode::Confirm(ConfirmState {
+            message: "Delete?".to_string(),
+            paths: vec![],
+            on_confirm: ConfirmAction::CustomTrash,
+        });
+
+        // Must not panic or change mode.
+        super::paste_into_active_buffer("foo", &mut state);
+        assert!(matches!(state.mode, AppMode::Confirm(_)));
     }
 }
