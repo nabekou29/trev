@@ -242,7 +242,7 @@ const SEARCH_DEBOUNCE: Duration = Duration::from_millis(100);
 /// key input is never blocked. Sets a debounce deadline; the actual results
 /// are applied in [`apply_nucleo_results`] once the deadline expires and
 /// Nucleo workers have produced results.
-fn run_incremental_search(state: &mut AppState) {
+pub(super) fn run_incremental_search(state: &mut AppState) {
     let AppMode::Search(ref search) = state.mode else {
         return;
     };

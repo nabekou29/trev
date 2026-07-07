@@ -32,10 +32,10 @@ use crossterm::event::{
 };
 use futures_util::StreamExt as _;
 use handler::{
-    handle_clipboard_paste,
     handle_ipc_command,
     handle_key_event,
     handle_mouse_event,
+    handle_paste_event,
     refresh_directory,
     spawn_load_children,
     trigger_prefetch,
@@ -809,8 +809,8 @@ fn drain_terminal_events(state: &mut AppState, ctx: &AppContext) -> Result<()> {
                 handle_mouse_event(mouse, state, ctx);
                 state.dirty = true;
             }
-            Event::Paste(_) => {
-                handle_clipboard_paste(state, ctx);
+            Event::Paste(text) => {
+                handle_paste_event(&text, state, ctx);
                 state.dirty = true;
             }
             _ => {}
@@ -902,9 +902,9 @@ pub async fn run(args: &Args) -> Result<()> {
                         handle_mouse_event(mouse, &mut state, &ctx);
                         state.dirty = true;
                     }
-                    Some(Ok(Event::Paste(_))) => {
+                    Some(Ok(Event::Paste(text))) => {
                         got_terminal_event = true;
-                        handle_clipboard_paste(&mut state, &ctx);
+                        handle_paste_event(&text, &mut state, &ctx);
                         state.dirty = true;
                     }
                     Some(Ok(Event::Resize(_, _))) => {
