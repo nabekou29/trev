@@ -1,4 +1,15 @@
 
+## [0.1.11] - 2026-07-12
+
+### Bug Fixes
+
+- Keep socket path within sun_path limit for long workspace names (#12)
+
+### Features
+
+- Paste clipboard text into text input fields (#13)
+
+
 ## [0.1.10] - 2026-06-08
 
 ### Bug Fixes
