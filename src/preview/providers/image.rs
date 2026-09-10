@@ -248,6 +248,26 @@ mod tests {
         assert_that!(resolve_protocol(detected, cell_size_known, in_herdr), eq(expected));
     }
 
+    // --- SVG rendering tests ---
+
+    #[rstest]
+    fn load_svg_rasterizes_at_document_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("square.svg");
+        std::fs::write(
+            &path,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="#ff0000"/></svg>"##,
+        )
+        .unwrap();
+
+        let img = load_svg(&path).unwrap();
+
+        assert_that!(img.width(), eq(20));
+        assert_that!(img.height(), eq(10));
+        let center = img.to_rgba8().get_pixel(10, 5).0;
+        assert_that!(center, eq([255, 0, 0, 255]));
+    }
+
     #[rstest]
     fn priority_is_builtin() {
         let provider = make_provider();
