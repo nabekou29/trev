@@ -34,7 +34,7 @@ lru = "0.18"
 terminal-light = "1"
 ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
 image = { version = "0.25", default-features = false, features = ["rayon", "bmp", "gif", "ico", "jpeg", "png", "tiff", "webp"] }
-resvg = "0.47"
+resvg = "0.48"
 ansi-to-tui = "8"
 
 # Fuzzy search
@@ -92,7 +92,7 @@ dev = []
 criterion = { version = "0.8", features = ["html_reports"] }
 googletest = "0.14"
 proptest = "1"
-rstest = "0.26"
+rstest = "0.27"
 tempfile = "3"
 tokio-test = "0.4"
 
