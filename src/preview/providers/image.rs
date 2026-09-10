@@ -3,7 +3,11 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use ratatui_image::picker::Picker;
+use ratatui_image::picker::{
+    Capability,
+    Picker,
+    ProtocolType,
+};
 
 use crate::preview::content::PreviewContent;
 use crate::preview::provider::{
@@ -38,6 +42,40 @@ impl ImagePreviewProvider {
     pub fn fallback_picker() -> Picker {
         Picker::halfblocks()
     }
+}
+
+/// Correct the graphics protocol detected by `Picker` when running inside herdr.
+///
+/// A herdr pane inherits the outer terminal's environment variables, and
+/// ratatui-image skips the Kitty and Sixel capability queries whenever
+/// `WEZTERM_EXECUTABLE` (or `KONSOLE_VERSION`) is set, falling back to the
+/// iTerm2 protocol based on `TERM_PROGRAM`. The protocol then matches the outer
+/// terminal rather than the herdr pane that actually draws the output, and
+/// iTerm2 image payloads leave the preview empty there.
+///
+/// herdr's own emulator answers the Kitty capability query and reports its cell
+/// size, so Kitty is the protocol to use inside a pane.
+pub fn correct_protocol_in_herdr(picker: &mut Picker) {
+    let in_herdr = std::env::var_os("HERDR_ENV").is_some_and(|v| !v.is_empty());
+    let cell_size_known =
+        picker.capabilities().iter().any(|c| matches!(*c, Capability::CellSize(Some(_))));
+    let resolved = resolve_protocol(picker.protocol_type(), cell_size_known, in_herdr);
+    if resolved != picker.protocol_type() {
+        picker.set_protocol_type(resolved);
+    }
+}
+
+/// Decide the protocol to render with.
+///
+/// The correction requires a real cell-size response: without one the picker
+/// carries a placeholder font size, and Kitty images would be sized in pixels
+/// against a made-up cell grid.
+const fn resolve_protocol(
+    detected: ProtocolType,
+    cell_size_known: bool,
+    in_herdr: bool,
+) -> ProtocolType {
+    if in_herdr && cell_size_known { ProtocolType::Kitty } else { detected }
 }
 
 impl std::fmt::Debug for ImagePreviewProvider {
@@ -190,6 +228,24 @@ mod tests {
             NodeInfo { file_type: if is_dir { FileType::Directory } else { FileType::File } };
         let provider = make_provider();
         assert_that!(provider.can_handle(&PathBuf::from(filename), &node), eq(expected));
+    }
+
+    // --- protocol correction tests ---
+
+    #[rstest]
+    #[case(ProtocolType::Iterm2, true, true, ProtocolType::Kitty)]
+    #[case(ProtocolType::Halfblocks, true, true, ProtocolType::Kitty)]
+    #[case(ProtocolType::Kitty, true, true, ProtocolType::Kitty)]
+    #[case(ProtocolType::Iterm2, false, true, ProtocolType::Iterm2)]
+    #[case(ProtocolType::Iterm2, true, false, ProtocolType::Iterm2)]
+    #[case(ProtocolType::Sixel, true, false, ProtocolType::Sixel)]
+    fn resolve_protocol_cases(
+        #[case] detected: ProtocolType,
+        #[case] cell_size_known: bool,
+        #[case] in_herdr: bool,
+        #[case] expected: ProtocolType,
+    ) {
+        assert_that!(resolve_protocol(detected, cell_size_known, in_herdr), eq(expected));
     }
 
     #[rstest]
