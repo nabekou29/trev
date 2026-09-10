@@ -489,8 +489,14 @@ fn detect_terminal_and_build_registry(
     config: &Config,
     root_path: &Path,
 ) -> Result<(Arc<RwLock<Option<GitState>>>, PreviewRegistry)> {
-    let picker =
+    let mut picker =
         Picker::from_query_stdio().unwrap_or_else(|_| ImagePreviewProvider::fallback_picker());
+    crate::preview::providers::image::correct_protocol_in_herdr(&mut picker);
+    tracing::info!(
+        protocol = ?picker.protocol_type(),
+        font_size = ?picker.font_size(),
+        "terminal graphics protocol detected",
+    );
     crate::preview::highlight::init_theme();
     let git_state: Arc<RwLock<Option<GitState>>> = Arc::new(RwLock::new(None));
     let preview_registry = build_preview_registry(picker, config, &git_state, root_path)?;
