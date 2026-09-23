@@ -1,4 +1,11 @@
 
+## [0.1.12] - 2026-09-23
+
+### Bug Fixes
+
+- Use Kitty graphics protocol inside herdr panes (#15)
+
+
 ## [0.1.11] - 2026-07-12
 
 ### Bug Fixes
