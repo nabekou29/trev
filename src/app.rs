@@ -1701,15 +1701,16 @@ fn process_watcher_events(
         }
 
         had_events = true;
-        // Invalidate preview cache for changed files.
+        // Invalidate preview cache for changed files and their ancestor directories.
         for event in &events {
             tracing::debug!(path = %event.path.display(), "preview cache invalidated (fs change)");
             state.preview_cache.invalidate_path(&event.path);
         }
 
-        // Re-trigger preview if the currently previewed file was modified.
+        // Re-trigger preview if the currently previewed file, or anything
+        // inside the currently previewed directory, was modified.
         if let Some(ref preview_path) = state.preview_state.current_path
-            && events.iter().any(|e| e.path == *preview_path)
+            && events.iter().any(|e| e.path.starts_with(preview_path))
         {
             handler::preview::trigger_preview_immediate(state, ctx);
         }
