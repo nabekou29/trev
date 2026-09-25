@@ -54,10 +54,19 @@ impl PreviewCache {
         self.cache.put(key, content);
     }
 
-    /// Remove all cache entries for the given file path (any provider).
+    /// Remove all cache entries (any provider) for the given path and its
+    /// ancestor directories.
+    ///
+    /// Ancestors are included because a directory preview reflects its
+    /// contents, while a file system event carries the changed entry's own
+    /// path rather than its parent directory's.
     pub fn invalidate_path(&mut self, path: &Path) {
-        let keys: Vec<CacheKey> =
-            self.cache.iter().filter(|(k, _)| k.path == path).map(|(k, _)| k.clone()).collect();
+        let keys: Vec<CacheKey> = self
+            .cache
+            .iter()
+            .filter(|(k, _)| path.starts_with(&k.path))
+            .map(|(k, _)| k.clone())
+            .collect();
         for key in keys {
             self.cache.pop(&key);
         }
@@ -135,6 +144,25 @@ mod tests {
         cache.invalidate_path(Path::new("/nonexistent"));
 
         assert_that!(cache.get(&key).is_some(), eq(true));
+    }
+
+    #[rstest]
+    #[case::parent("/root/sub", true)]
+    #[case::grandparent("/root", true)]
+    #[case::sibling_file("/root/sub/other.txt", false)]
+    #[case::sibling_dir("/root/other", false)]
+    #[case::name_prefix_only("/root/su", false)]
+    fn invalidate_path_covers_ancestor_directories(
+        #[case] cached_path: &str,
+        #[case] expect_invalidated: bool,
+    ) {
+        let mut cache = PreviewCache::new(10);
+        let key = make_key(cached_path, "Fallback");
+        cache.put(key.clone(), PreviewContent::Empty);
+
+        cache.invalidate_path(Path::new("/root/sub/new.txt"));
+
+        assert_that!(cache.get(&key).is_none(), eq(expect_invalidated));
     }
 
     #[rstest]
