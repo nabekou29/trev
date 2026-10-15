@@ -1313,6 +1313,15 @@ fn restore_session_state(
         }
     });
 
+    let trash_retention_days = config.file_op.trash_retention_days;
+    tokio::spawn(async move {
+        match crate::file_op::trash::cleanup_expired(trash_retention_days) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(n, "cleaned up expired trash entries"),
+            Err(e) => tracing::warn!(%e, "failed to clean up expired trash entries"),
+        }
+    });
+
     (selection, undo_history, restored_visual_row, deferred)
 }
 
