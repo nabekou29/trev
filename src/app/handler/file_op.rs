@@ -798,7 +798,7 @@ fn execute_undo(state: &mut AppState, ctx: &AppContext) {
                 return;
             }
             Err(e) => {
-                state.set_status(format!("Cannot undo: {e}"));
+                state.set_status(format!("Cannot undo (dropped from history): {e}"));
                 return;
             }
         }
@@ -839,7 +839,7 @@ fn execute_redo(state: &mut AppState, ctx: &AppContext) {
                 return;
             }
             Err(e) => {
-                state.set_status(format!("Cannot redo: {e}"));
+                state.set_status(format!("Cannot redo (dropped from history): {e}"));
                 return;
             }
         }
