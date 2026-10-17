@@ -72,19 +72,14 @@ impl UndoHistory {
     ///
     /// Validates file system preconditions before returning.
     /// On success, moves the group to the redo stack and returns it.
-    /// On validation failure, drops the group from history so that older
-    /// entries stay reachable instead of every undo failing on the same group.
     pub fn undo(&mut self) -> Result<Option<&OpGroup>> {
         let Some(group) = self.undo_stack.back() else {
             return Ok(None);
         };
 
         // Validate reverse ops can be executed.
-        if let Err(e) = group.ops.iter().try_for_each(|op| validate_op_precondition(&op.reverse)) {
-            if let Some(dropped) = self.undo_stack.pop_back() {
-                cleanup_trash_refs(&dropped);
-            }
-            return Err(e);
+        for undo_op in &group.ops {
+            validate_op_precondition(&undo_op.reverse)?;
         }
 
         // Safe: validated that undo_stack.back() is Some above.
@@ -99,16 +94,14 @@ impl UndoHistory {
     ///
     /// Validates file system preconditions before returning.
     /// On success, moves the group back to the undo stack and returns it.
-    /// On validation failure, drops the group from history (see [`Self::undo`]).
     pub fn redo(&mut self) -> Result<Option<&OpGroup>> {
         let Some(group) = self.redo_stack.back() else {
             return Ok(None);
         };
 
         // Validate forward ops can be re-executed.
-        if let Err(e) = group.ops.iter().try_for_each(|op| validate_op_precondition(&op.forward)) {
-            self.redo_stack.pop_back();
-            return Err(e);
+        for undo_op in &group.ops {
+            validate_op_precondition(&undo_op.forward)?;
         }
 
         // Safe: validated that redo_stack.back() is Some above.
@@ -363,57 +356,8 @@ mod tests {
 
         let result = history.undo();
         assert!(result.is_err());
-        // Group is dropped (neither left on undo nor moved to redo).
-        assert_that!(history.can_undo(), eq(false));
-        assert_that!(history.can_redo(), eq(false));
-    }
-
-    #[rstest]
-    fn undo_after_dropped_group_reaches_older_entry() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let existing = tmp.path().join("existing.txt");
-        std::fs::write(&existing, "x").unwrap();
-        let missing = tmp.path().join("missing.txt");
-
-        let mut history = UndoHistory::new(10);
-        history.push(OpGroup {
-            description: "older".to_string(),
-            ops: vec![UndoOp {
-                forward: FsOp::CreateFile { path: existing.clone() },
-                reverse: FsOp::RemoveFile { path: existing },
-            }],
-        });
-        history.push(OpGroup {
-            description: "broken".to_string(),
-            ops: vec![UndoOp {
-                forward: FsOp::CreateFile { path: missing.clone() },
-                reverse: FsOp::RemoveFile { path: missing },
-            }],
-        });
-
-        assert!(history.undo().is_err());
-        let group = history.undo().unwrap().unwrap();
-        assert_that!(group.description.as_str(), eq("older"));
-    }
-
-    #[rstest]
-    fn redo_fails_on_precondition_violation_and_drops_group() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("file.txt");
-        std::fs::write(&path, "x").unwrap();
-
-        let mut history = UndoHistory::new(10);
-        // Forward op would create a file that already exists.
-        history.redo_stack.push_back(OpGroup {
-            description: "test".to_string(),
-            ops: vec![UndoOp {
-                forward: FsOp::CreateFile { path: path.clone() },
-                reverse: FsOp::RemoveFile { path },
-            }],
-        });
-
-        assert!(history.redo().is_err());
-        assert_that!(history.can_undo(), eq(false));
+        // Group stays on undo stack (not moved to redo).
+        assert_that!(history.can_undo(), eq(true));
         assert_that!(history.can_redo(), eq(false));
     }
 
