@@ -138,6 +138,8 @@ pub struct AppState {
     /// Set to `true` to cancel the in-flight build before starting a new one
     /// (e.g. when toggling hidden/ignored file visibility).
     pub search_index_cancelled: Arc<AtomicBool>,
+    /// Cancellation token for the background custom trash cleanup.
+    pub trash_cleanup_cancelled: Arc<AtomicBool>,
     /// Async parallel search engine powered by `Nucleo<T>`.
     ///
     /// Items are injected from background threads; pattern updates and result
@@ -663,6 +665,7 @@ pub(super) mod tests {
             search_match_indices: HashMap::new(),
             search_pending_loads: None,
             search_index_cancelled: Arc::new(AtomicBool::new(false)),
+            trash_cleanup_cancelled: Arc::new(AtomicBool::new(false)),
             search_engine: NucleoSearchEngine::new(Arc::new(|| {})),
             search_debounce: None,
         }

@@ -20,6 +20,7 @@ use std::sync::{
 use std::time::{
     Duration,
     Instant,
+    SystemTime,
 };
 
 use anyhow::{
@@ -183,6 +184,8 @@ fn init_app(
     let _span = tracing::info_span!("init_app").entered();
 
     let (config, root_path) = load_config(args)?;
+    // Shared by undo history pruning and the trash cleanup.
+    let startup_time = SystemTime::now();
 
     // --- Phase 1: early session load to resolve display/sort overrides ---
     let (session_state, overrides) = {
@@ -230,7 +233,7 @@ fn init_app(
     let search_history = session_state.as_ref().map_or_else(Vec::new, |s| s.search_history.clone());
     let (selection, undo_history, restored_visual_row, deferred_expansion) = {
         let _span = tracing::info_span!("session_restore").entered();
-        restore_session_state(session_state, &config, builder, &mut tree_state)
+        restore_session_state(session_state, &config, builder, &mut tree_state, startup_time)
     };
 
     // Reveal a specific path on startup (--reveal flag).
@@ -312,6 +315,10 @@ fn init_app(
         search_match_indices: std::collections::HashMap::new(),
         search_pending_loads: None,
         search_index_cancelled: Arc::new(AtomicBool::new(false)),
+        trash_cleanup_cancelled: spawn_trash_cleanup(
+            config.file_op.trash_retention_days,
+            startup_time,
+        ),
         search_engine: NucleoSearchEngine::new(nucleo_notify_fn),
         search_debounce: None,
     };
@@ -998,6 +1005,7 @@ pub async fn run(args: &Args) -> Result<()> {
 
     // Cancel background search index build if still running.
     state.search_index_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+    state.trash_cleanup_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
 
     shutdown(&root_path, &state);
     Ok(())
@@ -1030,6 +1038,23 @@ pub(crate) fn spawn_search_index_build(
         );
         // Notify the event loop that the index is ready for searching.
         let _ = tx.blocking_send(());
+    });
+    cancelled
+}
+
+/// Spawn a background task that deletes expired custom trash entries.
+///
+/// Returns a cancellation token that should be set to `true` when the app shuts
+/// down, so a large deletion does not keep the process alive after exit.
+fn spawn_trash_cleanup(retention_days: u64, now: SystemTime) -> Arc<AtomicBool> {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancel = Arc::clone(&cancelled);
+    tokio::task::spawn_blocking(move || {
+        match crate::file_op::trash::cleanup_expired(retention_days, now, &cancel) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(n, "cleaned up expired trash entries"),
+            Err(e) => tracing::warn!(%e, "failed to clean up expired trash entries"),
+        }
     });
     cancelled
 }
@@ -1231,6 +1256,7 @@ fn restore_session_state(
     config: &Config,
     builder: TreeBuilder,
     tree_state: &mut TreeState,
+    now: SystemTime,
 ) -> (SelectionBuffer, UndoHistory, Option<usize>, Option<DeferredExpansion>) {
     let mut selection = SelectionBuffer::new();
     let mut undo_history = UndoHistory::new(config.file_op.undo_stack_size);
@@ -1294,6 +1320,17 @@ fn restore_session_state(
             config.file_op.undo_stack_size,
         );
 
+        // Drop deletes whose trash entries expire now, using the same `now` as the
+        // background trash cleanup so both agree on what has expired.
+        let pruned = undo_history.prune_expired_trash(
+            &crate::file_op::trash::trash_dir(),
+            config.file_op.trash_retention_days,
+            now,
+        );
+        if pruned > 0 {
+            tracing::info!(pruned, "dropped undo groups with expired trash entries");
+        }
+
         // Old sessions without scroll_visual_row fall back to None
         // (center_on_cursor in setup_terminal).
         restored_visual_row = session_state.scroll_visual_row;
@@ -1310,15 +1347,6 @@ fn restore_session_state(
             Ok(0) => {}
             Ok(n) => tracing::info!(n, "cleaned up expired sessions"),
             Err(e) => tracing::warn!(%e, "failed to clean up expired sessions"),
-        }
-    });
-
-    let trash_retention_days = config.file_op.trash_retention_days;
-    tokio::spawn(async move {
-        match crate::file_op::trash::cleanup_expired(trash_retention_days) {
-            Ok(0) => {}
-            Ok(n) => tracing::info!(n, "cleaned up expired trash entries"),
-            Err(e) => tracing::warn!(%e, "failed to clean up expired trash entries"),
         }
     });
 

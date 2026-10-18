@@ -920,10 +920,14 @@ pub struct FileOpConfig {
     pub delete_mode: DeleteMode,
     /// Maximum undo stack size.
     pub undo_stack_size: usize,
-    /// Days to keep files in the custom trash before they are auto-deleted.
+    /// Days a delete into the custom trash stays undoable.
     ///
-    /// Age is measured from when the file was moved to the trash.
-    /// Expired files are removed on startup. `0` keeps them indefinitely.
+    /// Age is measured from when the file was moved to the trash. On startup,
+    /// expired trash entries are deleted, and undo history drops the deletes
+    /// that restore them together with all older operations.
+    ///
+    /// `0` disables this age-based cleanup. Trash entries are still deleted
+    /// when their operation is evicted from undo history (`undo_stack_size`).
     pub trash_retention_days: u64,
     /// Sync yank/cut operations with the OS clipboard as a file list.
     ///

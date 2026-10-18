@@ -60,7 +60,7 @@ preview:
 file_op:
   delete_mode: permanent # permanent | custom_trash
   undo_stack_size: 100
-  trash_retention_days: 30 # days to keep custom_trash files (0 = forever)
+  trash_retention_days: 30 # days a custom_trash delete stays undoable (0 = no age limit)
   clipboard_sync: false # sync yank/cut with OS clipboard
 
 session:
