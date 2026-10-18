@@ -4,6 +4,7 @@
 pub mod clipboard;
 pub mod conflict;
 pub mod executor;
+pub mod fingerprint;
 pub mod selection;
 pub mod trash;
 pub mod undo;

@@ -14,6 +14,7 @@ use serde::{
 };
 
 use super::executor::FsOp;
+use super::fingerprint::Fingerprint;
 use super::trash;
 
 /// A single undoable file system operation with its reverse.
@@ -23,6 +24,23 @@ pub struct UndoOp {
     pub forward: FsOp,
     /// Reverse operation (how to undo it).
     pub reverse: FsOp,
+    /// Snapshot of the entry the last executed direction produced.
+    ///
+    /// The next undo (or redo) consumes that same path, and refuses to touch
+    /// it if it is no longer the entry trev left there. `None` for operations
+    /// recorded by older versions, which skip this check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<Fingerprint>,
+}
+
+impl UndoOp {
+    /// Build an `UndoOp` for a forward operation that has just been executed.
+    ///
+    /// Captures the fingerprint of the entry the forward operation produced.
+    pub fn new(forward: FsOp, reverse: FsOp) -> Self {
+        let fingerprint = produced_path(&forward).and_then(Fingerprint::of);
+        Self { forward, reverse, fingerprint }
+    }
 }
 
 /// A group of operations performed as a single user action.
@@ -32,6 +50,36 @@ pub struct OpGroup {
     pub description: String,
     /// Individual operations in execution order.
     pub ops: Vec<UndoOp>,
+}
+
+/// Result of an undo or redo step.
+#[derive(Debug)]
+pub enum Step<'a> {
+    /// The history in that direction is empty.
+    Nothing,
+    /// The group was applied and moved to the opposite stack.
+    Done(&'a OpGroup),
+    /// A precondition failed, so nothing was changed on disk.
+    ///
+    /// The group is removed from history. Entries it still references in the
+    /// trash are left for the retention cleanup instead of being deleted, so
+    /// a recoverable conflict never destroys data.
+    Skipped {
+        /// The removed group.
+        group: OpGroup,
+        /// Why the precondition failed.
+        error: anyhow::Error,
+    },
+    /// Execution failed after some operations were applied.
+    ///
+    /// The group is removed from history; the applied operations are not
+    /// rolled back.
+    Failed {
+        /// The removed group.
+        group: OpGroup,
+        /// The execution error.
+        error: anyhow::Error,
+    },
 }
 
 /// Bounded undo/redo history.
@@ -69,56 +117,63 @@ impl UndoHistory {
         }
     }
 
-    /// Pop the most recent operation group for undo.
+    /// Undo the most recent operation group by running its reverse operations
+    /// through `exec`.
     ///
-    /// Validates file system preconditions before returning.
-    /// On success, moves the group to the redo stack and returns it.
-    pub fn undo(&mut self) -> Result<Option<&OpGroup>> {
-        let Some(group) = self.undo_stack.back() else {
-            return Ok(None);
+    /// Older groups stay undoable when this group is skipped or fails. Every
+    /// later step re-checks its preconditions and, for operations recorded with
+    /// a fingerprint, the identity of the entry it consumes, so it does not
+    /// act on entries that changed in the meantime.
+    pub fn undo(&mut self, exec: impl FnMut(&FsOp) -> Result<()>) -> Step<'_> {
+        let Some(mut group) = self.undo_stack.pop_back() else {
+            return Step::Nothing;
         };
 
-        // Validate reverse ops can be executed.
-        for undo_op in &group.ops {
-            validate_op_precondition(&undo_op.reverse)?;
+        if let Err(error) =
+            group.ops.iter().try_for_each(|op| validate_step(&op.reverse, op.fingerprint.as_ref()))
+        {
+            return Step::Skipped { group, error };
+        }
+        if let Err(error) = group.ops.iter().rev().map(|op| &op.reverse).try_for_each(exec) {
+            return Step::Failed { group, error };
         }
 
-        // Safe: validated that undo_stack.back() is Some above.
-        let Some(group) = self.undo_stack.pop_back() else {
-            return Ok(None);
-        };
+        for op in &mut group.ops {
+            op.fingerprint = produced_path(&op.reverse).and_then(Fingerprint::of);
+        }
         self.redo_stack.push_back(group);
-        Ok(self.redo_stack.back())
+        self.redo_stack.back().map_or(Step::Nothing, Step::Done)
     }
 
-    /// Pop the most recent undone operation group for redo.
-    ///
-    /// Validates file system preconditions before returning.
-    /// On success, moves the group back to the undo stack and returns it.
+    /// Redo the most recently undone operation group by running its forward
+    /// operations through `exec`.
     ///
     /// Deletes into the custom trash get a fresh trash name, so their
     /// retention period starts again from the redo.
-    pub fn redo(&mut self) -> Result<Option<&OpGroup>> {
-        let Some(group) = self.redo_stack.back_mut() else {
-            return Ok(None);
+    pub fn redo(&mut self, exec: impl FnMut(&FsOp) -> Result<()>) -> Step<'_> {
+        let Some(mut group) = self.redo_stack.pop_back() else {
+            return Step::Nothing;
         };
 
         let trash_dir = trash::trash_dir();
-        for undo_op in &mut group.ops {
-            retarget_trash_move(undo_op, &trash_dir);
+        for op in &mut group.ops {
+            retarget_trash_move(op, &trash_dir);
         }
 
-        // Validate forward ops can be re-executed.
-        for undo_op in &group.ops {
-            validate_op_precondition(&undo_op.forward)?;
+        if let Err(error) =
+            group.ops.iter().try_for_each(|op| validate_step(&op.forward, op.fingerprint.as_ref()))
+        {
+            return Step::Skipped { group, error };
+        }
+        if let Err(error) = group.ops.iter().map(|op| &op.forward).try_for_each(exec) {
+            return Step::Failed { group, error };
         }
 
-        // Safe: validated that redo_stack.back() is Some above.
-        let Some(group) = self.redo_stack.pop_back() else {
-            return Ok(None);
-        };
+        for op in &mut group.ops {
+            op.fingerprint = produced_path(&op.forward).and_then(Fingerprint::of);
+        }
         self.undo_stack.push_back(group);
-        Ok(self.undo_stack.back())
+        self.undo_stack.back().map_or(Step::Nothing, Step::Done)
     }
 
     /// Drop groups whose custom trash entries have expired, plus all older groups.
@@ -170,29 +225,82 @@ impl UndoHistory {
     }
 }
 
+/// How strictly a consumed entry must match its recorded fingerprint.
+#[derive(Debug, Clone, Copy)]
+enum Match {
+    /// Same inode; content may differ (the entry is moved, not destroyed).
+    Entry,
+    /// Same inode and unmodified content (the entry is deleted).
+    Content,
+}
+
+/// The path an operation removes from its current location, if any.
+fn consumed_path(op: &FsOp) -> Option<(&Path, Match)> {
+    match op {
+        FsOp::Move { src, .. } => Some((src, Match::Entry)),
+        FsOp::RemoveFile { path } | FsOp::RemoveDir { path } => Some((path, Match::Content)),
+        FsOp::Copy { .. }
+        | FsOp::CreateFile { .. }
+        | FsOp::CreateDir { .. }
+        | FsOp::CreateSymlink { .. }
+        | FsOp::CreateHardlink { .. } => None,
+    }
+}
+
+/// The path an operation creates, if any.
+fn produced_path(op: &FsOp) -> Option<&Path> {
+    match op {
+        FsOp::Copy { dst, .. } | FsOp::Move { dst, .. } => Some(dst),
+        FsOp::CreateFile { path } | FsOp::CreateDir { path } => Some(path),
+        FsOp::CreateSymlink { link, .. } | FsOp::CreateHardlink { link, .. } => Some(link),
+        FsOp::RemoveFile { .. } | FsOp::RemoveDir { .. } => None,
+    }
+}
+
+/// Validate an operation's preconditions and the identity of the entry it consumes.
+fn validate_step(op: &FsOp, expected: Option<&Fingerprint>) -> Result<()> {
+    validate_op_precondition(op)?;
+
+    if let (Some((path, mode)), Some(expected)) = (consumed_path(op), expected) {
+        let matches = Fingerprint::of(path).is_some_and(|current| match mode {
+            Match::Entry => expected.same_entry(&current),
+            Match::Content => expected.same_content(&current),
+        });
+        if !matches {
+            bail!("Changed outside trev since the operation: {}", path.display());
+        }
+    }
+    Ok(())
+}
+
+/// Whether anything exists at `path`, without following symlinks.
+fn path_exists(path: &Path) -> bool {
+    path.symlink_metadata().is_ok()
+}
+
 /// Validate that a file system operation's preconditions are met.
 fn validate_op_precondition(op: &FsOp) -> Result<()> {
     match op {
         FsOp::Copy { src, dst } | FsOp::Move { src, dst } => {
-            if !src.exists() {
+            if !path_exists(src) {
                 bail!("Source does not exist: {}", src.display());
             }
-            if dst.exists() {
+            if path_exists(dst) {
                 bail!("Destination already exists: {}", dst.display());
             }
         }
         FsOp::CreateFile { path } | FsOp::CreateDir { path } => {
-            if path.exists() {
+            if path_exists(path) {
                 bail!("Path already exists: {}", path.display());
             }
         }
         FsOp::RemoveFile { path } | FsOp::RemoveDir { path } => {
-            if !path.exists() {
+            if !path_exists(path) {
                 bail!("Path does not exist: {}", path.display());
             }
         }
         FsOp::CreateSymlink { link, .. } | FsOp::CreateHardlink { link, .. } => {
-            if link.exists() {
+            if path_exists(link) {
                 bail!("Link path already exists: {}", link.display());
             }
         }
@@ -236,20 +344,18 @@ fn retarget_trash_move(undo_op: &mut UndoOp, trash_dir: &Path) {
     undo_op.forward = FsOp::Move { src, dst: new_dst };
 }
 
+/// Whether `path` is a directory, without following symlinks.
+fn is_real_dir(path: &Path) -> bool {
+    path.symlink_metadata().is_ok_and(|m| m.is_dir())
+}
+
 /// Build the reverse operation for a forward `FsOp`.
 ///
 /// Returns `None` for operations that cannot be meaningfully reversed
 /// (caller should handle this by not adding to undo history).
 pub fn reverse_op(forward: &FsOp) -> Option<FsOp> {
     match forward {
-        FsOp::Copy { dst, .. } => {
-            // Undo copy = remove the copied file/dir.
-            if dst.is_dir() {
-                Some(FsOp::RemoveDir { path: dst.clone() })
-            } else {
-                Some(FsOp::RemoveFile { path: dst.clone() })
-            }
-        }
+        FsOp::Copy { dst, .. } => Some(reverse_for_copy(dst)),
         FsOp::Move { src, dst } => {
             // Undo move = move back.
             Some(FsOp::Move { src: dst.clone(), dst: src.clone() })
@@ -278,20 +384,20 @@ pub fn reverse_op(forward: &FsOp) -> Option<FsOp> {
     }
 }
 
-/// Convenience: build an `UndoOp` from a forward operation.
+/// Convenience: build an `UndoOp` from a forward operation that has just been executed.
 ///
 /// Returns `None` if the operation has no meaningful reverse.
 pub fn build_undo_op(forward: FsOp) -> Option<UndoOp> {
     let reverse = reverse_op(&forward)?;
-    Some(UndoOp { forward, reverse })
+    Some(UndoOp::new(forward, reverse))
 }
 
 /// Convenience: determine the appropriate reverse for a copied path.
 ///
-/// Checks whether `dst` is a file or directory at call time
-/// to choose `RemoveFile` vs `RemoveDir`.
+/// Checks whether `dst` is a directory at call time (without following
+/// symlinks) to choose `RemoveFile` vs `RemoveDir`.
 pub fn reverse_for_copy(dst: &Path) -> FsOp {
-    if dst.is_dir() {
+    if is_real_dir(dst) {
         FsOp::RemoveDir { path: dst.to_path_buf() }
     } else {
         FsOp::RemoveFile { path: dst.to_path_buf() }
@@ -307,15 +413,41 @@ mod tests {
     use googletest::prelude::*;
     use rstest::*;
 
+    use super::super::executor::execute;
     use super::*;
 
-    fn sample_group(desc: &str) -> OpGroup {
+    /// Build a group from `(forward, reverse)` pairs without fingerprints.
+    fn group(desc: &str, ops: Vec<(FsOp, FsOp)>) -> OpGroup {
         OpGroup {
             description: desc.to_string(),
-            ops: vec![UndoOp {
-                forward: FsOp::CreateFile { path: PathBuf::from("/tmp/test") },
-                reverse: FsOp::RemoveFile { path: PathBuf::from("/tmp/test") },
-            }],
+            ops: ops
+                .into_iter()
+                .map(|(forward, reverse)| UndoOp { forward, reverse, fingerprint: None })
+                .collect(),
+        }
+    }
+
+    fn sample_group(desc: &str) -> OpGroup {
+        group(
+            desc,
+            vec![(
+                FsOp::CreateFile { path: PathBuf::from("/tmp/test") },
+                FsOp::RemoveFile { path: PathBuf::from("/tmp/test") },
+            )],
+        )
+    }
+
+    /// Execute `forward` and push it as a single-op group, as the handlers do.
+    fn run_and_push(history: &mut UndoHistory, desc: &str, forward: FsOp) {
+        execute(&forward).unwrap();
+        let op = build_undo_op(forward).unwrap();
+        history.push(OpGroup { description: desc.to_string(), ops: vec![op] });
+    }
+
+    fn description(step: &Step<'_>) -> Option<String> {
+        match step {
+            Step::Done(group) => Some(group.description.clone()),
+            Step::Nothing | Step::Skipped { .. } | Step::Failed { .. } => None,
         }
     }
 
@@ -365,69 +497,197 @@ mod tests {
     fn undo_redo_cycle_with_real_fs() {
         let tmp = tempfile::TempDir::new().unwrap();
         let file_path = tmp.path().join("test.txt");
-
-        // Create the file.
-        std::fs::write(&file_path, "hello").unwrap();
-
         let mut history = UndoHistory::new(10);
-        history.push(OpGroup {
-            description: "Created test.txt".to_string(),
-            ops: vec![UndoOp {
-                forward: FsOp::CreateFile { path: file_path.clone() },
-                reverse: FsOp::RemoveFile { path: file_path.clone() },
-            }],
-        });
+        run_and_push(
+            &mut history,
+            "Created test.txt",
+            FsOp::CreateFile { path: file_path.clone() },
+        );
 
         // Undo: remove the file.
-        let group = history.undo().unwrap().unwrap();
-        for op in &group.ops {
-            super::super::executor::execute(&op.reverse).unwrap();
-        }
+        let step = history.undo(execute);
+        assert_that!(description(&step), some(eq("Created test.txt")));
         assert_that!(file_path.exists(), eq(false));
         assert_that!(history.can_undo(), eq(false));
         assert_that!(history.can_redo(), eq(true));
 
         // Redo: recreate the file.
-        let group = history.redo().unwrap().unwrap();
-        for op in &group.ops {
-            super::super::executor::execute(&op.forward).unwrap();
-        }
+        let step = history.redo(execute);
+        assert_that!(description(&step), some(eq("Created test.txt")));
         assert_that!(file_path.exists(), eq(true));
         assert_that!(history.can_undo(), eq(true));
         assert_that!(history.can_redo(), eq(false));
     }
 
     #[rstest]
-    fn undo_fails_on_precondition_violation() {
+    fn undo_returns_nothing_when_empty() {
         let mut history = UndoHistory::new(10);
-        // Reverse op tries to remove a non-existent file.
-        history.push(OpGroup {
-            description: "test".to_string(),
-            ops: vec![UndoOp {
-                forward: FsOp::CreateFile { path: PathBuf::from("/nonexistent/file.txt") },
-                reverse: FsOp::RemoveFile { path: PathBuf::from("/nonexistent/file.txt") },
-            }],
-        });
+        assert!(matches!(history.undo(execute), Step::Nothing));
+    }
 
-        let result = history.undo();
-        assert!(result.is_err());
-        // Group stays on undo stack (not moved to redo).
-        assert_that!(history.can_undo(), eq(true));
+    #[rstest]
+    fn redo_returns_nothing_when_empty() {
+        let mut history = UndoHistory::new(10);
+        assert!(matches!(history.redo(execute), Step::Nothing));
+    }
+
+    #[rstest]
+    fn undo_skips_group_on_precondition_violation_without_touching_disk() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let a = tmp.path().join("a.txt");
+        let b = tmp.path().join("b.txt");
+        let mut history = UndoHistory::new(10);
+        std::fs::write(&a, "data").unwrap();
+        run_and_push(&mut history, "Rename", FsOp::Move { src: a.clone(), dst: b.clone() });
+        // Something recreates the original name.
+        std::fs::write(&a, "new").unwrap();
+
+        let step = history.undo(execute);
+
+        assert!(matches!(step, Step::Skipped { .. }));
+        assert_that!(std::fs::read_to_string(&a).unwrap(), eq("new"));
+        assert_that!(std::fs::read_to_string(&b).unwrap(), eq("data"));
+        assert_that!(history.can_undo(), eq(false));
         assert_that!(history.can_redo(), eq(false));
     }
 
     #[rstest]
-    fn undo_returns_none_when_empty() {
+    fn undo_after_skip_does_not_delete_recreated_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let notes = tmp.path().join("notes.md");
+        let notes2 = tmp.path().join("notes2.md");
         let mut history = UndoHistory::new(10);
-        let result = history.undo().unwrap();
-        assert!(result.is_none());
+        run_and_push(&mut history, "Create", FsOp::CreateFile { path: notes.clone() });
+        run_and_push(
+            &mut history,
+            "Rename",
+            FsOp::Move { src: notes.clone(), dst: notes2.clone() },
+        );
+        // An editor recreates notes.md with user content.
+        std::fs::write(&notes, "user content").unwrap();
+
+        assert!(matches!(history.undo(execute), Step::Skipped { .. }));
+        let step = history.undo(execute);
+
+        assert!(matches!(step, Step::Skipped { .. }));
+        assert_that!(std::fs::read_to_string(&notes).unwrap(), eq("user content"));
+        assert!(notes2.exists());
     }
 
     #[rstest]
-    fn redo_returns_none_when_empty() {
+    fn undo_refuses_to_delete_modified_copy() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let src = tmp.path().join("src.txt");
+        let dst = tmp.path().join("dst.txt");
+        std::fs::write(&src, "data").unwrap();
         let mut history = UndoHistory::new(10);
-        let result = history.redo().unwrap();
-        assert!(result.is_none());
+        run_and_push(&mut history, "Copy", FsOp::Copy { src, dst: dst.clone() });
+        std::fs::write(&dst, "edited after copy").unwrap();
+
+        let step = history.undo(execute);
+
+        assert!(matches!(step, Step::Skipped { .. }));
+        assert_that!(std::fs::read_to_string(&dst).unwrap(), eq("edited after copy"));
+    }
+
+    #[rstest]
+    fn undo_after_skip_reaches_older_independent_group() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let older = tmp.path().join("older.txt");
+        let newer = tmp.path().join("newer.txt");
+        let mut history = UndoHistory::new(10);
+        run_and_push(&mut history, "Create older", FsOp::CreateFile { path: older.clone() });
+        run_and_push(&mut history, "Create newer", FsOp::CreateFile { path: newer.clone() });
+        std::fs::remove_file(&newer).unwrap();
+
+        assert!(matches!(history.undo(execute), Step::Skipped { .. }));
+        let step = history.undo(execute);
+
+        assert_that!(description(&step), some(eq("Create older")));
+        assert!(!older.exists());
+    }
+
+    #[rstest]
+    fn redo_refuses_to_move_replaced_source() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let a = tmp.path().join("a.txt");
+        let b = tmp.path().join("b.txt");
+        std::fs::write(&a, "data").unwrap();
+        let mut history = UndoHistory::new(10);
+        run_and_push(&mut history, "Rename", FsOp::Move { src: a.clone(), dst: b.clone() });
+        assert!(matches!(history.undo(execute), Step::Done(_)));
+        // Replace the restored file with an unrelated one at the same path.
+        std::fs::rename(&a, tmp.path().join("aside.txt")).unwrap();
+        std::fs::write(&a, "unrelated").unwrap();
+
+        let step = history.redo(execute);
+
+        assert!(matches!(step, Step::Skipped { .. }));
+        assert_that!(std::fs::read_to_string(&a).unwrap(), eq("unrelated"));
+        assert!(!b.exists());
+    }
+
+    #[cfg(unix)]
+    #[rstest]
+    fn undo_restores_dangling_symlink_moved_into_trash() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let trash = tmp.path().join("trash");
+        std::fs::create_dir_all(&trash).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink("file.txt", &link).unwrap();
+        let mut history = UndoHistory::new(10);
+        let trashed = trash::trash_path_in(&trash, &link);
+        run_and_push(&mut history, "Delete", FsOp::Move { src: link.clone(), dst: trashed });
+
+        let step = history.undo(execute);
+
+        assert!(matches!(step, Step::Done(_)));
+        assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+    }
+
+    #[rstest]
+    fn undo_failure_during_execution_drops_group() {
+        let mut history = UndoHistory::new(10);
+        history.push(sample_group("older"));
+        history.push(group(
+            "test",
+            vec![(
+                FsOp::CreateDir { path: PathBuf::from("/nonexistent/dir") },
+                FsOp::CreateDir { path: PathBuf::from("/nonexistent/dir") },
+            )],
+        ));
+
+        let step = history.undo(|_| bail!("disk error"));
+
+        assert!(matches!(step, Step::Failed { .. }));
+        assert_that!(history.undo_stack.len(), eq(1));
+        assert_that!(history.can_redo(), eq(false));
+    }
+
+    #[rstest]
+    fn legacy_ops_without_fingerprint_still_undo() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("legacy.txt");
+        std::fs::write(&path, "x").unwrap();
+        let mut history = UndoHistory::new(10);
+        history.push(group(
+            "legacy",
+            vec![(
+                FsOp::CreateFile { path: path.clone() },
+                FsOp::RemoveFile { path: path.clone() },
+            )],
+        ));
+
+        assert!(matches!(history.undo(execute), Step::Done(_)));
+        assert!(!path.exists());
+    }
+
+    #[rstest]
+    fn legacy_session_json_without_fingerprint_deserializes() {
+        let json =
+            r#"{"forward":{"CreateFile":{"path":"/a"}},"reverse":{"RemoveFile":{"path":"/a"}}}"#;
+        let op: UndoOp = serde_json::from_str(json).unwrap();
+        assert_that!(op.fingerprint, none());
     }
 
     /// Source and destination of a `Move`.
@@ -444,13 +704,13 @@ mod tests {
     fn trash_group(desc: &str, trash_dir: &Path, trashed_at: SystemTime) -> OpGroup {
         let original = PathBuf::from(format!("/work/{desc}"));
         let trashed = trash::trash_path_at(trash_dir, &original, trashed_at);
-        OpGroup {
-            description: desc.to_string(),
-            ops: vec![UndoOp {
-                forward: FsOp::Move { src: original.clone(), dst: trashed.clone() },
-                reverse: FsOp::Move { src: trashed, dst: original },
-            }],
-        }
+        group(
+            desc,
+            vec![(
+                FsOp::Move { src: original.clone(), dst: trashed.clone() },
+                FsOp::Move { src: trashed, dst: original },
+            )],
+        )
     }
 
     #[rstest]
@@ -506,6 +766,7 @@ mod tests {
         let mut op = UndoOp {
             forward: FsOp::Move { src: original.clone(), dst: old.clone() },
             reverse: FsOp::Move { src: old.clone(), dst: original.clone() },
+            fingerprint: None,
         };
 
         retarget_trash_move(&mut op, trash_dir);
@@ -528,6 +789,7 @@ mod tests {
                 UndoOp {
                     forward: FsOp::Move { src: original.clone(), dst: old.clone() },
                     reverse: FsOp::Move { src: old, dst: original },
+                    fingerprint: None,
                 }
             })
             .collect();
@@ -548,6 +810,7 @@ mod tests {
         let mut op = UndoOp {
             forward: forward.clone(),
             reverse: FsOp::Move { src: PathBuf::from("/b"), dst: PathBuf::from("/a") },
+            fingerprint: None,
         };
 
         retarget_trash_move(&mut op, trash_dir);
