@@ -127,6 +127,9 @@ impl UndoHistory {
     /// restored history never points at entries that cleanup deletes. Older
     /// groups go too because undo replays history newest first. Returns the
     /// number of dropped groups.
+    ///
+    /// Trash entries are left on disk: the retention cleanup deletes them in
+    /// the background once they expire, so this stays cheap on startup.
     pub fn prune_expired_trash(
         &mut self,
         trash_dir: &Path,
@@ -139,11 +142,7 @@ impl UndoHistory {
             return 0;
         };
 
-        let pruned: Vec<OpGroup> = self.undo_stack.drain(..=last_expired).collect();
-        for group in &pruned {
-            cleanup_trash_refs(group, trash_dir);
-        }
-        pruned.len()
+        self.undo_stack.drain(..=last_expired).count()
     }
 
     /// Whether there are operations to undo.
@@ -211,12 +210,12 @@ fn trash_refs<'a>(group: &'a OpGroup, trash_dir: &'a Path) -> impl Iterator<Item
 
 /// Delete the custom trash entries a group restores on undo.
 ///
-/// Used when the group leaves history for good (eviction or pruning), since
-/// nothing else can restore those entries.
+/// Used when the group is evicted from history, since nothing else can
+/// restore those entries.
 fn cleanup_trash_refs(group: &OpGroup, trash_dir: &Path) {
     for src in trash_refs(group, trash_dir) {
         if let Err(e) = trash::clean_trash_file(src) {
-            tracing::warn!(%e, ?src, "failed to clean trash file of dropped undo group");
+            tracing::warn!(%e, ?src, "failed to clean trash file of evicted undo group");
         }
     }
 }
@@ -443,9 +442,8 @@ mod tests {
 
     /// A delete-into-trash group whose trash entry name encodes `trashed_at`.
     fn trash_group(desc: &str, trash_dir: &Path, trashed_at: SystemTime) -> OpGroup {
-        let nanos = trashed_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
         let original = PathBuf::from(format!("/work/{desc}"));
-        let trashed = trash_dir.join(format!("{nanos}_{desc}"));
+        let trashed = trash::trash_path_at(trash_dir, &original, trashed_at);
         OpGroup {
             description: desc.to_string(),
             ops: vec![UndoOp {
@@ -474,7 +472,7 @@ mod tests {
     }
 
     #[rstest]
-    fn prune_expired_trash_deletes_trash_of_pruned_groups() {
+    fn prune_expired_trash_leaves_trash_entries_to_the_cleanup() {
         let tmp = tempfile::TempDir::new().unwrap();
         let now = SystemTime::now();
         let mut history = UndoHistory::new(10);
@@ -485,7 +483,8 @@ mod tests {
 
         history.prune_expired_trash(tmp.path(), 30, now);
 
-        assert!(!trashed.exists());
+        assert_that!(history.can_undo(), eq(false));
+        assert!(trashed.exists());
     }
 
     #[rstest]
@@ -516,6 +515,30 @@ mod tests {
         assert!(dst.starts_with(trash_dir) && *dst != old);
         assert!(!trash::is_expired(dst, 1, SystemTime::now()));
         assert_eq!(op.reverse, FsOp::Move { src: dst.clone(), dst: original });
+    }
+
+    #[rstest]
+    fn retarget_trash_move_gives_same_named_files_distinct_paths() {
+        let trash_dir = Path::new("/state/trev/trash");
+        let mut ops: Vec<UndoOp> = ["/a/x.txt", "/b/x.txt"]
+            .iter()
+            .map(|original| {
+                let original = PathBuf::from(original);
+                let old = trash_dir.join("1000000000000000000_x.txt");
+                UndoOp {
+                    forward: FsOp::Move { src: original.clone(), dst: old.clone() },
+                    reverse: FsOp::Move { src: old, dst: original },
+                }
+            })
+            .collect();
+
+        for op in &mut ops {
+            retarget_trash_move(op, trash_dir);
+        }
+
+        let dst_a = move_paths(&ops[0].forward).unwrap().1;
+        let dst_b = move_paths(&ops[1].forward).unwrap().1;
+        assert_ne!(dst_a, dst_b);
     }
 
     #[rstest]

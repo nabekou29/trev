@@ -6,6 +6,7 @@ use std::path::{
 };
 use std::sync::atomic::{
     AtomicBool,
+    AtomicU64,
     Ordering,
 };
 use std::time::{
@@ -23,6 +24,14 @@ use anyhow::{
 /// Nanoseconds since the Unix epoch have 19 digits from 2001-09 until 2286.
 const TIMESTAMP_DIGITS: usize = 19;
 
+/// Timestamp of the most recently generated trash name, in nanoseconds since
+/// the Unix epoch.
+///
+/// The system clock can return the same value for calls in quick succession
+/// (e.g. microsecond resolution on macOS), which would give two entries with
+/// the same original name the same trash path.
+static LAST_TRASH_NANOS: AtomicU64 = AtomicU64::new(0);
+
 /// Get the custom trash directory path.
 ///
 /// Uses the XDG state directory: `{state_dir}/trev/trash/`.
@@ -39,13 +48,35 @@ pub fn trash_path(original: &Path) -> PathBuf {
 }
 
 /// Generate a timestamped trash path for a file inside `dir`.
+///
+/// Every call in this process gets a strictly larger timestamp, so paths
+/// generated back to back never collide.
 pub fn trash_path_in(dir: &Path, original: &Path) -> PathBuf {
-    let nanos =
-        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let now = nanos_since_epoch(SystemTime::now());
+    let prev = LAST_TRASH_NANOS
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |last| {
+            Some(now.max(last.saturating_add(1)))
+        })
+        .unwrap_or(now);
+    trash_path_with_nanos(dir, original, now.max(prev.saturating_add(1)))
+}
 
+/// Trash path for `original` inside `dir` as if it was trashed at `trashed_at`.
+#[cfg(test)]
+pub fn trash_path_at(dir: &Path, original: &Path, trashed_at: SystemTime) -> PathBuf {
+    trash_path_with_nanos(dir, original, nanos_since_epoch(trashed_at))
+}
+
+/// Build the `{dir}/{nanos}_{original_name}` trash path.
+fn trash_path_with_nanos(dir: &Path, original: &Path, nanos: u64) -> PathBuf {
     let file_name = original.file_name().unwrap_or_default().to_string_lossy();
-
     dir.join(format!("{nanos}_{file_name}"))
+}
+
+/// Nanoseconds since the Unix epoch, saturating at the `u64` range.
+fn nanos_since_epoch(time: SystemTime) -> u64 {
+    let nanos = time.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    u64::try_from(nanos).unwrap_or(u64::MAX)
 }
 
 /// Ensure the trash directory exists.
@@ -120,8 +151,13 @@ fn cleanup_expired_in(
         if cancelled.load(Ordering::Relaxed) {
             break;
         }
-        let entry = entry.context("Failed to read trash directory entry")?;
-        let path = entry.path();
+        let path = match entry {
+            Ok(entry) => entry.path(),
+            Err(e) => {
+                tracing::warn!(%e, "failed to read trash directory entry");
+                continue;
+            }
+        };
 
         if !is_expired(&path, retention_days, now) {
             continue;
@@ -203,17 +239,11 @@ mod tests {
     }
 
     #[rstest]
-    fn trash_path_is_unique() {
-        let original = PathBuf::from("/test/file.txt");
-        let p1 = trash_path(&original);
-        // Very small sleep to ensure different nanos.
-        std::thread::sleep(Duration::from_nanos(1));
-        let p2 = trash_path(&original);
-        // They should be different due to different timestamps.
-        // (In practice, nanos resolution makes collisions extremely unlikely.)
-        // We just verify both contain the file name.
-        assert!(p1.to_string_lossy().contains("file.txt"));
-        assert!(p2.to_string_lossy().contains("file.txt"));
+    fn trash_path_is_unique_when_generated_back_to_back() {
+        let original = Path::new("/test/file.txt");
+        let paths: std::collections::HashSet<_> =
+            (0..1000).map(|_| trash_path_in(Path::new("/trash"), original)).collect();
+        assert_that!(paths.len(), eq(1000));
     }
 
     #[rstest]
@@ -264,8 +294,7 @@ mod tests {
 
     /// Create a trash entry named as if it was trashed at `trashed_at`.
     fn create_entry(dir: &Path, trashed_at: SystemTime, name: &str, is_dir: bool) -> PathBuf {
-        let nanos = trashed_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
-        let path = dir.join(format!("{nanos}_{name}"));
+        let path = trash_path_at(dir, Path::new(name), trashed_at);
         if is_dir {
             std::fs::create_dir_all(path.join("child")).unwrap();
             std::fs::write(path.join("child/file.txt"), "x").unwrap();
@@ -353,8 +382,7 @@ mod tests {
         std::fs::create_dir_all(&outside).unwrap();
         std::fs::write(outside.join("keep.txt"), "keep").unwrap();
         let now = SystemTime::now();
-        let nanos = (now - DAY * 31).duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
-        let link = trash.join(format!("{nanos}_link"));
+        let link = trash_path_at(&trash, Path::new("link"), now - DAY * 31);
         std::os::unix::fs::symlink(&outside, &link).unwrap();
 
         let deleted = cleanup_expired_in(&trash, 30, now, &AtomicBool::new(false)).unwrap();
