@@ -1005,7 +1005,6 @@ pub async fn run(args: &Args) -> Result<()> {
 
     // Cancel background search index build if still running.
     state.search_index_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
-    state.trash_cleanup_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
 
     shutdown(&root_path, &state);
     Ok(())
@@ -1044,9 +1043,9 @@ pub(crate) fn spawn_search_index_build(
 
 /// Spawn a background task that deletes expired custom trash entries.
 ///
-/// Returns a cancellation token that should be set to `true` when the app shuts
-/// down, so a large deletion does not keep the process alive after exit.
-fn spawn_trash_cleanup(retention_days: u64, now: SystemTime) -> Arc<AtomicBool> {
+/// The task is cancelled when the returned token is dropped, so a large
+/// deletion does not keep the process alive after exit.
+fn spawn_trash_cleanup(retention_days: u64, now: SystemTime) -> CancelOnDrop {
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancel = Arc::clone(&cancelled);
     tokio::task::spawn_blocking(move || {
@@ -1056,7 +1055,7 @@ fn spawn_trash_cleanup(retention_days: u64, now: SystemTime) -> Arc<AtomicBool> 
             Err(e) => tracing::warn!(%e, "failed to clean up expired trash entries"),
         }
     });
-    cancelled
+    CancelOnDrop::new(cancelled)
 }
 
 /// Create the file system watcher and suppression flag.
