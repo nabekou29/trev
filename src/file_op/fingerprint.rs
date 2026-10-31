@@ -65,9 +65,6 @@ impl Fingerprint {
     }
 
     /// Whether `other` is the same entry and its content looks unmodified.
-    ///
-    /// For a directory, size and mtime change when entries are added or
-    /// removed directly inside it; changes deeper in the tree are not detected.
     pub fn same_content(&self, other: &Self) -> bool {
         self.same_entry(other) && self.size == other.size && self.mtime == other.mtime
     }

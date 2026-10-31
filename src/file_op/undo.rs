@@ -129,12 +129,17 @@ impl UndoHistory {
             return Step::Nothing;
         };
 
-        if let Err(error) =
-            group.ops.iter().try_for_each(|op| validate_step(&op.reverse, op.fingerprint.as_ref()))
+        if let Err(error) = group
+            .ops
+            .iter()
+            .try_for_each(|op| validate_step(&op.reverse, &op.forward, op.fingerprint.as_ref()))
         {
             return Step::Skipped { group, error };
         }
         if let Err(error) = group.ops.iter().rev().map(|op| &op.reverse).try_for_each(exec) {
+            // Newer groups were recorded on top of this one, which is now only
+            // partly undone.
+            self.redo_stack.clear();
             return Step::Failed { group, error };
         }
 
@@ -160,12 +165,17 @@ impl UndoHistory {
             retarget_trash_move(op, &trash_dir);
         }
 
-        if let Err(error) =
-            group.ops.iter().try_for_each(|op| validate_step(&op.forward, op.fingerprint.as_ref()))
+        if let Err(error) = group
+            .ops
+            .iter()
+            .try_for_each(|op| validate_step(&op.forward, &op.reverse, op.fingerprint.as_ref()))
         {
             return Step::Skipped { group, error };
         }
         if let Err(error) = group.ops.iter().map(|op| &op.forward).try_for_each(exec) {
+            // Newer groups were recorded on top of this one, which is now only
+            // partly redone.
+            self.redo_stack.clear();
             return Step::Failed { group, error };
         }
 
@@ -228,17 +238,27 @@ impl UndoHistory {
 /// How strictly a consumed entry must match its recorded fingerprint.
 #[derive(Debug, Clone, Copy)]
 enum Match {
-    /// Same inode; content may differ (the entry is moved, not destroyed).
+    /// Same inode; content may differ.
     Entry,
     /// Same inode and unmodified content (the entry is deleted).
     Content,
 }
 
 /// The path an operation removes from its current location, if any.
-fn consumed_path(op: &FsOp) -> Option<(&Path, Match)> {
+///
+/// `producer` is the operation that created that entry.
+fn consumed_path<'a>(op: &'a FsOp, producer: &FsOp) -> Option<(&'a Path, Match)> {
     match op {
         FsOp::Move { src, .. } => Some((src, Match::Entry)),
-        FsOp::RemoveFile { path } | FsOp::RemoveDir { path } => Some((path, Match::Content)),
+        // Removing a hard link leaves the content reachable through the
+        // original name, and editing the original changes the shared inode.
+        FsOp::RemoveFile { path } if matches!(producer, FsOp::CreateHardlink { .. }) => {
+            Some((path, Match::Entry))
+        }
+        FsOp::RemoveFile { path } => Some((path, Match::Content)),
+        // A directory's size and mtime also change when trev itself adds or
+        // removes entries inside it, so they cannot tell external changes apart.
+        FsOp::RemoveDir { path } => Some((path, Match::Entry)),
         FsOp::Copy { .. }
         | FsOp::CreateFile { .. }
         | FsOp::CreateDir { .. }
@@ -258,10 +278,12 @@ fn produced_path(op: &FsOp) -> Option<&Path> {
 }
 
 /// Validate an operation's preconditions and the identity of the entry it consumes.
-fn validate_step(op: &FsOp, expected: Option<&Fingerprint>) -> Result<()> {
+///
+/// `producer` is the operation that created the consumed entry.
+fn validate_step(op: &FsOp, producer: &FsOp, expected: Option<&Fingerprint>) -> Result<()> {
     validate_op_precondition(op)?;
 
-    if let (Some((path, mode)), Some(expected)) = (consumed_path(op), expected) {
+    if let (Some((path, mode)), Some(expected)) = (consumed_path(op, producer), expected) {
         let matches = Fingerprint::of(path).is_some_and(|current| match mode {
             Match::Entry => expected.same_entry(&current),
             Match::Content => expected.same_content(&current),
@@ -662,6 +684,85 @@ mod tests {
         assert!(matches!(step, Step::Failed { .. }));
         assert_that!(history.undo_stack.len(), eq(1));
         assert_that!(history.can_redo(), eq(false));
+    }
+
+    #[rstest]
+    fn undo_failure_during_execution_drops_newer_redo_groups() {
+        let mut history = UndoHistory::new(10);
+        history.push(group(
+            "test",
+            vec![(
+                FsOp::CreateDir { path: PathBuf::from("/nonexistent/dir") },
+                FsOp::CreateDir { path: PathBuf::from("/nonexistent/dir") },
+            )],
+        ));
+        history.redo_stack.push_back(sample_group("newer"));
+
+        let step = history.undo(|_| bail!("disk error"));
+
+        assert!(matches!(step, Step::Failed { .. }));
+        assert_that!(history.can_redo(), eq(false));
+    }
+
+    #[rstest]
+    fn redo_failure_during_execution_drops_newer_redo_groups() {
+        let mut history = UndoHistory::new(10);
+        history.redo_stack.push_back(sample_group("newer"));
+        history.redo_stack.push_back(group(
+            "test",
+            vec![(
+                FsOp::CreateDir { path: PathBuf::from("/nonexistent/dir") },
+                FsOp::CreateDir { path: PathBuf::from("/nonexistent/dir") },
+            )],
+        ));
+
+        let step = history.redo(|_| bail!("disk error"));
+
+        assert!(matches!(step, Step::Failed { .. }));
+        assert_that!(history.can_redo(), eq(false));
+    }
+
+    /// Long enough for a later write to get a different mtime.
+    const MTIME_TICK: Duration = Duration::from_millis(20);
+
+    #[rstest]
+    fn undo_created_dir_after_undoing_change_inside_it() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("d");
+        let mut history = UndoHistory::new(10);
+        run_and_push(&mut history, "Create dir", FsOp::CreateDir { path: dir.clone() });
+        std::thread::sleep(MTIME_TICK);
+        run_and_push(&mut history, "Create file", FsOp::CreateFile { path: dir.join("f") });
+        std::thread::sleep(MTIME_TICK);
+        assert!(matches!(history.undo(execute), Step::Done(_)));
+
+        let step = history.undo(execute);
+
+        assert!(matches!(step, Step::Done(_)));
+        assert!(!dir.exists());
+    }
+
+    #[cfg(unix)]
+    #[rstest]
+    fn undo_removes_hardlink_after_original_is_edited() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let original = tmp.path().join("a.txt");
+        let link = tmp.path().join("b.txt");
+        std::fs::write(&original, "data").unwrap();
+        let mut history = UndoHistory::new(10);
+        run_and_push(
+            &mut history,
+            "Link",
+            FsOp::CreateHardlink { original: original.clone(), link: link.clone() },
+        );
+        std::thread::sleep(MTIME_TICK);
+        std::fs::write(&original, "edited").unwrap();
+
+        let step = history.undo(execute);
+
+        assert!(matches!(step, Step::Done(_)));
+        assert!(!link.exists());
+        assert_that!(std::fs::read_to_string(&original).unwrap(), eq("edited"));
     }
 
     #[rstest]
