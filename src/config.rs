@@ -920,6 +920,15 @@ pub struct FileOpConfig {
     pub delete_mode: DeleteMode,
     /// Maximum undo stack size.
     pub undo_stack_size: usize,
+    /// Days a delete into the custom trash stays undoable.
+    ///
+    /// Age is measured from when the file was moved to the trash. On startup,
+    /// expired trash entries are deleted, and undo history drops the deletes
+    /// that restore them together with all older operations.
+    ///
+    /// `0` disables this age-based cleanup. Trash entries are still deleted
+    /// when their operation is evicted from undo history (`undo_stack_size`).
+    pub trash_retention_days: u64,
     /// Sync yank/cut operations with the OS clipboard as a file list.
     ///
     /// When enabled, yanking or cutting files also writes the file list to
@@ -972,7 +981,12 @@ impl Default for KeybindingConfig {
 
 impl Default for FileOpConfig {
     fn default() -> Self {
-        Self { delete_mode: DeleteMode::default(), undo_stack_size: 100, clipboard_sync: false }
+        Self {
+            delete_mode: DeleteMode::default(),
+            undo_stack_size: 100,
+            trash_retention_days: 30,
+            clipboard_sync: false,
+        }
     }
 }
 
@@ -1447,6 +1461,8 @@ pub struct FileOpConfigOverride {
     pub delete_mode: Option<DeleteMode>,
     /// Maximum undo stack size.
     pub undo_stack_size: Option<usize>,
+    /// Days to keep files in the custom trash.
+    pub trash_retention_days: Option<u64>,
     /// Sync yank/cut with OS clipboard.
     pub clipboard_sync: Option<bool>,
 }
@@ -1454,7 +1470,14 @@ pub struct FileOpConfigOverride {
 impl FileOpConfigOverride {
     /// Apply present fields to the target config.
     const fn apply_to(self, target: &mut FileOpConfig) {
-        apply_option_fields!(self, target, delete_mode, undo_stack_size, clipboard_sync);
+        apply_option_fields!(
+            self,
+            target,
+            delete_mode,
+            undo_stack_size,
+            trash_retention_days,
+            clipboard_sync
+        );
     }
 }
 

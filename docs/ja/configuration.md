@@ -60,6 +60,7 @@ preview:
 file_op:
   delete_mode: permanent # permanent | custom_trash
   undo_stack_size: 100
+  trash_retention_days: 30 # custom_trash での削除を undo できる日数 (0 = 日数で削除しない)
   clipboard_sync: false # yank/cut を OS クリップボードと同期
 
 session:

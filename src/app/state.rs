@@ -7,7 +7,10 @@ use std::path::{
 };
 use std::sync::Arc;
 use std::sync::RwLock;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{
+    AtomicBool,
+    Ordering,
+};
 use std::time::{
     Duration,
     Instant,
@@ -43,6 +46,27 @@ use crate::state::tree::{
 use crate::tree::search_engine::NucleoSearchEngine;
 use crate::ui::column::ResolvedColumn;
 use crate::watcher::FsWatcher;
+
+/// Cancellation token that is set to `true` when dropped.
+///
+/// Tokio waits for unfinished `spawn_blocking` tasks when the runtime shuts
+/// down, so background work must be cancelled on every exit path, including
+/// early returns on error.
+#[derive(Debug, Default)]
+pub struct CancelOnDrop(Arc<AtomicBool>);
+
+impl CancelOnDrop {
+    /// Wrap `flag`, which is set to `true` when this value is dropped.
+    pub const fn new(flag: Arc<AtomicBool>) -> Self {
+        Self(flag)
+    }
+}
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
 
 /// Application-wide state wrapping tree state and UI settings.
 #[derive(Debug)]
@@ -138,6 +162,8 @@ pub struct AppState {
     /// Set to `true` to cancel the in-flight build before starting a new one
     /// (e.g. when toggling hidden/ignored file visibility).
     pub search_index_cancelled: Arc<AtomicBool>,
+    /// Cancels the background custom trash cleanup when the app state is dropped.
+    pub trash_cleanup_cancelled: CancelOnDrop,
     /// Async parallel search engine powered by `Nucleo<T>`.
     ///
     /// Items are injected from background threads; pattern updates and result
@@ -663,6 +689,7 @@ pub(super) mod tests {
             search_match_indices: HashMap::new(),
             search_pending_loads: None,
             search_index_cancelled: Arc::new(AtomicBool::new(false)),
+            trash_cleanup_cancelled: CancelOnDrop::default(),
             search_engine: NucleoSearchEngine::new(Arc::new(|| {})),
             search_debounce: None,
         }

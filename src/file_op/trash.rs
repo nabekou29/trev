@@ -4,12 +4,33 @@ use std::path::{
     Path,
     PathBuf,
 };
-use std::time::SystemTime;
+use std::sync::atomic::{
+    AtomicBool,
+    AtomicU64,
+    Ordering,
+};
+use std::time::{
+    Duration,
+    SystemTime,
+};
 
 use anyhow::{
     Context as _,
     Result,
 };
+
+/// Number of digits in the `{nanos}_` prefix of a trash entry name.
+///
+/// Nanoseconds since the Unix epoch have 19 digits from 2001-09 until 2286.
+const TIMESTAMP_DIGITS: usize = 19;
+
+/// Timestamp of the most recently generated trash name, in nanoseconds since
+/// the Unix epoch.
+///
+/// The system clock can return the same value for calls in quick succession
+/// (e.g. microsecond resolution on macOS), which would give two entries with
+/// the same original name the same trash path.
+static LAST_TRASH_NANOS: AtomicU64 = AtomicU64::new(0);
 
 /// Get the custom trash directory path.
 ///
@@ -23,12 +44,39 @@ pub fn trash_dir() -> PathBuf {
 ///
 /// Format: `{trash_dir}/{nanos}_{original_name}`.
 pub fn trash_path(original: &Path) -> PathBuf {
-    let nanos =
-        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    trash_path_in(&trash_dir(), original)
+}
 
+/// Generate a timestamped trash path for a file inside `dir`.
+///
+/// Every call in this process gets a strictly larger timestamp, so paths
+/// generated back to back never collide.
+pub fn trash_path_in(dir: &Path, original: &Path) -> PathBuf {
+    let now = nanos_since_epoch(SystemTime::now());
+    let prev = LAST_TRASH_NANOS
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |last| {
+            Some(now.max(last.saturating_add(1)))
+        })
+        .unwrap_or(now);
+    trash_path_with_nanos(dir, original, now.max(prev.saturating_add(1)))
+}
+
+/// Trash path for `original` inside `dir` as if it was trashed at `trashed_at`.
+#[cfg(test)]
+pub fn trash_path_at(dir: &Path, original: &Path, trashed_at: SystemTime) -> PathBuf {
+    trash_path_with_nanos(dir, original, nanos_since_epoch(trashed_at))
+}
+
+/// Build the `{dir}/{nanos}_{original_name}` trash path.
+fn trash_path_with_nanos(dir: &Path, original: &Path, nanos: u64) -> PathBuf {
     let file_name = original.file_name().unwrap_or_default().to_string_lossy();
+    dir.join(format!("{nanos}_{file_name}"))
+}
 
-    trash_dir().join(format!("{nanos}_{file_name}"))
+/// Nanoseconds since the Unix epoch, saturating at the `u64` range.
+fn nanos_since_epoch(time: SystemTime) -> u64 {
+    let nanos = time.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    u64::try_from(nanos).unwrap_or(u64::MAX)
 }
 
 /// Ensure the trash directory exists.
@@ -39,23 +87,139 @@ pub fn ensure_trash_dir() -> Result<()> {
     Ok(())
 }
 
-/// Remove a specific file from the custom trash directory.
+/// Remove a specific entry from the custom trash directory.
+///
+/// Symlinks are removed themselves, never followed.
 pub fn clean_trash_file(path: &Path) -> Result<()> {
-    if path.exists() {
-        if path.is_dir() {
-            std::fs::remove_dir_all(path)
-                .with_context(|| format!("Failed to clean trash: {}", path.display()))?;
-        } else {
-            std::fs::remove_file(path)
-                .with_context(|| format!("Failed to clean trash: {}", path.display()))?;
-        }
+    let Ok(meta) = path.symlink_metadata() else {
+        return Ok(());
+    };
+    if meta.is_dir() {
+        std::fs::remove_dir_all(path)
+            .with_context(|| format!("Failed to clean trash: {}", path.display()))?;
+    } else {
+        std::fs::remove_file(path)
+            .with_context(|| format!("Failed to clean trash: {}", path.display()))?;
     }
     Ok(())
+}
+
+/// Whether the trash entry at `path` is older than `retention_days` at `now`.
+///
+/// Always `false` when `retention_days` is `0` or the name has no trev timestamp.
+pub fn is_expired(path: &Path, retention_days: u64, now: SystemTime) -> bool {
+    if retention_days == 0 {
+        return false;
+    }
+    let Some(trashed_at) = path.file_name().and_then(|n| trashed_at(&n.to_string_lossy())) else {
+        return false;
+    };
+    let retention = Duration::from_secs(retention_days.saturating_mul(24 * 60 * 60));
+    now.duration_since(trashed_at).is_ok_and(|age| age > retention)
+}
+
+/// Delete trash entries older than `retention_days` at `now`.
+///
+/// Stops early when `cancelled` becomes `true`; partially deleted entries are
+/// still expired and are deleted on a later run. Returns the number of
+/// entries deleted completely.
+pub fn cleanup_expired(
+    retention_days: u64,
+    now: SystemTime,
+    cancelled: &AtomicBool,
+) -> Result<usize> {
+    cleanup_expired_in(&trash_dir(), retention_days, now, cancelled)
+}
+
+/// [`cleanup_expired`] for an explicit trash directory.
+fn cleanup_expired_in(
+    dir: &Path,
+    retention_days: u64,
+    now: SystemTime,
+    cancelled: &AtomicBool,
+) -> Result<usize> {
+    if retention_days == 0 || !dir.exists() {
+        return Ok(0);
+    }
+
+    let mut deleted = 0;
+
+    let entries = std::fs::read_dir(dir)
+        .with_context(|| format!("Failed to read trash directory: {}", dir.display()))?;
+
+    for entry in entries {
+        if cancelled.load(Ordering::Relaxed) {
+            break;
+        }
+        let path = match entry {
+            Ok(entry) => entry.path(),
+            Err(e) => {
+                tracing::warn!(%e, "failed to read trash directory entry");
+                continue;
+            }
+        };
+
+        if !is_expired(&path, retention_days, now) {
+            continue;
+        }
+
+        match remove_tree(&path, cancelled) {
+            Ok(true) => deleted += 1,
+            Ok(false) => break,
+            Err(e) => tracing::warn!(%e, ?path, "failed to delete expired trash entry"),
+        }
+    }
+
+    Ok(deleted)
+}
+
+/// Remove `path` recursively without following symlinks.
+///
+/// Checks `cancelled` between entries so that a large tree does not delay
+/// shutdown. Returns `false` if cancelled before finishing.
+fn remove_tree(path: &Path, cancelled: &AtomicBool) -> Result<bool> {
+    let meta = path
+        .symlink_metadata()
+        .with_context(|| format!("Failed to read metadata: {}", path.display()))?;
+    if !meta.is_dir() {
+        std::fs::remove_file(path)
+            .with_context(|| format!("Failed to remove file: {}", path.display()))?;
+        return Ok(true);
+    }
+
+    for entry in std::fs::read_dir(path)
+        .with_context(|| format!("Failed to read directory: {}", path.display()))?
+    {
+        if cancelled.load(Ordering::Relaxed) {
+            return Ok(false);
+        }
+        let entry = entry.with_context(|| format!("Failed to read entry in {}", path.display()))?;
+        if !remove_tree(&entry.path(), cancelled)? {
+            return Ok(false);
+        }
+    }
+    std::fs::remove_dir(path)
+        .with_context(|| format!("Failed to remove directory: {}", path.display()))?;
+    Ok(true)
+}
+
+/// Parse the trashed time from a `{nanos}_{original_name}` trash file name.
+///
+/// Only a prefix of exactly [`TIMESTAMP_DIGITS`] ASCII digits is accepted, so
+/// names like `2024_report.xlsx` are not mistaken for trev entries.
+fn trashed_at(file_name: &str) -> Option<SystemTime> {
+    let (nanos, _) = file_name.split_once('_')?;
+    if nanos.len() != TIMESTAMP_DIGITS || !nanos.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let nanos: u64 = nanos.parse().ok()?;
+    SystemTime::UNIX_EPOCH.checked_add(Duration::from_nanos(nanos))
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::expect_used)]
 mod tests {
+    use googletest::prelude::*;
     use rstest::*;
 
     use super::*;
@@ -75,17 +239,21 @@ mod tests {
     }
 
     #[rstest]
-    fn trash_path_is_unique() {
-        let original = PathBuf::from("/test/file.txt");
-        let p1 = trash_path(&original);
-        // Very small sleep to ensure different nanos.
-        std::thread::sleep(std::time::Duration::from_nanos(1));
-        let p2 = trash_path(&original);
-        // They should be different due to different timestamps.
-        // (In practice, nanos resolution makes collisions extremely unlikely.)
-        // We just verify both contain the file name.
-        assert!(p1.to_string_lossy().contains("file.txt"));
-        assert!(p2.to_string_lossy().contains("file.txt"));
+    fn trash_path_is_unique_when_generated_back_to_back() {
+        let original = Path::new("/test/file.txt");
+        let paths: std::collections::HashSet<_> =
+            (0..1000).map(|_| trash_path_in(Path::new("/trash"), original)).collect();
+        assert_that!(paths.len(), eq(1000));
+    }
+
+    #[rstest]
+    fn trash_path_timestamp_round_trips() {
+        let before = SystemTime::now();
+        let path = trash_path_in(Path::new("/trash"), Path::new("/a/file_name.txt"));
+        let after = SystemTime::now();
+
+        let parsed = trashed_at(&path.file_name().unwrap().to_string_lossy()).unwrap();
+        assert!(before <= parsed && parsed <= after);
     }
 
     #[rstest]
@@ -109,5 +277,141 @@ mod tests {
     fn clean_trash_file_noop_for_missing() {
         let result = clean_trash_file(Path::new("/nonexistent/path"));
         assert!(result.is_ok());
+    }
+
+    #[cfg(unix)]
+    #[rstest]
+    fn clean_trash_file_removes_dangling_symlink() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink("missing-target", &link).unwrap();
+
+        clean_trash_file(&link).unwrap();
+        assert!(link.symlink_metadata().is_err());
+    }
+
+    const DAY: Duration = Duration::from_hours(24);
+
+    /// Create a trash entry named as if it was trashed at `trashed_at`.
+    fn create_entry(dir: &Path, trashed_at: SystemTime, name: &str, is_dir: bool) -> PathBuf {
+        let path = trash_path_at(dir, Path::new(name), trashed_at);
+        if is_dir {
+            std::fs::create_dir_all(path.join("child")).unwrap();
+            std::fs::write(path.join("child/file.txt"), "x").unwrap();
+        } else {
+            std::fs::write(&path, "trash").unwrap();
+        }
+        path
+    }
+
+    #[rstest]
+    fn cleanup_expired_removes_old_files_and_dirs() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let now = SystemTime::now();
+        let old_file = create_entry(tmp.path(), now - DAY * 31, "old.txt", false);
+        let old_dir = create_entry(tmp.path(), now - DAY * 31, "old_dir", true);
+
+        let deleted = cleanup_expired_in(tmp.path(), 30, now, &AtomicBool::new(false)).unwrap();
+
+        assert_that!(deleted, eq(2));
+        assert!(!old_file.exists());
+        assert!(!old_dir.exists());
+    }
+
+    #[rstest]
+    fn cleanup_expired_keeps_recent_entries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let now = SystemTime::now();
+        let recent = create_entry(tmp.path(), now - DAY * 29, "recent.txt", false);
+
+        let deleted = cleanup_expired_in(tmp.path(), 30, now, &AtomicBool::new(false)).unwrap();
+
+        assert_that!(deleted, eq(0));
+        assert!(recent.exists());
+    }
+
+    #[rstest]
+    fn cleanup_expired_ignores_entries_without_timestamp_prefix() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let foreign = tmp.path().join("2024_report.xlsx");
+        std::fs::write(&foreign, "keep").unwrap();
+
+        let deleted = cleanup_expired_in(
+            tmp.path(),
+            1,
+            SystemTime::now() + DAY * 365,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+
+        assert_that!(deleted, eq(0));
+        assert!(foreign.exists());
+    }
+
+    #[rstest]
+    fn cleanup_expired_disabled_with_zero_days() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let now = SystemTime::now();
+        let old = create_entry(tmp.path(), now - DAY * 3650, "old.txt", false);
+
+        let deleted = cleanup_expired_in(tmp.path(), 0, now, &AtomicBool::new(false)).unwrap();
+
+        assert_that!(deleted, eq(0));
+        assert!(old.exists());
+    }
+
+    #[rstest]
+    fn cleanup_expired_stops_when_cancelled() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let now = SystemTime::now();
+        let old = create_entry(tmp.path(), now - DAY * 31, "old_dir", true);
+
+        let deleted = cleanup_expired_in(tmp.path(), 30, now, &AtomicBool::new(true)).unwrap();
+
+        assert_that!(deleted, eq(0));
+        assert!(old.exists());
+    }
+
+    #[cfg(unix)]
+    #[rstest]
+    fn cleanup_expired_removes_symlink_without_following_it() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let trash = tmp.path().join("trash");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&trash).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep.txt"), "keep").unwrap();
+        let now = SystemTime::now();
+        let link = trash_path_at(&trash, Path::new("link"), now - DAY * 31);
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+        let deleted = cleanup_expired_in(&trash, 30, now, &AtomicBool::new(false)).unwrap();
+
+        assert_that!(deleted, eq(1));
+        assert!(link.symlink_metadata().is_err());
+        assert!(outside.join("keep.txt").exists());
+    }
+
+    #[rstest]
+    #[case("/trash/1700000000000000000_file.txt", 30, true)]
+    #[case("/trash/1700000000000000000_file.txt", 0, false)]
+    #[case("/trash/file.txt", 30, false)]
+    fn is_expired_cases(#[case] path: &str, #[case] days: u64, #[case] expected: bool) {
+        // 1_700_000_000 s is 2023-11-14; check from one year later.
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000) + DAY * 365;
+        assert_that!(is_expired(Path::new(path), days, now), eq(expected));
+    }
+
+    #[rstest]
+    #[case("1700000000000000000_file.txt", Some(1_700_000_000))]
+    #[case("1700000000000000000_with_underscore.txt", Some(1_700_000_000))]
+    #[case("file.txt", None)]
+    #[case("abc_file.txt", None)]
+    #[case("2024_report.xlsx", None)]
+    #[case("+700000000000000000_file.txt", None)]
+    fn trashed_at_parses_prefix(#[case] name: &str, #[case] expected_secs: Option<u64>) {
+        let secs =
+            trashed_at(name).map(|t| t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
+        assert_that!(secs, eq(expected_secs));
     }
 }

@@ -154,6 +154,7 @@
       "default": {
         "clipboard_sync": false,
         "delete_mode": "permanent",
+        "trash_retention_days": 30,
         "undo_stack_size": 100
       }
     },
@@ -735,6 +736,13 @@
           "description": "Delete mode for the `d` key.",
           "$ref": "#/$defs/DeleteMode",
           "default": "permanent"
+        },
+        "trash_retention_days": {
+          "description": "Days a delete into the custom trash stays undoable.\n\nAge is measured from when the file was moved to the trash. On startup,\nexpired trash entries are deleted, and undo history drops the deletes\nthat restore them together with all older operations.\n\n`0` disables this age-based cleanup. Trash entries are still deleted\nwhen their operation is evicted from undo history (`undo_stack_size`).",
+          "type": "integer",
+          "format": "uint64",
+          "default": 30,
+          "minimum": 0
         },
         "undo_stack_size": {
           "description": "Maximum undo stack size.",
