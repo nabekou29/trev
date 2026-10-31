@@ -1,7 +1,10 @@
 //! Undo/redo history management with operation groups.
 
 use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::time::SystemTime;
 
 use anyhow::{
@@ -124,10 +127,18 @@ impl UndoHistory {
     /// later step re-checks its preconditions and, for operations recorded with
     /// a fingerprint, the identity of the entry it consumes, so it does not
     /// act on entries that changed in the meantime.
+    ///
+    /// Moves into the custom trash get a fresh trash name, so their retention
+    /// period starts from the undo.
     pub fn undo(&mut self, exec: impl FnMut(&FsOp) -> Result<()>) -> Step<'_> {
         let Some(mut group) = self.undo_stack.pop_back() else {
             return Step::Nothing;
         };
+
+        let trash_dir = trash::trash_dir();
+        for op in &mut group.ops {
+            retarget_trash_move(&mut op.reverse, &mut op.forward, &trash_dir);
+        }
 
         if let Err(error) = group
             .ops
@@ -162,7 +173,7 @@ impl UndoHistory {
 
         let trash_dir = trash::trash_dir();
         for op in &mut group.ops {
-            retarget_trash_move(op, &trash_dir);
+            retarget_trash_move(&mut op.forward, &mut op.reverse, &trash_dir);
         }
 
         if let Err(error) = group
@@ -350,20 +361,21 @@ fn cleanup_trash_refs(group: &OpGroup, trash_dir: &Path) {
     }
 }
 
-/// Point a delete-into-trash operation at a fresh trash path.
+/// If `into` moves an entry into the custom trash, point it and its
+/// counterpart `back` at a fresh trash path.
 ///
-/// The trash name encodes when the entry was trashed, so a redo needs a new name.
-fn retarget_trash_move(undo_op: &mut UndoOp, trash_dir: &Path) {
-    let FsOp::Move { src, dst } = &undo_op.forward else {
+/// The trash name encodes when the entry was trashed, so each move into the
+/// trash needs a new name.
+fn retarget_trash_move(into: &mut FsOp, back: &mut FsOp, trash_dir: &Path) {
+    let FsOp::Move { src, dst } = into else {
         return;
     };
     if !dst.starts_with(trash_dir) {
         return;
     }
-    let src = src.clone();
-    let new_dst = trash::trash_path_in(trash_dir, &src);
-    undo_op.reverse = FsOp::Move { src: new_dst.clone(), dst: src.clone() };
-    undo_op.forward = FsOp::Move { src, dst: new_dst };
+    let new_dst = trash::trash_path_in(trash_dir, src);
+    *back = FsOp::Move { src: new_dst.clone(), dst: src.clone() };
+    *dst = new_dst;
 }
 
 /// Whether `path` is a directory, without following symlinks.
@@ -404,6 +416,17 @@ pub fn reverse_op(forward: &FsOp) -> Option<FsOp> {
             Some(FsOp::RemoveFile { path: link.clone() })
         }
     }
+}
+
+/// Undo operation for a file trev wrote that cannot be written again on redo.
+///
+/// Undo moves the file to `trash_path` instead of deleting it, so redo can
+/// move it back with its content.
+pub fn undo_op_via_trash(path: &Path, trash_path: PathBuf) -> UndoOp {
+    UndoOp::new(
+        FsOp::Move { src: trash_path.clone(), dst: path.to_path_buf() },
+        FsOp::Move { src: path.to_path_buf(), dst: trash_path },
+    )
 }
 
 /// Convenience: build an `UndoOp` from a forward operation that has just been executed.
@@ -766,6 +789,40 @@ mod tests {
     }
 
     #[rstest]
+    fn redo_after_undo_via_trash_restores_original_content() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("image.png");
+        let trash_path = tmp.path().join("1000000000000000000_image.png");
+        std::fs::write(&path, "pixels").unwrap();
+        let mut history = UndoHistory::new(10);
+        history.push(OpGroup {
+            description: "Paste image".to_string(),
+            ops: vec![undo_op_via_trash(&path, trash_path)],
+        });
+
+        assert!(matches!(history.undo(execute), Step::Done(_)));
+        assert!(!path.exists());
+        assert!(matches!(history.redo(execute), Step::Done(_)));
+
+        assert_that!(std::fs::read_to_string(&path).unwrap(), eq("pixels"));
+    }
+
+    #[rstest]
+    fn undo_via_trash_assigns_fresh_trash_name() {
+        let trash_dir = Path::new("/state/trev/trash");
+        let path = PathBuf::from("/work/image.png");
+        let old = trash_dir.join("1000000000000000000_image.png");
+        let mut op = undo_op_via_trash(&path, old.clone());
+
+        retarget_trash_move(&mut op.reverse, &mut op.forward, trash_dir);
+
+        let (src, dst) = move_paths(&op.reverse).unwrap();
+        assert_that!(src, eq(&path));
+        assert!(dst.starts_with(trash_dir) && *dst != old);
+        assert_eq!(op.forward, FsOp::Move { src: dst.clone(), dst: path });
+    }
+
+    #[rstest]
     fn legacy_ops_without_fingerprint_still_undo() {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("legacy.txt");
@@ -870,7 +927,7 @@ mod tests {
             fingerprint: None,
         };
 
-        retarget_trash_move(&mut op, trash_dir);
+        retarget_trash_move(&mut op.forward, &mut op.reverse, trash_dir);
 
         let (src, dst) = move_paths(&op.forward).unwrap();
         assert_that!(src, eq(&original));
@@ -896,7 +953,7 @@ mod tests {
             .collect();
 
         for op in &mut ops {
-            retarget_trash_move(op, trash_dir);
+            retarget_trash_move(&mut op.forward, &mut op.reverse, trash_dir);
         }
 
         let dst_a = move_paths(&ops[0].forward).unwrap().1;
@@ -914,7 +971,7 @@ mod tests {
             fingerprint: None,
         };
 
-        retarget_trash_move(&mut op, trash_dir);
+        retarget_trash_move(&mut op.forward, &mut op.reverse, trash_dir);
 
         assert_eq!(op.forward, forward);
     }

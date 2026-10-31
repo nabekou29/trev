@@ -24,6 +24,7 @@ use crate::file_op::undo::{
     UndoOp,
     build_undo_op,
     reverse_for_copy,
+    undo_op_via_trash,
 };
 use crate::input::AppMode;
 use crate::watcher::SuppressGuard;
@@ -763,13 +764,19 @@ fn execute_clipboard_paste(state: &mut AppState, ctx: &AppContext) {
 
             match crate::file_op::clipboard::save_image_as_png(&dst_dir, width, height, &bytes) {
                 Ok(saved_path) => {
-                    // Build undo op: reverse is removing the created file.
-                    let forward = FsOp::CreateFile { path: saved_path.clone() };
-                    let reverse = FsOp::RemoveFile { path: saved_path.clone() };
+                    // The image cannot be written again from the history, so undo
+                    // keeps it in the custom trash for redo.
+                    if let Err(e) = crate::file_op::trash::ensure_trash_dir() {
+                        tracing::warn!(%e, "failed to create trash directory");
+                    }
+                    let undo_op = undo_op_via_trash(
+                        &saved_path,
+                        crate::file_op::trash::trash_path(&saved_path),
+                    );
                     let file_name = saved_path.file_name().unwrap_or_default().to_string_lossy();
                     state.undo_history.push(OpGroup {
                         description: format!("Paste clipboard image as {file_name}"),
-                        ops: vec![UndoOp::new(forward, reverse)],
+                        ops: vec![undo_op],
                     });
 
                     refresh_directory(state, &dst_dir, ctx);
