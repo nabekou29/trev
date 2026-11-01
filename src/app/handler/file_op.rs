@@ -20,9 +20,11 @@ use crate::file_op::executor::{
 use crate::file_op::selection::SelectionMode;
 use crate::file_op::undo::{
     OpGroup,
+    Step,
     UndoOp,
     build_undo_op,
     reverse_for_copy,
+    undo_op_via_trash,
 };
 use crate::input::AppMode;
 use crate::watcher::SuppressGuard;
@@ -646,7 +648,7 @@ fn execute_paste(state: &mut AppState, ctx: &AppContext) {
         } else {
             reverse_for_copy(&final_dst)
         };
-        undo_ops.push(UndoOp { forward: op, reverse });
+        undo_ops.push(UndoOp::new(op, reverse));
 
         // Track source parent for cut operations.
         if is_cut && let Some(parent) = src.parent() {
@@ -743,7 +745,7 @@ fn execute_clipboard_paste(state: &mut AppState, ctx: &AppContext) {
                 }
 
                 let reverse = reverse_for_copy(&final_dst);
-                undo_ops.push(UndoOp { forward: op, reverse });
+                undo_ops.push(UndoOp::new(op, reverse));
                 paste_count += 1;
             }
 
@@ -762,13 +764,19 @@ fn execute_clipboard_paste(state: &mut AppState, ctx: &AppContext) {
 
             match crate::file_op::clipboard::save_image_as_png(&dst_dir, width, height, &bytes) {
                 Ok(saved_path) => {
-                    // Build undo op: reverse is removing the created file.
-                    let forward = FsOp::CreateFile { path: saved_path.clone() };
-                    let reverse = FsOp::RemoveFile { path: saved_path.clone() };
+                    // The image cannot be written again from the history, so undo
+                    // keeps it in the custom trash for redo.
+                    if let Err(e) = crate::file_op::trash::ensure_trash_dir() {
+                        tracing::warn!(%e, "failed to create trash directory");
+                    }
+                    let undo_op = undo_op_via_trash(
+                        &saved_path,
+                        crate::file_op::trash::trash_path(&saved_path),
+                    );
                     let file_name = saved_path.file_name().unwrap_or_default().to_string_lossy();
                     state.undo_history.push(OpGroup {
                         description: format!("Paste clipboard image as {file_name}"),
-                        ops: vec![UndoOp { forward, reverse }],
+                        ops: vec![undo_op],
                     });
 
                     refresh_directory(state, &dst_dir, ctx);
@@ -785,84 +793,66 @@ fn execute_clipboard_paste(state: &mut AppState, ctx: &AppContext) {
 
 /// Execute undo: reverse the most recent operation group.
 fn execute_undo(state: &mut AppState, ctx: &AppContext) {
-    // Extract undo data before executing (releases borrow on undo_history).
-    let (desc, reverse_ops) = {
-        match state.undo_history.undo() {
-            Ok(Some(group)) => {
-                let desc = group.description.clone();
-                let ops: Vec<FsOp> = group.ops.iter().rev().map(|op| op.reverse.clone()).collect();
-                (desc, ops)
-            }
-            Ok(None) => {
-                state.set_status("Nothing to undo");
-                return;
-            }
-            Err(e) => {
-                state.set_status(format!("Cannot undo: {e}"));
-                return;
-            }
-        }
-    };
-
-    {
-        let _guard = SuppressGuard::new(&ctx.suppressed);
-        for op in &reverse_ops {
-            if let Err(e) = execute(op) {
-                tracing::error!(%e, "undo operation failed");
-                state.set_status(format!("Undo failed: {e}"));
-                return;
-            }
-        }
-    }
-
-    // Refresh affected directories.
-    let parents = collect_affected_parents(&reverse_ops);
-    for parent in &parents {
-        refresh_directory(state, parent, ctx);
-    }
-
-    state.set_status(format!("Undid: {desc}"));
+    apply_history_step(state, ctx, HistoryDirection::Undo);
 }
 
 /// Execute redo: re-apply the most recently undone operation group.
 fn execute_redo(state: &mut AppState, ctx: &AppContext) {
-    // Extract redo data before executing (releases borrow on undo_history).
-    let (desc, forward_ops) = {
-        match state.undo_history.redo() {
-            Ok(Some(group)) => {
-                let desc = group.description.clone();
-                let ops: Vec<FsOp> = group.ops.iter().map(|op| op.forward.clone()).collect();
-                (desc, ops)
+    apply_history_step(state, ctx, HistoryDirection::Redo);
+}
+
+/// Direction of a history step.
+#[derive(Debug, Clone, Copy)]
+enum HistoryDirection {
+    /// Undo the most recent group.
+    Undo,
+    /// Redo the most recently undone group.
+    Redo,
+}
+
+/// Run one undo or redo step, then refresh affected directories and report the result.
+fn apply_history_step(state: &mut AppState, ctx: &AppContext, direction: HistoryDirection) {
+    let (verb, title, done) = match direction {
+        HistoryDirection::Undo => ("undo", "Undo", "Undid"),
+        HistoryDirection::Redo => ("redo", "Redo", "Redid"),
+    };
+
+    // Ops in the order they were (or would have been) executed, for refresh.
+    let (status, ops) = {
+        let _guard = SuppressGuard::new(&ctx.suppressed);
+        let step = match direction {
+            HistoryDirection::Undo => state.undo_history.undo(execute),
+            HistoryDirection::Redo => state.undo_history.redo(execute),
+        };
+        match step {
+            Step::Nothing => (format!("Nothing to {verb}"), Vec::new()),
+            Step::Done(group) => {
+                (format!("{done}: {}", group.description), executed_ops(group, direction))
             }
-            Ok(None) => {
-                state.set_status("Nothing to redo");
-                return;
+            Step::Skipped { group, error } => {
+                tracing::warn!(%error, description = %group.description, "{verb} skipped");
+                (format!("Cannot {verb}, removed from history: {error}"), Vec::new())
             }
-            Err(e) => {
-                state.set_status(format!("Cannot redo: {e}"));
-                return;
+            Step::Failed { group, error } => {
+                tracing::error!(%error, description = %group.description, "{verb} failed");
+                let ops = executed_ops(&group, direction);
+                (format!("{title} failed partway, removed from history: {error}"), ops)
             }
         }
     };
 
-    {
-        let _guard = SuppressGuard::new(&ctx.suppressed);
-        for op in &forward_ops {
-            if let Err(e) = execute(op) {
-                tracing::error!(%e, "redo operation failed");
-                state.set_status(format!("Redo failed: {e}"));
-                return;
-            }
-        }
-    }
-
-    // Refresh affected directories.
-    let parents = collect_affected_parents(&forward_ops);
-    for parent in &parents {
+    for parent in &collect_affected_parents(&ops) {
         refresh_directory(state, parent, ctx);
     }
+    state.set_status(status);
+}
 
-    state.set_status(format!("Redid: {desc}"));
+/// The ops a history step runs, in execution order.
+fn executed_ops(group: &OpGroup, direction: HistoryDirection) -> Vec<FsOp> {
+    match direction {
+        HistoryDirection::Undo => group.ops.iter().rev().map(|op| op.reverse.clone()).collect(),
+        HistoryDirection::Redo => group.ops.iter().map(|op| op.forward.clone()).collect(),
+    }
 }
 
 /// Collect unique parent directories affected by a set of operations.
