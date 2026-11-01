@@ -1,4 +1,16 @@
 
+## [0.1.13] - 2026-11-01
+
+### Bug Fixes
+
+- Refresh directory previews when their contents change (#19)
+- Verify entry identity and skip only the failing group (#21)
+
+### Features
+
+- Add a retention period for custom trash entries (#20)
+
+
 ## [0.1.12] - 2026-09-23
 
 ### Bug Fixes
